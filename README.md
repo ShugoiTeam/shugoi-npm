@@ -1,4 +1,4 @@
-# Shugoi — Node.js
+# Shugoi - Node.js
 
 [![npm version](https://img.shields.io/npm/v/shugoi)](https://npmjs.com/package/shugoi)
 
@@ -75,7 +75,7 @@ Connect-compatible middleware. Sets up CSP, anti-bot (User-Agent + Sec-Fetch), a
 
 | Option | Type | Default | Description |
 |---|---|---|---|
-| `siteKey` | `string` | — | **Required.** Your Shugoi siteKey |
+| `siteKey` | `string` | - | **Required.** Your Shugoi siteKey |
 | `allowlist` | `string[]` | `['/legal']` | Paths that bypass anti-bot |
 | `headlessPatterns` | `RegExp[]` | curl, wget, python, ... | User-Agent patterns to block |
 | `botWhitelist` | `RegExp[]` | Googlebot, Bingbot, ... | Legitimate bots to allow |

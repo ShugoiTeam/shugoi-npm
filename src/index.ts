@@ -1,5 +1,5 @@
 /**
- * Shugoi — Protection anti-abus par fingerprinting matériel.
+ * Shugoi - Hardware fingerprinting anti-abuse protection.
  *
  * @packageDocumentation
  */

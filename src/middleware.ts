@@ -68,7 +68,7 @@ export function createShugoiMiddleware(options: ShugoiOptions) {
         state.validationError = result.error;
         throw new ShugoiError(
           'invalid_site_key',
-          `SiteKey invalide : ${options.siteKey} — ${result.error}`
+          `Invalid siteKey: ${options.siteKey} - ${result.error}`
         );
       }
       state.validated = true;
