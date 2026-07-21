@@ -1,0 +1,13 @@
+{
+  "name": "shugoi-example-fastify",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "fastify": "^5.0.0",
+    "@fastify/express": "^4.0.0",
+    "shugoi": "file:../.."
+  }
+}

@@ -56,6 +56,13 @@ export interface ShugoiOptions {
    * @default false
    */
   debug?: boolean;
+
+  /**
+   * Automatically inject guard-detect and guard scripts into HTML pages.
+   * Scripts are inserted before `</head>` and before `</body>`.
+   * @default true
+   */
+  autoInject?: boolean;
 }
 
 /**

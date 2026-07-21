@@ -8,22 +8,52 @@ Hardware fingerprinting anti-abuse protection. One-line integration for Express,
 npm install shugoi
 ```
 
-## Quick Start
+Guard scripts (guard-detect + guard) are loaded dynamically from `https://shugoi.com/api/v1/*`.
+This means updates on shugoi.com apply instantly to all sites without updating node_modules.
 
-### Express
+## Quick Start (Express)
 
 ```ts
 import express from 'express';
 import { createShugoiMiddleware } from 'shugoi';
 
 const app = express();
+
+// One line: CSP, anti-bot, guard injection, Tor protection, consent notice
 app.use(createShugoiMiddleware({
   siteKey: 'sg_sk_live_xxx',
   allowlist: ['/legal', '/docs'],
 }));
 
+// Guard scripts are auto-injected into HTML - no manual tags needed
 app.get('/', (req, res) => res.send('<h1>Protected by Shugoi</h1>'));
 app.listen(3000);
+```
+
+### Vanilla Node.js
+
+```ts
+import http from 'http';
+import { createShugoiMiddleware } from 'shugoi';
+
+const mw = createShugoiMiddleware({ siteKey: 'sg_sk_live_xxx' });
+http.createServer(async (req, res) => {
+  let nextCalled = false;
+  await mw(req, res, () => { nextCalled = true; });
+  if (nextCalled) res.end('<h1>Protected</h1>');
+}).listen(3000);
+```
+
+### Fastify (via @fastify/express)
+
+```ts
+import Fastify from 'fastify';
+import expressPlugin from '@fastify/express';
+import { createShugoiMiddleware } from 'shugoi';
+
+const app = Fastify();
+await app.register(expressPlugin);
+app.use(createShugoiMiddleware({ siteKey: 'sg_sk_live_xxx' }));
 ```
 
 ### Next.js (App Router)
@@ -31,11 +61,7 @@ app.listen(3000);
 ```ts
 // next.config.ts
 import { withShugoi } from 'shugoi/next';
-
-export default withShugoi(
-  { siteKey: 'sg_sk_live_xxx' },
-  { reactStrictMode: true }
-);
+export default withShugoi({ siteKey: 'sg_sk_live_xxx' }, nextConfig);
 ```
 
 Add `src/proxy.ts` for anti-bot blocking (Next.js 16+):
@@ -55,16 +81,6 @@ export function proxy(request: NextRequest) {
   return NextResponse.next();
 }
 export const config = { matcher: '/((?!_next/static|_next/image|favicon.ico).*)' };
-```
-
-### HTML Script Tags
-
-```ts
-import { scriptTags } from 'shugoi';
-
-const { guardDetect, guard } = scriptTags({ siteKey: 'sg_sk_live_xxx' });
-// guardDetect → <head> (beforeInteractive)
-// guard → end of <body> (afterInteractive)
 ```
 
 ## API

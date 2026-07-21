@@ -146,6 +146,64 @@ describe('createShugoiMiddleware', () => {
     expect(next).toHaveBeenCalledTimes(1);
   });
 
+  it('injects guard scripts into HTML by default', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ allowed: true }),
+    });
+
+    const mw = createShugoiMiddleware(validOptions);
+    const req = { headers: {}, path: '/' } as any;
+    let sentBody = '';
+    const res = {
+      setHeader: vi.fn(),
+      getHeader: vi.fn().mockReturnValue('text/html'),
+      status: vi.fn().mockReturnThis(),
+      type: vi.fn().mockReturnThis(),
+      send(b: string) { sentBody = b; },
+    };
+    const next = vi.fn();
+
+    await mw(req, res, next);
+    expect(next).toHaveBeenCalled();
+
+    // Simulate what the route handler sends
+    const html = '<!DOCTYPE html><html><head></head><body><h1>OK</h1></body></html>';
+    res.send(html);
+
+    expect(sentBody).toContain('guard-detect');
+    expect(sentBody).toContain('guard');
+    expect(sentBody).toContain('sg_sk_live_xxx');
+    expect(sentBody.indexOf('guard-detect')).toBeLessThan(sentBody.indexOf('</head>'));
+    expect(sentBody.indexOf('guard')).toBeLessThan(sentBody.indexOf('</body>'));
+  });
+
+  it('does not inject scripts when autoInject is false', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ allowed: true }),
+    });
+
+    const mw = createShugoiMiddleware({ siteKey: 'sg_sk_live_xxx', autoInject: false });
+    const req = { headers: {}, path: '/' } as any;
+    let sentBody = '';
+    const res = {
+      setHeader: vi.fn(),
+      getHeader: vi.fn().mockReturnValue('text/html'),
+      status: vi.fn().mockReturnThis(),
+      type: vi.fn().mockReturnThis(),
+      send(b: string) { sentBody = b; },
+    };
+    const next = vi.fn();
+
+    await mw(req, res, next);
+    const html = '<!DOCTYPE html><html><head></head><body><h1>OK</h1></body></html>';
+    res.send(html);
+
+    expect(sentBody).not.toContain('guard-detect');
+    expect(sentBody).not.toContain('guard');
+  });
+
   it('sets CSP header on response', async () => {
     globalThis.fetch = vi.fn().mockResolvedValue({
       ok: true,

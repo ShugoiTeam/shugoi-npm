@@ -16,14 +16,28 @@ const DEFAULT_BOT_WHITELIST = [
   /AhrefsBot/i, /SemrushBot/i,
 ];
 
+function injectGuardScripts(html: string, siteKey: string, baseUrl: string): string {
+  const guardDetect = `<script src="${baseUrl}/guard-detect?key=${siteKey}"></script>`;
+  const guard = `<script src="${baseUrl}/guard?key=${siteKey}"></script>`;
+  let result = html;
+  if (result.includes('</head>')) {
+    result = result.replace('</head>', `${guardDetect}\n</head>`);
+  }
+  if (result.includes('</body>')) {
+    result = result.replace('</body>', `${guard}\n</body>`);
+  }
+  return result;
+}
+
 /**
  * Creates a Connect-compatible middleware for Shugoi protection.
  *
  * Validates the siteKey on first call, then:
- * 1. Sets CSP headers
- * 2. Blocks headless User-Agents (curl, wget...)
- * 3. Checks Sec-Fetch headers for fake browser UAs
+ * 1. Blocks headless User-Agents (curl, wget...)
+ * 2. Checks Sec-Fetch headers for fake browser UAs
+ * 3. Sets CSP headers
  * 4. Bypasses allowlisted paths
+ * 5. Auto-injects guard scripts into HTML responses
  *
  * @param options - Configuration options
  * @returns Connect middleware (req, res, next)
@@ -49,6 +63,7 @@ export function createShugoiMiddleware(options: ShugoiOptions) {
   const botWhitelist = options.botWhitelist ?? DEFAULT_BOT_WHITELIST;
   const baseUrl = options.baseUrl ?? 'https://shugoi.com/api/v1';
   const debug = options.debug ?? false;
+  const autoInject = options.autoInject ?? true;
 
   const csp = buildCsp({ siteKey: options.siteKey, extraDirectives: {} });
 
@@ -85,10 +100,12 @@ export function createShugoiMiddleware(options: ShugoiOptions) {
     res: {
       statusCode?: number;
       setHeader?: (key: string, val: string) => void;
+      getHeader?: (key: string) => string | string[] | number | undefined;
       status?: (code: number) => any;
       type?: (t: string) => any;
-      send?: (b: string) => void;
-      end?: (b?: string) => void;
+      send?: (b: any) => void;
+      end?: (b?: any) => void;
+      write?: (chunk: any) => boolean;
       [key: string]: any;
     },
     next: () => void,
@@ -98,16 +115,18 @@ export function createShugoiMiddleware(options: ShugoiOptions) {
 
       const path = (req.path ?? req.url ?? '/').split('?')[0];
 
+      // CSP
       if (res.setHeader) {
         res.setHeader('Content-Security-Policy', csp);
       }
 
+      // Allowlist bypass
       if (allowlist.some(p => path === p || path.startsWith(p + '/'))) {
         return next();
       }
 
+      // Headless UA block
       const ua = (req.headers?.['user-agent'] as string) ?? '';
-
       if (ua && !botWhitelist.some(p => p.test(ua)) && headlessPatterns.some(p => p.test(ua))) {
         if (res.status) res.status(200);
         if (res.type) res.type('txt');
@@ -116,6 +135,7 @@ export function createShugoiMiddleware(options: ShugoiOptions) {
         return;
       }
 
+      // Sec-Fetch check
       if (/Mozilla/i.test(ua) && !botWhitelist.some(p => p.test(ua))) {
         const sfd = req.headers?.['sec-fetch-dest'] as string ?? '';
         const sfm = req.headers?.['sec-fetch-mode'] as string ?? '';
@@ -125,6 +145,36 @@ export function createShugoiMiddleware(options: ShugoiOptions) {
           if (res.send) res.send('BLOCKED BY SHUGOI');
           else if (res.end) res.end('BLOCKED BY SHUGOI');
           return;
+        }
+      }
+
+      // Auto-inject guard scripts into HTML responses
+      if (autoInject) {
+        const originalSend = res.send?.bind(res);
+        const originalEnd = res.end?.bind(res);
+
+        if (originalSend) {
+          res.send = function (body: any) {
+            if (typeof body === 'string') {
+              const ct = res.getHeader ? res.getHeader('content-type') : undefined;
+              if (!ct || String(ct).includes('text/html')) {
+                body = injectGuardScripts(body, options.siteKey, baseUrl);
+              }
+            }
+            return originalSend(body);
+          };
+        }
+
+        if (originalEnd) {
+          res.end = function (body?: any) {
+            if (body && typeof body === 'string') {
+              const ct = res.getHeader ? res.getHeader('content-type') : undefined;
+              if (!ct || String(ct).includes('text/html')) {
+                body = injectGuardScripts(body, options.siteKey, baseUrl);
+              }
+            }
+            return originalEnd(body);
+          };
         }
       }
 
