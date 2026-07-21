@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.turbo/
+coverage/
+*.tsbuildinfo
+.env
+.env.local
+examples/*/node_modules/
