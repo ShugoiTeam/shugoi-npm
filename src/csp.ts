@@ -1,10 +1,10 @@
 /**
- * Options pour {@link buildCsp}.
+ * Options for {@link buildCsp}.
  */
 export interface CspOptions {
-  /** SiteKey (utilisée pour les directives futures) */
+  /** SiteKey (used for future directives) */
   siteKey: string;
-  /** Directives CSP supplémentaires qui fusionnent avec les défauts */
+  /** Additional CSP directives merged with defaults */
   extraDirectives?: Record<string, string[]>;
 }
 
@@ -19,13 +19,13 @@ const DEFAULT_DIRECTIVES: Record<string, string[]> = {
 };
 
 /**
- * Construit la chaîne Content-Security-Policy à partir des options.
+ * Builds a Content-Security-Policy header string from options.
  *
- * Fusionne les directives par défaut avec les directives supplémentaires.
- * Les directives supplémentaires écrasent les défauts si elles existent.
+ * Merges default Shugoi directives with any extra directives.
+ * Extra directives override defaults when keys overlap.
  *
- * @param options - Options de configuration CSP
- * @returns La chaîne CSP complète, prête à être utilisée dans un header HTTP
+ * @param options - CSP configuration options
+ * @returns The full CSP string, ready to use in an HTTP header
  *
  * @example
  * ```ts

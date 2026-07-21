@@ -1,65 +1,65 @@
 /**
- * Options de configuration du middleware Shugoi.
+ * Shugoi middleware configuration options.
  */
 export interface ShugoiOptions {
   /**
-   * Votre siteKey Shugoi (commence par `sg_sk_live_` ou `sg_sk_test_`).
-   * Obtenez-la sur https://shugoi.com/dashboard
+   * Your Shugoi siteKey (starts with `sg_sk_live_` or `sg_sk_test_`).
+   * Get one at https://shugoi.com/dashboard
    */
   siteKey: string;
 
   /**
-   * Chemins qui contournent le blocage anti-headless.
-   * Utile pour exposer les pages /docs ou /legal aux crawlers.
+   * Path prefixes that bypass the anti-headless block.
+   * Useful to expose /docs or /legal pages to crawlers.
    * @default ["/legal"]
    */
   allowlist?: string[];
 
   /**
-   * Liste des User-Agent headless à bloquer (patterns regex).
-   * @default patterns curl, wget, python, Go-http-client, ...
+   * Headless User-Agent patterns to block (regex).
+   * @default curl, wget, python, Go-http-client patterns
    */
   headlessPatterns?: RegExp[];
 
   /**
-   * Liste des bots légitimes à ne JAMAIS bloquer (Googlebot, Bingbot...).
-   * @default patterns Googlebot, Bingbot, Slurp, DuckDuckBot, ...
+   * Legitimate bots that should NEVER be blocked (Googlebot, Bingbot...).
+   * @default Googlebot, Bingbot, Slurp, DuckDuckBot, ...
    */
   botWhitelist?: RegExp[];
 
   /**
-   * Action par défaut envoyée à l'API `/check`.
+   * Default action sent to `/check` API.
    * @default "signup"
    */
   defaultAction?: string;
 
   /**
-   * URL de base de l'API Shugoi.
+   * Shugoi API base URL.
    * @default "https://shugoi.com/api/v1"
    */
   baseUrl?: string;
 
   /**
-   * Timeout en ms pour les appels API.
+   * API request timeout in ms.
    * @default 5000
    */
   timeout?: number;
 
   /**
-   * User-Agent utilisé pour les appels serveur→serveur.
+   * User-Agent for server-to-server API calls.
    * @default "ShugoiNode/0.1.0"
    */
   serverUa?: string;
 
   /**
-   * Activer le mode debug (logs console).
+   * Enable debug mode (console logs).
    * @default false
    */
   debug?: boolean;
 }
 
 /**
- * Réponse de l'API POST /api/v1/check
+ * Response from POST /api/v1/check
  */
 export interface CheckResponse {
   allowed?: boolean;
@@ -95,7 +95,7 @@ export interface CaptchaChallenge {
 }
 
 /**
- * Payload envoyé à POST /api/v1/check
+ * Payload sent to POST /api/v1/check
  */
 export interface CheckRequest {
   siteKey: string;
@@ -115,7 +115,7 @@ export interface CheckRequest {
 }
 
 /**
- * État interne du middleware.
+ * Internal middleware state.
  */
 export interface ShugoiState {
   siteKey: string;

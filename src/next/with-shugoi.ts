@@ -1,24 +1,24 @@
 import { buildCsp } from '../csp';
 
 /**
- * Options pour le plugin Next.js Shugoi.
+ * Options for the Next.js Shugoi plugin.
  */
 export interface WithShugoiOptions {
-  /** SiteKey Shugoi */
+  /** Shugoi siteKey */
   siteKey: string;
   /**
-   * Chemins supplémentaires pour l'allowlist du proxy.
+   * Additional paths for the proxy allowlist.
    * @default ["/legal"]
    */
   allowlist?: string[];
-  /** URL de base de l'API */
+  /** API base URL */
   baseUrl?: string;
 }
 
 /**
- * Wrapper Next.js config qui ajoute les headers CSP Shugoi.
+ * Next.js config wrapper that adds Shugoi CSP headers.
  *
- * À utiliser dans `next.config.ts` :
+ * Use in `next.config.ts`:
  *
  * ```ts
  * import { withShugoi } from 'shugoi/next';
@@ -29,9 +29,9 @@ export interface WithShugoiOptions {
  * );
  * ```
  *
- * @param shugoiOptions - Options Shugoi
- * @param nextConfig - Configuration Next.js existante
- * @returns Configuration Next.js fusionnée
+ * @param shugoiOptions - Shugoi options
+ * @param nextConfig - Existing Next.js config
+ * @returns Merged Next.js config
  */
 export function withShugoi(
   shugoiOptions: WithShugoiOptions,

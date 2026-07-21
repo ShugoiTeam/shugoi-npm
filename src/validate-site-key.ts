@@ -2,26 +2,26 @@ import { ShugoiError } from './errors';
 import type { CheckResponse } from './types';
 
 /**
- * Options pour {@link validateSiteKey}.
+ * Options for {@link validateSiteKey}.
  */
 export interface ValidateSiteKeyOptions {
-  /** SiteKey à valider */
+  /** SiteKey to validate */
   siteKey: string;
-  /** Base URL de l'API */
+  /** API base URL */
   baseUrl?: string;
-  /** Timeout en ms */
+  /** Timeout in ms */
   timeout?: number;
 }
 
 /**
- * Valide une siteKey en appelant l'API Shugoi.
+ * Validates a siteKey by calling the Shugoi API.
  *
- * Envoie une requête légère à `/api/v1/check` avec la siteKey
- * et vérifie que l'API ne retourne pas `invalid_site_key`.
+ * Sends a lightweight request to `/api/v1/check` with the siteKey
+ * and checks that the API does not return `invalid_site_key`.
  *
- * @param options - Options de validation
- * @returns Résultat de la validation
- * @throws {ShugoiError} Si l'API est injoignable
+ * @param options - Validation options
+ * @returns Validation result with validity and mode
+ * @throws {ShugoiError} If the API is unreachable
  */
 export async function validateSiteKey(
   options: ValidateSiteKeyOptions

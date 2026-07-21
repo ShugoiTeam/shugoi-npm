@@ -2,40 +2,40 @@ import { ShugoiError } from './errors';
 import type { CheckResponse } from './types';
 
 /**
- * Options pour {@link checkLicense}.
+ * Options for {@link checkLicense}.
  */
 export interface CheckLicenseOptions {
-  /** SiteKey Shugoi */
+  /** Shugoi siteKey */
   siteKey: string;
-  /** Action (ex: "signup", "login", "download") */
+  /** Action (e.g. "signup", "login", "download") */
   action: string;
-  /** Machine ID (SHA-256 du fingerprint) */
+  /** Machine ID (SHA-256 of browser fingerprint) */
   machineId?: string;
-  /** Signaux de fingerprint additionnels */
+  /** Additional fingerprint signals */
   signals?: Record<string, unknown>;
-  /** Token captcha (si requis) */
+  /** Captcha token (if required by API) */
   captchaToken?: string;
   /** Pass token */
   passToken?: string;
-  /** Métadonnées (IP, email) */
+  /** Request metadata (IP, email) */
   metadata?: { ip?: string; email?: string };
-  /** Base URL API */
+  /** API base URL */
   baseUrl?: string;
-  /** Timeout en ms */
+  /** Request timeout in ms */
   timeout?: number;
-  /** User-Agent pour la requête */
+  /** User-Agent for server-to-server requests */
   serverUa?: string;
 }
 
 /**
- * Vérifie une licence/appel auprès de l'API Shugoi.
+ * Checks a license against the Shugoi API.
  *
- * Wrapper typé autour de `POST /api/v1/check` avec gestion des erreurs,
- * timeout, et codes d'erreur normalisés.
+ * Typed wrapper around `POST /api/v1/check` with error handling,
+ * timeout, and normalized error codes.
  *
- * @param options - Paramètres de la vérification
- * @returns Réponse de l'API Shugoi
- * @throws {ShugoiError} Si la clé est invalide, l'API injoignable, ou timeout
+ * @param options - Check parameters
+ * @returns Shugoi API response
+ * @throws {ShugoiError} If the key is invalid, API unreachable, or timeout
  *
  * @example
  * ```ts

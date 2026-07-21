@@ -17,17 +17,17 @@ const DEFAULT_BOT_WHITELIST = [
 ];
 
 /**
- * Crée un middleware Connect-compatible pour Shugoi.
+ * Creates a Connect-compatible middleware for Shugoi protection.
  *
- * Valide la siteKey au premier appel, puis :
- * 1. Ajoute les headers CSP
- * 2. Bloque les User-Agent headless (curl, wget...)
- * 3. Vérifie les headers Sec-Fetch pour les faux navigateurs
- * 4. Passe les chemins whitelistés
+ * Validates the siteKey on first call, then:
+ * 1. Sets CSP headers
+ * 2. Blocks headless User-Agents (curl, wget...)
+ * 3. Checks Sec-Fetch headers for fake browser UAs
+ * 4. Bypasses allowlisted paths
  *
- * @param options - Options de configuration
- * @returns Middleware (req, res, next)
- * @throws {ShugoiError} Si la siteKey est invalide (asynchrone, au premier appel)
+ * @param options - Configuration options
+ * @returns Connect middleware (req, res, next)
+ * @throws {ShugoiError} If siteKey is invalid (async, on first call)
  *
  * @example
  * ```ts
@@ -72,11 +72,11 @@ export function createShugoiMiddleware(options: ShugoiOptions) {
         );
       }
       state.validated = true;
-      log('SiteKey validee, mode:', result.mode);
+      log('SiteKey validated, mode:', result.mode);
     } catch (err) {
       if (err instanceof ShugoiError && err.code === 'invalid_site_key') throw err;
       state.validated = true;
-      log('Validation ignoree (reseau indisponible)');
+      log('Validation skipped (network unavailable)');
     }
   }
 
@@ -131,7 +131,7 @@ export function createShugoiMiddleware(options: ShugoiOptions) {
       next();
     } catch (err) {
       if (err instanceof ShugoiError && err.code === 'invalid_site_key') {
-        log('SiteKey invalide, blocage par defaut');
+        log('Invalid siteKey, blocking by default');
         if (res.status) res.status(500);
         if (res.type) res.type('txt');
         const msg = 'Shugoi configuration error: ' + err.message;
@@ -139,7 +139,7 @@ export function createShugoiMiddleware(options: ShugoiOptions) {
         else if (res.end) res.end(msg);
         return;
       }
-      log('Erreur non geree:', err);
+      log('Unhandled error:', err);
       next();
     }
   };

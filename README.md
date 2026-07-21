@@ -2,7 +2,7 @@
 
 [![npm version](https://img.shields.io/npm/v/shugoi)](https://npmjs.com/package/shugoi)
 
-Protection anti-abus par fingerprinting matériel. Une ligne d'intégration pour Express, Fastify, Next.js.
+Hardware fingerprinting anti-abuse protection. One-line integration for Express, Fastify, Next.js.
 
 ```bash
 npm install shugoi
@@ -22,7 +22,7 @@ app.use(createShugoiMiddleware({
   allowlist: ['/legal', '/docs'],
 }));
 
-app.get('/', (req, res) => res.send('<h1>Protégé par Shugoi</h1>'));
+app.get('/', (req, res) => res.send('<h1>Protected by Shugoi</h1>'));
 app.listen(3000);
 ```
 
@@ -38,7 +38,7 @@ export default withShugoi(
 );
 ```
 
-Ajoutez aussi `src/proxy.ts` pour le blocage anti-bot :
+Add `src/proxy.ts` for anti-bot blocking (Next.js 16+):
 
 ```ts
 import { NextResponse } from 'next/server';
@@ -57,35 +57,35 @@ export function proxy(request: NextRequest) {
 export const config = { matcher: '/((?!_next/static|_next/image|favicon.ico).*)' };
 ```
 
-### Scripts HTML
+### HTML Script Tags
 
 ```ts
 import { scriptTags } from 'shugoi';
 
 const { guardDetect, guard } = scriptTags({ siteKey: 'sg_sk_live_xxx' });
 // guardDetect → <head> (beforeInteractive)
-// guard → fin de <body> (afterInteractive)
+// guard → end of <body> (afterInteractive)
 ```
 
 ## API
 
 ### `createShugoiMiddleware(options)`
 
-Connect-compatible middleware. Configure CSP, anti-bot (User-Agent + Sec-Fetch), et allowlist.
+Connect-compatible middleware. Sets up CSP, anti-bot (User-Agent + Sec-Fetch), and allowlist.
 
-| Option | Type | Défaut | Description |
+| Option | Type | Default | Description |
 |---|---|---|---|
-| `siteKey` | `string` | — | **Requis.** Votre siteKey Shugoi |
-| `allowlist` | `string[]` | `['/legal']` | Chemins qui bypassent l'anti-bot |
-| `headlessPatterns` | `RegExp[]` | curl, wget, python, ... | Patterns User-Agent à bloquer |
-| `botWhitelist` | `RegExp[]` | Googlebot, Bingbot, ... | Bots légitimes à ne pas bloquer |
-| `baseUrl` | `string` | `https://shugoi.com/api/v1` | URL de base API |
-| `timeout` | `number` | `5000` | Timeout API en ms |
-| `debug` | `boolean` | `false` | Logs console |
+| `siteKey` | `string` | — | **Required.** Your Shugoi siteKey |
+| `allowlist` | `string[]` | `['/legal']` | Paths that bypass anti-bot |
+| `headlessPatterns` | `RegExp[]` | curl, wget, python, ... | User-Agent patterns to block |
+| `botWhitelist` | `RegExp[]` | Googlebot, Bingbot, ... | Legitimate bots to allow |
+| `baseUrl` | `string` | `https://shugoi.com/api/v1` | API base URL |
+| `timeout` | `number` | `5000` | API timeout in ms |
+| `debug` | `boolean` | `false` | Enable console logs |
 
 ### `checkLicense(options)`
 
-Appelle `POST /api/v1/check`. Retourne `CheckResponse`.
+Calls `POST /api/v1/check`. Returns `CheckResponse`.
 
 ```ts
 const result = await checkLicense({
@@ -95,26 +95,26 @@ const result = await checkLicense({
 });
 
 if (result.blocked) {
-  // Bloquer : Tor, VM, headless...
+  // Blocked: Tor, VM, headless...
   redirect(`/blocked?reason=${result.blocked_reason}`);
 }
 if (!result.allowed) {
-  // Rate limit : trop de requêtes
+  // Rate limited: too many requests
   return { error: 'rate_limited', retryAfter: result.resetAt };
 }
 ```
 
 ### `buildCsp(options)`
 
-Génère la chaîne `Content-Security-Policy` avec les directives Shugoi.
+Generates a `Content-Security-Policy` header string with Shugoi directives.
 
 ### `scriptTags(options)`
 
-Génère les balises `<script>` pour guard-detect et guard.
+Generates `<script>` tags for guard-detect and guard scripts.
 
 ## Error Handling
 
-Toutes les erreurs sont des `ShugoiError` avec un code machine-readable.
+All errors are `ShugoiError` instances with a machine-readable code.
 
 ```ts
 import { ShugoiError } from 'shugoi';
@@ -124,10 +124,10 @@ try {
 } catch (err) {
   if (err instanceof ShugoiError) {
     switch (err.code) {
-      case 'invalid_site_key':   // SiteKey invalide ou expirée
-      case 'api_unreachable':    // API Shugoi injoignable
-      case 'api_timeout':        // Timeout sur l'appel API
-      case 'unexpected_api_response': // Réponse inattendue
+      case 'invalid_site_key':   // SiteKey invalid or expired
+      case 'api_unreachable':    // Shugoi API unreachable
+      case 'api_timeout':        // API request timed out
+      case 'unexpected_api_response': // Unexpected response
         console.error('Shugoi:', err.message);
     }
   }
@@ -142,6 +142,6 @@ npm run build   # ESM + CJS + types
 npm run typecheck
 ```
 
-## Licence
+## License
 
 MIT

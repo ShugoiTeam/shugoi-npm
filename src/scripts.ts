@@ -1,18 +1,18 @@
 /**
- * Options pour {@link scriptTags}.
+ * Options for {@link scriptTags}.
  */
 export interface ScriptTagsOptions {
-  /** SiteKey Shugoi */
+  /** Shugoi siteKey */
   siteKey: string;
-  /** Base URL de l'API */
+  /** API base URL */
   baseUrl?: string;
 }
 
 /**
- * Génère les balises `<script>` pour les scripts Shugoi.
+ * Generates `<script>` tags for Shugoi guard scripts.
  *
- * @returns Objet avec `guardDetect` (à mettre dans `<head>`)
- * et `guard` (à mettre en fin de `<body>`)
+ * @returns Object with `guardDetect` (place in `<head>`)
+ * and `guard` (place at end of `<body>`)
  *
  * @example
  * ```ts
