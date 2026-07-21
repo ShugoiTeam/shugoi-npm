@@ -68,7 +68,7 @@ export interface ShugoiOptions {
    * Enable/disable the restricted access block page.
    * When false, users with blocked or unverified machineIds will not
    * see the restricted access overlay. Tor and headless detection still apply.
-   * @default true
+   * @default false
    */
   restrictedAccess?: boolean;
 }

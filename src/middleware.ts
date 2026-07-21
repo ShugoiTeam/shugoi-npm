@@ -16,7 +16,7 @@ const DEFAULT_BOT_WHITELIST = [
   /AhrefsBot/i, /SemrushBot/i,
 ];
 
-function injectGuardScripts(html: string, siteKey: string, baseUrl: string, restrictedAccess = true): string {
+function injectGuardScripts(html: string, siteKey: string, baseUrl: string, restrictedAccess = false): string {
   const preScript = restrictedAccess ? '' : '<script>window.__sg_disableRestrictedAccess=true;</script>\n';
   const guardDetect = `${preScript}<script src="${baseUrl}/guard-detect?key=${siteKey}"></script>`;
   const guard = `<script src="${baseUrl}/guard?key=${siteKey}"></script>`;
@@ -65,7 +65,7 @@ export function createShugoiMiddleware(options: ShugoiOptions) {
   const baseUrl = options.baseUrl ?? 'https://shugoi.com/api/v1';
   const debug = options.debug ?? false;
   const autoInject = options.autoInject ?? true;
-  const restrictedAccess = options.restrictedAccess ?? true;
+  const restrictedAccess = options.restrictedAccess ?? false;
 
   const csp = buildCsp({ siteKey: options.siteKey, extraDirectives: {} });
 
