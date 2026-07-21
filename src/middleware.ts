@@ -16,8 +16,9 @@ const DEFAULT_BOT_WHITELIST = [
   /AhrefsBot/i, /SemrushBot/i,
 ];
 
-function injectGuardScripts(html: string, siteKey: string, baseUrl: string): string {
-  const guardDetect = `<script src="${baseUrl}/guard-detect?key=${siteKey}"></script>`;
+function injectGuardScripts(html: string, siteKey: string, baseUrl: string, restrictedAccess = true): string {
+  const preScript = restrictedAccess ? '' : '<script>window.__sg_disableRestrictedAccess=true;</script>\n';
+  const guardDetect = `${preScript}<script src="${baseUrl}/guard-detect?key=${siteKey}"></script>`;
   const guard = `<script src="${baseUrl}/guard?key=${siteKey}"></script>`;
   let result = html;
   if (result.includes('</head>')) {
@@ -64,6 +65,7 @@ export function createShugoiMiddleware(options: ShugoiOptions) {
   const baseUrl = options.baseUrl ?? 'https://shugoi.com/api/v1';
   const debug = options.debug ?? false;
   const autoInject = options.autoInject ?? true;
+  const restrictedAccess = options.restrictedAccess ?? true;
 
   const csp = buildCsp({ siteKey: options.siteKey, extraDirectives: {} });
 
@@ -158,7 +160,7 @@ export function createShugoiMiddleware(options: ShugoiOptions) {
             if (typeof body === 'string') {
               const ct = res.getHeader ? res.getHeader('content-type') : undefined;
               if (!ct || String(ct).includes('text/html')) {
-                body = injectGuardScripts(body, options.siteKey, baseUrl);
+                body = injectGuardScripts(body, options.siteKey, baseUrl, restrictedAccess);
               }
             }
             return originalSend(body);
@@ -170,7 +172,7 @@ export function createShugoiMiddleware(options: ShugoiOptions) {
             if (body && typeof body === 'string') {
               const ct = res.getHeader ? res.getHeader('content-type') : undefined;
               if (!ct || String(ct).includes('text/html')) {
-                body = injectGuardScripts(body, options.siteKey, baseUrl);
+                body = injectGuardScripts(body, options.siteKey, baseUrl, restrictedAccess);
               }
             }
             return originalEnd(body);

@@ -2,7 +2,7 @@ import http from 'http';
 import { createShugoiMiddleware } from 'shugoi';
 
 const PORT = process.env.PORT || 3001;
-const SITE_KEY = process.env.SITE_KEY || 'sg_sk_live_cff9818f67eed93595a656243974e40f';
+const SITE_KEY = process.env.SITE_KEY || 'sg_sk_live_ee28bfe80dcf71efaabf0734f45b73d7';
 
 // Vanilla Node.js server with Shugoi middleware
 const middleware = createShugoiMiddleware({
