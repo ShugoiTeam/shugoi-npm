@@ -71,6 +71,15 @@ export interface ShugoiOptions {
    * @default false
    */
   restrictedAccess?: boolean;
+
+  /**
+   * Local whitelist of machine IDs.
+   * Machines in this list bypass the server whitelist check entirely.
+   * Empty array `[]` allows all machines (no filtering).
+   *
+   * @example ['abc123...', 'def456...']
+   */
+  whitelist?: string[];
 }
 
 /**

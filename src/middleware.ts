@@ -30,9 +30,10 @@ const DEFAULT_BOT_WHITELIST = [
   /AhrefsBot/i, /SemrushBot/i,
 ];
 
-function injectGuardScripts(html: string, siteKey: string, baseUrl: string): string {
+function injectGuardScripts(html: string, siteKey: string, baseUrl: string, whitelist?: string[]): string {
   const cacheBust = Date.now();
-  const guardDetect = `<script src="${baseUrl}/guard-detect?key=${siteKey}&v=${cacheBust}"></script>`;
+  const whitelistScript = whitelist ? `<script>window.__sg_whitelist=${JSON.stringify(whitelist)};</script>\n` : '';
+  const guardDetect = `${whitelistScript}<script src="${baseUrl}/guard-detect?key=${siteKey}&v=${cacheBust}"></script>`;
   const guard = `<script src="${baseUrl}/guard?key=${siteKey}&v=${cacheBust}"></script>`;
   let result = html;
   // guard-detect needs document.body for font enumeration.
@@ -85,7 +86,7 @@ export function createShugoiMiddleware(options: ShugoiOptions) {
   const baseUrl = options.baseUrl ?? 'https://shugoi.com/api/v1';
   const debug = options.debug ?? false;
   const autoInject = options.autoInject ?? true;
-  const restrictedAccess = options.restrictedAccess ?? false;
+  const restrictedAccess = options.restrictedAccess ?? false; // kept for backward compat
 
   const csp = buildCsp({ siteKey: options.siteKey, extraDirectives: {} });
 
@@ -180,7 +181,7 @@ export function createShugoiMiddleware(options: ShugoiOptions) {
             if (typeof body === 'string') {
               const ct = res.getHeader ? res.getHeader('content-type') : undefined;
               if (!ct || String(ct).includes('text/html')) {
-                body = injectGuardScripts(body, options.siteKey, baseUrl);
+                body = injectGuardScripts(body, options.siteKey, baseUrl, options.whitelist);
               }
             }
             return originalSend(body);
@@ -192,7 +193,7 @@ export function createShugoiMiddleware(options: ShugoiOptions) {
             if (body && typeof body === 'string') {
               const ct = res.getHeader ? res.getHeader('content-type') : undefined;
               if (!ct || String(ct).includes('text/html')) {
-                body = injectGuardScripts(body, options.siteKey, baseUrl);
+                body = injectGuardScripts(body, options.siteKey, baseUrl, options.whitelist);
               }
             }
             return originalEnd(body);
