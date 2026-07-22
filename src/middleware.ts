@@ -148,9 +148,19 @@ export function createShugoiMiddleware(options: ShugoiOptions) {
         return next();
       }
 
+      function recordBlock(reason: string) {
+        fetch(`${baseUrl}/event`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ siteKey: options.siteKey, reason, machineId: '' }),
+          keepalive: true,
+        }).catch(() => {});
+      }
+
       // Headless UA block
       const ua = (req.headers?.['user-agent'] as string) ?? '';
       if (ua && !botWhitelist.some(p => p.test(ua)) && headlessPatterns.some(p => p.test(ua))) {
+        recordBlock('headless');
         if (res.status) res.status(200);
         if (res.type) res.type('txt');
         if (res.send) res.send(BLOCK_PAGE);
@@ -163,6 +173,7 @@ export function createShugoiMiddleware(options: ShugoiOptions) {
         const sfd = req.headers?.['sec-fetch-dest'] as string ?? '';
         const sfm = req.headers?.['sec-fetch-mode'] as string ?? '';
         if (!sfd && !sfm) {
+          recordBlock('headless');
           if (res.status) res.status(200);
           if (res.type) res.type('txt');
           if (res.send) res.send(BLOCK_PAGE);
