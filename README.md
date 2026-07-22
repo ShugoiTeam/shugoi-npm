@@ -162,6 +162,31 @@ Generates a `Content-Security-Policy` header string with Shugoi directives.
 
 Generates `<script>` tags for guard-detect and guard scripts.
 
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `siteKey` | `string` | — | **Required.** Your Shugoi siteKey |
+| `baseUrl` | `string` | `https://shugoi.com/api/v1` | API base URL |
+| `version` | `string` | — | Cache-busting version (incrémenter au déploiement pour contourner le cache 1 an) |
+| `whitelist` | `string[]` | — | MachineIds autorisés en local (pas d'appel API, pas de latence) |
+
+**Retourne :**
+
+| Propriété | Type | Description |
+|---|---|---|
+| `guardDetect` | `string` | `<script>` tag pour guard-detect (à mettre dans `<head>`) |
+| `guard` | `string` | `<script>` tag pour guard (à mettre en fin de `<body>`) |
+| `whitelistConfig` | `string` \| `undefined` | `<script>` inline définissant `window.__sg_whitelist` (à mettre AVANT guardDetect) |
+
+```ts
+const { whitelistConfig, guardDetect, guard } = scriptTags({
+  siteKey: 'sg_sk_live_xxx',
+  version: '20250722',
+  whitelist: ['machineId1', 'machineId2'],
+});
+// head: whitelistConfig + guardDetect;
+// body: guard;
+```
+
 ## Error Handling
 
 All errors are `ShugoiError` instances with a machine-readable code.

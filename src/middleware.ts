@@ -30,10 +30,9 @@ const DEFAULT_BOT_WHITELIST = [
   /AhrefsBot/i, /SemrushBot/i,
 ];
 
-function injectGuardScripts(html: string, siteKey: string, baseUrl: string, restrictedAccess = false): string {
-  const preScript = restrictedAccess ? '' : '<script>window.__sg_disableRestrictedAccess=true;</script>\n';
+function injectGuardScripts(html: string, siteKey: string, baseUrl: string): string {
   const cacheBust = Date.now();
-  const guardDetect = `${preScript}<script src="${baseUrl}/guard-detect?key=${siteKey}&v=${cacheBust}"></script>`;
+  const guardDetect = `<script src="${baseUrl}/guard-detect?key=${siteKey}&v=${cacheBust}"></script>`;
   const guard = `<script src="${baseUrl}/guard?key=${siteKey}&v=${cacheBust}"></script>`;
   let result = html;
   // guard-detect needs document.body for font enumeration.
@@ -181,7 +180,7 @@ export function createShugoiMiddleware(options: ShugoiOptions) {
             if (typeof body === 'string') {
               const ct = res.getHeader ? res.getHeader('content-type') : undefined;
               if (!ct || String(ct).includes('text/html')) {
-                body = injectGuardScripts(body, options.siteKey, baseUrl, restrictedAccess);
+                body = injectGuardScripts(body, options.siteKey, baseUrl);
               }
             }
             return originalSend(body);
@@ -193,7 +192,7 @@ export function createShugoiMiddleware(options: ShugoiOptions) {
             if (body && typeof body === 'string') {
               const ct = res.getHeader ? res.getHeader('content-type') : undefined;
               if (!ct || String(ct).includes('text/html')) {
-                body = injectGuardScripts(body, options.siteKey, baseUrl, restrictedAccess);
+                body = injectGuardScripts(body, options.siteKey, baseUrl);
               }
             }
             return originalEnd(body);
