@@ -9,6 +9,20 @@ const DEFAULT_HEADLESS_PATTERNS = [
   /^okhttp/i, /^scrapy/i, /PowerShell/i, /WinHttp/i,
 ];
 
+const BLOCK_PAGE = [
+  '╔═══════════════════════════════════════════╗',
+  '║           BLOCKED BY SHUGOI               ║',
+  '╠═══════════════════════════════════════════╣',
+  '║  Bots, scrapers and headless clients      ║',
+  '║  are blocked by Shugoi protection.        ║',
+  '║                                           ║',
+  '║  Use a standard browser to access         ║',
+  '║  this site.                               ║',
+  '║                                           ║',
+  '║  ─ contact: support@shugoi.com ─          ║',
+  '╚═══════════════════════════════════════════╝',
+].join('\n') + '\n';
+
 const DEFAULT_BOT_WHITELIST = [
   /Googlebot/i, /Bingbot/i, /Slurp/i, /DuckDuckBot/i,
   /YandexBot/i, /Baiduspider/i, /FacebookExternalHit/i,
@@ -132,8 +146,8 @@ export function createShugoiMiddleware(options: ShugoiOptions) {
       if (ua && !botWhitelist.some(p => p.test(ua)) && headlessPatterns.some(p => p.test(ua))) {
         if (res.status) res.status(200);
         if (res.type) res.type('txt');
-        if (res.send) res.send('BLOCKED BY SHUGOI');
-        else if (res.end) res.end('BLOCKED BY SHUGOI');
+        if (res.send) res.send(BLOCK_PAGE);
+        else if (res.end) res.end(BLOCK_PAGE);
         return;
       }
 
@@ -144,8 +158,8 @@ export function createShugoiMiddleware(options: ShugoiOptions) {
         if (!sfd && !sfm) {
           if (res.status) res.status(200);
           if (res.type) res.type('txt');
-          if (res.send) res.send('BLOCKED BY SHUGOI');
-          else if (res.end) res.end('BLOCKED BY SHUGOI');
+          if (res.send) res.send(BLOCK_PAGE);
+          else if (res.end) res.end(BLOCK_PAGE);
           return;
         }
       }
