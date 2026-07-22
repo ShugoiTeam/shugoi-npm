@@ -11,4 +11,5 @@ export default defineConfig({
   clean: true,
   target: 'node20',
   splitting: false,
+  external: ['next'],
 });

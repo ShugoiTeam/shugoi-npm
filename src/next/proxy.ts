@@ -43,8 +43,22 @@ export function createShugoiProxy(options: ShugoiProxyOptions = {}) {
     if (allowlist.some((p) => path === p || path.startsWith(p + "/")))
       return NextResponse.next();
     const ua = request.headers.get("user-agent") || "";
-    if (headless.some((p) => p.test(ua)))
-      return new NextResponse("BLOCKED BY SHUGOI", { status: 200 });
+    if (headless.some((p) => p.test(ua))) {
+      const block = [
+        '╔═══════════════════════════════════════════╗',
+        '║           BLOCKED BY SHUGOI               ║',
+        '╠═══════════════════════════════════════════╣',
+        '║  Bots, scrapers and headless clients      ║',
+        '║  are blocked by Shugoi protection.        ║',
+        '║                                           ║',
+        '║  Use a standard browser to access         ║',
+        '║  this site.                               ║',
+        '║                                           ║',
+        '║  ─ contact: support@shugoi.com ─          ║',
+        '╚═══════════════════════════════════════════╝',
+      ].join('\n') + '\n';
+      return new NextResponse(block, { status: 200 });
+    }
     return NextResponse.next();
   };
 }
