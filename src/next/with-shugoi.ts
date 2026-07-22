@@ -7,6 +7,11 @@ export interface WithShugoiOptions {
   /** Shugoi siteKey */
   siteKey: string;
   /**
+   * Local whitelist of machine IDs.
+   * Empty array `[]` allows all machines.
+   */
+  whitelist?: string[];
+  /**
    * Additional paths for the proxy allowlist.
    * @default ["/legal"]
    */
@@ -18,26 +23,29 @@ export interface WithShugoiOptions {
 /**
  * Next.js config wrapper that adds Shugoi CSP headers.
  *
- * Use in `next.config.ts`:
- *
  * ```ts
+ * // next.config.ts
  * import { withShugoi } from 'shugoi/next';
- *
- * export default withShugoi(
- *   { siteKey: 'sg_sk_live_xxx' },
- *   { reactStrictMode: true }
- * );
+ * export default withShugoi({ siteKey: 'sg_sk_live_xxx' });
  * ```
  *
- * @param shugoiOptions - Shugoi options
- * @param nextConfig - Existing Next.js config
- * @returns Merged Next.js config
+ * Add guard scripts in your layout:
+ * ```tsx
+ * // app/layout.tsx
+ * import { scriptTags } from 'shugoi';
+ * const { whitelistConfig, guardDetect, guard } = scriptTags({
+ *   siteKey: 'sg_sk_live_xxx',
+ *   whitelist: [],
+ * });
+ * // head: whitelistConfig + guardDetect
+ * // body: guard
+ * ```
  */
 export function withShugoi(
-  shugoiOptions: WithShugoiOptions,
+  opts: WithShugoiOptions,
   nextConfig: Record<string, unknown> = {},
 ): Record<string, unknown> {
-  const csp = buildCsp({ siteKey: shugoiOptions.siteKey });
+  const csp = buildCsp({ siteKey: opts.siteKey });
 
   return {
     ...nextConfig,

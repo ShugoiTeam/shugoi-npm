@@ -8,6 +8,11 @@ import type { NextRequest } from "next/server";
 export interface ShugoiProxyOptions {
   /** Paths that bypass the anti-headless block. @default ["/legal"] */
   allowlist?: string[];
+  /**
+   * Local whitelist of machine IDs.
+   * Empty array `[]` allows all machines.
+   */
+  whitelist?: string[];
   /** Headless User-Agent patterns. @default curl, wget, python... */
   headlessPatterns?: RegExp[];
 }
