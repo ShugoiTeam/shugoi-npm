@@ -32,11 +32,18 @@ const DEFAULT_BOT_WHITELIST = [
 
 function injectGuardScripts(html: string, siteKey: string, baseUrl: string, restrictedAccess = false): string {
   const preScript = restrictedAccess ? '' : '<script>window.__sg_disableRestrictedAccess=true;</script>\n';
-  const guardDetect = `${preScript}<script src="${baseUrl}/guard-detect?key=${siteKey}"></script>`;
-  const guard = `<script src="${baseUrl}/guard?key=${siteKey}"></script>`;
+  const cacheBust = Date.now();
+  const guardDetect = `${preScript}<script src="${baseUrl}/guard-detect?key=${siteKey}&v=${cacheBust}"></script>`;
+  const guard = `<script src="${baseUrl}/guard?key=${siteKey}&v=${cacheBust}"></script>`;
   let result = html;
-  if (result.includes('</head>')) {
-    result = result.replace('</head>', `${guardDetect}\n</head>`);
+  // guard-detect needs document.body for font enumeration.
+  // Inject right after <body> (not in <head>) so body exists when it runs.
+  if (result.includes('<body')) {
+    const bodyMatch = result.match(/<body[^>]*>/);
+    if (bodyMatch) {
+      const insertAt = result.indexOf(bodyMatch[0]) + bodyMatch[0].length;
+      result = result.substring(0, insertAt) + '\n' + guardDetect + result.substring(insertAt);
+    }
   }
   if (result.includes('</body>')) {
     result = result.replace('</body>', `${guard}\n</body>`);

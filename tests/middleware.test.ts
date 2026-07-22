@@ -174,7 +174,7 @@ describe('createShugoiMiddleware', () => {
     expect(sentBody).toContain('guard-detect');
     expect(sentBody).toContain('guard');
     expect(sentBody).toContain('sg_sk_live_xxx');
-    expect(sentBody.indexOf('guard-detect')).toBeLessThan(sentBody.indexOf('</head>'));
+    expect(sentBody.indexOf('guard-detect')).toBeGreaterThan(sentBody.indexOf('<body'));
     expect(sentBody.indexOf('guard')).toBeLessThan(sentBody.indexOf('</body>'));
   });
 

@@ -64,6 +64,38 @@ import { withShugoi } from 'shugoi/next';
 export default withShugoi({ siteKey: 'sg_sk_live_xxx' }, nextConfig);
 ```
 
+### React + Vite
+
+```html
+<!-- index.html -->
+<head>
+  <script src="https://shugoi.com/api/v1/guard-detect?key=sg_sk_live_xxx"></script>
+</head>
+<body>
+  <script src="https://shugoi.com/api/v1/guard?key=sg_sk_live_xxx"></script>
+</body>
+```
+
+```ts
+// vite.config.ts
+import csp from 'vite-plugin-csp';
+export default defineConfig({
+  plugins: [react(), csp({ policy: {
+    'default-src': ["'self'"],
+    'script-src': ["'self'", "'unsafe-inline'", "'unsafe-eval'", 'https://shugoi.com'],
+    'connect-src': ["'self'", 'https://shugoi.com'],
+  }})],
+});
+```
+
+### Next.js (App Router)
+
+```ts
+// next.config.ts
+import { withShugoi } from 'shugoi/next';
+export default withShugoi({ siteKey: 'sg_sk_live_xxx' }, nextConfig);
+```
+
 Add `src/proxy.ts` for anti-bot blocking (Next.js 16+):
 
 ```ts
@@ -98,6 +130,8 @@ Connect-compatible middleware. Sets up CSP, anti-bot (User-Agent + Sec-Fetch), a
 | `baseUrl` | `string` | `https://shugoi.com/api/v1` | API base URL |
 | `timeout` | `number` | `5000` | API timeout in ms |
 | `debug` | `boolean` | `false` | Enable console logs |
+| `autoInject` | `boolean` | `true` | Auto-inject guard scripts into HTML |
+| `restrictedAccess` | `boolean` | `false` | Show restricted access block page |
 
 ### `checkLicense(options)`
 

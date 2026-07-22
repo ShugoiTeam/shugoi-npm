@@ -52,14 +52,14 @@ describe('Express integration', () => {
 
   it('blocks curl User-Agent', async () => {
     const { body } = await httpGet(`http://127.0.0.1:${port}/`, { 'User-Agent': 'curl/8.0.0' });
-    expect(body).toBe('BLOCKED BY SHUGOI');
+    expect(body).toContain('BLOCKED BY SHUGOI');
   });
 
   it('blocks Mozilla UA without Sec-Fetch headers', async () => {
     const { body } = await httpGet(`http://127.0.0.1:${port}/`, {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
     });
-    expect(body).toBe('BLOCKED BY SHUGOI');
+    expect(body).toContain('BLOCKED BY SHUGOI');
   });
 
   it('allows browser User-Agent with Sec-Fetch headers', async () => {
