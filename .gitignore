@@ -6,3 +6,4 @@ coverage/
 .env
 .env.local
 examples/*/node_modules/
+*.tgz
