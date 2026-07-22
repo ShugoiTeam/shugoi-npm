@@ -32,7 +32,7 @@ const DEFAULT_BOT_WHITELIST = [
 
 function injectGuardScripts(html: string, siteKey: string, baseUrl: string, whitelist?: string[]): string {
   const cacheBust = Date.now();
-  const whitelistScript = whitelist ? `<script>window.__sg_whitelist=${JSON.stringify(whitelist)};</script>\n` : '';
+  const whitelistScript = whitelist ? `<script>window.__sg_whitelist_local=${JSON.stringify(whitelist)};</script>\n` : '';
   const guardDetect = `${whitelistScript}<script src="${baseUrl}/guard-detect?key=${siteKey}&v=${cacheBust}"></script>`;
   const guard = `<script src="${baseUrl}/guard?key=${siteKey}&v=${cacheBust}"></script>`;
   let result = html;

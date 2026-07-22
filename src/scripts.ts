@@ -58,7 +58,7 @@ export function scriptTags(options: ScriptTagsOptions): {
 
   let whitelistConfig: string | undefined;
   if (options.whitelist) {
-    whitelistConfig = `<script>window.__sg_whitelist=${JSON.stringify(options.whitelist)};</script>`;
+    whitelistConfig = `<script>window.__sg_whitelist_local=${JSON.stringify(options.whitelist)};</script>`;
   }
 
   return {
