@@ -1,6 +1,7 @@
 import { validateSiteKey } from './validate-site-key';
 import { buildCsp } from './csp';
 import { ShugoiError } from './errors';
+import { ensureGuardsFetched, injectAndStore, handleRender } from './render';
 import type { ShugoiOptions, ShugoiState } from './types';
 
 const DEFAULT_HEADLESS_PATTERNS = [
@@ -30,50 +31,6 @@ const DEFAULT_BOT_WHITELIST = [
   /AhrefsBot/i, /SemrushBot/i,
 ];
 
-function injectGuardScripts(html: string, siteKey: string, baseUrl: string, whitelist?: string[]): string {
-  const cacheBust = Date.now();
-  const whitelistScript = whitelist ? `<script>window.__sg_whitelist_local=${JSON.stringify(whitelist)};</script>\n` : '';
-  const guardDetect = `${whitelistScript}<script src="${baseUrl}/guard-detect?key=${siteKey}&v=${cacheBust}"></script>`;
-  const guard = `<script src="${baseUrl}/guard?key=${siteKey}&v=${cacheBust}"></script>`;
-  let result = html;
-  // guard-detect needs document.body for font enumeration.
-  // Inject right after <body> (not in <head>) so body exists when it runs.
-  if (result.includes('<body')) {
-    const bodyMatch = result.match(/<body[^>]*>/);
-    if (bodyMatch) {
-      const insertAt = result.indexOf(bodyMatch[0]) + bodyMatch[0].length;
-      result = result.substring(0, insertAt) + '\n' + guardDetect + result.substring(insertAt);
-    }
-  }
-  if (result.includes('</body>')) {
-    result = result.replace('</body>', `${guard}\n</body>`);
-  }
-  return result;
-}
-
-/**
- * Creates a Connect-compatible middleware for Shugoi protection.
- *
- * Validates the siteKey on first call, then:
- * 1. Blocks headless User-Agents (curl, wget...)
- * 2. Checks Sec-Fetch headers for fake browser UAs
- * 3. Sets CSP headers
- * 4. Bypasses allowlisted paths
- * 5. Auto-injects guard scripts into HTML responses
- *
- * @param options - Configuration options
- * @returns Connect middleware (req, res, next)
- * @throws {ShugoiError} If siteKey is invalid (async, on first call)
- *
- * @example
- * ```ts
- * import express from 'express';
- * import { createShugoiMiddleware } from 'shugoi';
- *
- * const app = express();
- * app.use(createShugoiMiddleware({ siteKey: 'sg_sk_live_xxx' }));
- * ```
- */
 export function createShugoiMiddleware(options: ShugoiOptions) {
   const state: ShugoiState = {
     siteKey: options.siteKey,
@@ -86,7 +43,7 @@ export function createShugoiMiddleware(options: ShugoiOptions) {
   const baseUrl = options.baseUrl ?? 'https://shugoi.com/api/v1';
   const debug = options.debug ?? false;
   const autoInject = options.autoInject ?? true;
-  const restrictedAccess = options.restrictedAccess ?? false; // kept for backward compat
+  const restrictedAccess = options.restrictedAccess ?? false;
 
   const csp = buildCsp({ siteKey: options.siteKey, extraDirectives: {} });
 
@@ -143,6 +100,13 @@ export function createShugoiMiddleware(options: ShugoiOptions) {
         res.setHeader('Content-Security-Policy', csp);
       }
 
+      // Render endpoint for split-render
+      if (path.endsWith('/__shugoi/render')) {
+        const token = (req as any).query?.token || '';
+        handleRender(token, res);
+        return;
+      }
+
       // Allowlist bypass
       if (allowlist.some(p => path === p || path.startsWith(p + '/'))) {
         return next();
@@ -182,8 +146,10 @@ export function createShugoiMiddleware(options: ShugoiOptions) {
         }
       }
 
-      // Auto-inject guard scripts into HTML responses
+      // Split-render: replace HTML with skeleton
       if (autoInject) {
+        await ensureGuardsFetched(baseUrl);
+
         const originalSend = res.send?.bind(res);
         const originalEnd = res.end?.bind(res);
 
@@ -192,7 +158,14 @@ export function createShugoiMiddleware(options: ShugoiOptions) {
             if (typeof body === 'string') {
               const ct = res.getHeader ? res.getHeader('content-type') : undefined;
               if (!ct || String(ct).includes('text/html')) {
-                body = injectGuardScripts(body, options.siteKey, baseUrl, options.whitelist);
+                body = injectAndStore(
+                  body,
+                  options.siteKey,
+                  baseUrl,
+                  options.whitelist,
+                  restrictedAccess,
+                  options.signingSecret,
+                );
               }
             }
             return originalSend(body);
@@ -204,7 +177,14 @@ export function createShugoiMiddleware(options: ShugoiOptions) {
             if (body && typeof body === 'string') {
               const ct = res.getHeader ? res.getHeader('content-type') : undefined;
               if (!ct || String(ct).includes('text/html')) {
-                body = injectGuardScripts(body, options.siteKey, baseUrl, options.whitelist);
+                body = injectAndStore(
+                  body,
+                  options.siteKey,
+                  baseUrl,
+                  options.whitelist,
+                  restrictedAccess,
+                  options.signingSecret,
+                );
               }
             }
             return originalEnd(body);

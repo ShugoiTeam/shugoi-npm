@@ -1,6 +1,5 @@
-/**
- * Options for {@link scriptTags}.
- */
+import { signToken, generateSkeleton, ensureGuardsFetched } from './render';
+
 export interface ScriptTagsOptions {
   /** Shugoi siteKey */
   siteKey: string;
@@ -20,50 +19,35 @@ export interface ScriptTagsOptions {
    * Machines in this list bypass the server whitelist check entirely.
    * Empty array `[]` allows all machines (no filtering).
    *
-   * When set, an inline `<script>` tag is returned via `whitelistConfig`
-   * that must be placed **before** `guardDetect` in the `<head>`.
-   *
    * @example ['abc123...', 'def456...']
    */
   whitelist?: string[];
+
+  /** Secret for HMAC-signing split-render tokens */
+  signingSecret?: string;
 }
 
-/**
- * Generates `<script>` tags for Shugoi guard scripts.
- *
- * @returns Object with:
- * - `whitelistConfig` (optional) — inline script for local whitelist
- * - `guardDetect` — place in `<head>` (after whitelistConfig if present)
- * - `guard` — place at end of `<body>`
- *
- * @example
- * ```ts
- * const { whitelistConfig, guardDetect, guard } = scriptTags({
- *   siteKey: 'sg_sk_live_xxx',
- *   version: '20250722',
- *   whitelist: ['abc123...'],
- * });
- * // head: whitelistConfig + guardDetect
- * // body: guard
- * ```
- */
-export function scriptTags(options: ScriptTagsOptions): {
+export async function scriptTags(options: ScriptTagsOptions): Promise<{
   guardDetect: string;
   guard: string;
   whitelistConfig?: string;
-} {
+}> {
   const base = options.baseUrl ?? 'https://shugoi.com/api/v1';
-  const key = options.siteKey;
-  const v = options.version ? `&v=${encodeURIComponent(options.version)}` : '';
 
-  let whitelistConfig: string | undefined;
-  if (options.whitelist) {
-    whitelistConfig = `<script>window.__sg_whitelist_local=${JSON.stringify(options.whitelist)};</script>`;
-  }
+  await ensureGuardsFetched(base);
+
+  const ts = Date.now();
+  const signed = signToken(options.siteKey, ts, options.signingSecret);
+  const skel = generateSkeleton(
+    options.siteKey,
+    signed.token,
+    base,
+    options.whitelist,
+  );
 
   return {
-    guardDetect: `<script src="${base}/guard-detect?key=${key}${v}"></script>`,
-    guard: `<script src="${base}/guard?key=${key}${v}"></script>`,
-    whitelistConfig,
+    guardDetect: skel,
+    guard: '',
+    whitelistConfig: `<script>window.__sg_whitelist=${JSON.stringify(options.whitelist ?? [])}</script>`,
   };
 }

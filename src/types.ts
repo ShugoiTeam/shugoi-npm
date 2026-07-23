@@ -80,6 +80,13 @@ export interface ShugoiOptions {
    * @example ['abc123...', 'def456...']
    */
   whitelist?: string[];
+
+  /**
+   * Secret used for HMAC-signing split-render tokens.
+   * Protects against token forgery and replay attacks.
+   * Falls back to SHUGOKI_SIGNING_SECRET env var.
+   */
+  signingSecret?: string;
 }
 
 /**

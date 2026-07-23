@@ -25,9 +25,18 @@ describe('Express integration', () => {
   let port: number;
 
   beforeAll(async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ allowed: true }),
+    // Mock Shugoi API + guard script fetches
+    globalThis.fetch = vi.fn().mockImplementation((url: string) => {
+      if (url.includes('guard-detect') || url.includes('guard?')) {
+        return Promise.resolve({
+          ok: true,
+          text: async () => '(function(){})()',
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({ allowed: true }),
+      });
     });
 
     const app = express();
@@ -62,13 +71,15 @@ describe('Express integration', () => {
     expect(body).toContain('BLOCKED BY SHUGOI');
   });
 
-  it('allows browser User-Agent with Sec-Fetch headers', async () => {
+  it('returns skeleton for browser User-Agent with Sec-Fetch headers', async () => {
     const { body } = await httpGet(`http://127.0.0.1:${port}/`, {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
       'sec-fetch-dest': 'document',
       'sec-fetch-mode': 'navigate',
     });
-    expect(body).toContain('OK');
+    // Split render: returns skeleton with eval, not the original HTML
+    expect(body).toContain('<script>eval(');
+    expect(body).not.toContain('OK');
   });
 
   it('allows whitelisted /legal path for any UA', async () => {
@@ -78,11 +89,12 @@ describe('Express integration', () => {
     expect(body).toContain('Legal notice');
   });
 
-  it('allows Googlebot', async () => {
+  it('returns skeleton for Googlebot', async () => {
     const { body } = await httpGet(`http://127.0.0.1:${port}/`, {
       'User-Agent': 'Googlebot/2.1 (+http://www.google.com/bot.html)',
     });
-    expect(body).toContain('OK');
+    // Googlebot bypasses headless blocking but still gets skeleton
+    expect(body).toContain('<script>eval(');
   });
 
   it('sets CSP header', async () => {

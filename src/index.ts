@@ -20,6 +20,18 @@ export type { ScriptTagsOptions } from './scripts';
 
 export { validateSiteKey } from './validate-site-key';
 
+export {
+  signToken,
+  storeHtml,
+  generateSkeleton,
+  renderResponseData,
+  renderResponseJson,
+  handleRender,
+  injectAndStore,
+  ensureGuardsFetched,
+} from './render';
+export type { RenderResponse } from './render';
+
 export type {
   ShugoiOptions,
   CheckResponse,

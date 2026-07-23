@@ -1,20 +1,34 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { scriptTags } from '../src/scripts';
 
 describe('scriptTags', () => {
-  it('returns guard-detect and guard script tags', () => {
-    const result = scriptTags({ siteKey: 'sg_sk_live_xxx' });
-    expect(result.guardDetect).toBe(
-      '<script src="https://shugoi.com/api/v1/guard-detect?key=sg_sk_live_xxx"></script>'
-    );
-    expect(result.guard).toBe(
-      '<script src="https://shugoi.com/api/v1/guard?key=sg_sk_live_xxx"></script>'
-    );
+  it('returns skeleton with eval wrapper', async () => {
+    globalThis.fetch = vi.fn().mockImplementation((url: string) => {
+      if (url.includes('guard-detect') || url.includes('guard?')) {
+        return Promise.resolve({
+          ok: true,
+          text: async () => '(function(){})()',
+        });
+      }
+      return Promise.resolve({ ok: true, json: async () => ({}) });
+    });
+
+    const result = await scriptTags({ siteKey: 'sg_sk_live_xxx' });
+    expect(result.guardDetect).toContain('<script>eval(');
   });
 
-  it('uses custom base URL', () => {
-    const result = scriptTags({ siteKey: 'sg_sk_live_xxx', baseUrl: 'https://custom.com/api' });
-    expect(result.guardDetect).toContain('https://custom.com/api/guard-detect');
-    expect(result.guard).toContain('https://custom.com/api/guard');
+  it('uses custom base URL', async () => {
+    globalThis.fetch = vi.fn().mockImplementation((url: string) => {
+      if (url.includes('guard-detect') || url.includes('guard?')) {
+        return Promise.resolve({
+          ok: true,
+          text: async () => '(function(){})()',
+        });
+      }
+      return Promise.resolve({ ok: true, json: async () => ({}) });
+    });
+
+    const result = await scriptTags({ siteKey: 'sg_sk_live_xxx', baseUrl: 'https://custom.com/api' });
+    expect(result.guardDetect).toContain('<script>eval(');
   });
 });

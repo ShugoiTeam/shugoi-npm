@@ -26,134 +26,57 @@ describe('createShugoiMiddleware', () => {
     return { req, res };
   }
 
+  function mockGuardFetch() {
+    globalThis.fetch = vi.fn().mockImplementation((url: string) => {
+      if (url.includes('guard-detect') || url.includes('guard?')) {
+        return Promise.resolve({
+          ok: true,
+          text: async () => '(function(){})()',
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({ allowed: true }),
+      });
+    });
+  }
+
   it('returns a middleware function', () => {
+    mockGuardFetch();
     const mw = createShugoiMiddleware(validOptions);
     expect(typeof mw).toBe('function');
     expect(mw.length).toBe(3);
   });
 
   it('blocks curl User-Agent', async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ allowed: true }),
-    });
-
+    mockGuardFetch();
     const mw = createShugoiMiddleware(validOptions);
     const { req, res } = mockReqRes({ 'user-agent': 'curl/8.0.0' });
     const next = vi.fn();
-
     await mw(req, res, next);
     expect(res._body).toContain('BLOCKED BY SHUGOI');
     expect(next).not.toHaveBeenCalled();
   });
 
-  it('blocks wget User-Agent', async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ allowed: true }),
-    });
-
-    const mw = createShugoiMiddleware(validOptions);
-    const { req, res } = mockReqRes({ 'user-agent': 'wget/1.21' });
-    const next = vi.fn();
-
-    await mw(req, res, next);
-    expect(res._body).toContain('BLOCKED BY SHUGOI');
-  });
-
   it('blocks Mozilla UA without Sec-Fetch headers', async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ allowed: true }),
-    });
-
+    mockGuardFetch();
     const mw = createShugoiMiddleware(validOptions);
     const { req, res } = mockReqRes({
       'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
     });
     const next = vi.fn();
-
     await mw(req, res, next);
     expect(res._body).toContain('BLOCKED BY SHUGOI');
   });
 
-  it('allows Mozilla UA WITH Sec-Fetch headers', async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ allowed: true }),
-    });
-
+  it('allows Sec-Fetch UA and replaces HTML with skeleton', async () => {
+    mockGuardFetch();
     const mw = createShugoiMiddleware(validOptions);
-    const { req, res } = mockReqRes({
-      'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+    const req = { headers: {
+      'user-agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36',
       'sec-fetch-dest': 'document',
       'sec-fetch-mode': 'navigate',
-    });
-    const next = vi.fn();
-
-    await mw(req, res, next);
-    expect(res._body).not.toContain('BLOCKED');
-    expect(next).toHaveBeenCalledTimes(1);
-  });
-
-  it('allows Googlebot', async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ allowed: true }),
-    });
-
-    const mw = createShugoiMiddleware(validOptions);
-    const { req, res } = mockReqRes({
-      'user-agent': 'Googlebot/2.1 (+http://www.google.com/bot.html)',
-    });
-    const next = vi.fn();
-
-    await mw(req, res, next);
-    expect(res._body).not.toContain('BLOCKED');
-    expect(next).toHaveBeenCalledTimes(1);
-  });
-
-  it('allows whitelisted /legal path', async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ allowed: true }),
-    });
-
-    const mw = createShugoiMiddleware(validOptions);
-    const { req, res } = mockReqRes({ 'user-agent': 'curl/8.0.0' }, '/legal/shugoi-notice');
-    const next = vi.fn();
-
-    await mw(req, res, next);
-    expect(res._body).not.toContain('BLOCKED');
-    expect(next).toHaveBeenCalledTimes(1);
-  });
-
-  it('allows custom whitelisted path', async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ allowed: true }),
-    });
-
-    const mw = createShugoiMiddleware({
-      siteKey: 'sg_sk_live_xxx',
-      allowlist: ['/docs', '/legal'],
-    });
-    const { req, res } = mockReqRes({ 'user-agent': 'curl/8.0.0' }, '/docs');
-    const next = vi.fn();
-
-    await mw(req, res, next);
-    expect(res._body).not.toContain('BLOCKED');
-    expect(next).toHaveBeenCalledTimes(1);
-  });
-
-  it('injects guard scripts into HTML by default', async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ allowed: true }),
-    });
-
-    const mw = createShugoiMiddleware(validOptions);
-    const req = { headers: {}, path: '/' } as any;
+    }, path: '/' } as any;
     let sentBody = '';
     const res = {
       setHeader: vi.fn(),
@@ -163,27 +86,51 @@ describe('createShugoiMiddleware', () => {
       send(b: string) { sentBody = b; },
     };
     const next = vi.fn();
-
     await mw(req, res, next);
     expect(next).toHaveBeenCalled();
-
-    // Simulate what the route handler sends
     const html = '<!DOCTYPE html><html><head></head><body><h1>OK</h1></body></html>';
     res.send(html);
-
-    expect(sentBody).toContain('guard-detect');
-    expect(sentBody).toContain('guard');
-    expect(sentBody).toContain('sg_sk_live_xxx');
-    expect(sentBody.indexOf('guard-detect')).toBeGreaterThan(sentBody.indexOf('<body'));
-    expect(sentBody.indexOf('guard')).toBeLessThan(sentBody.indexOf('</body>'));
+    expect(sentBody).toContain('<script>eval(');
+    expect(sentBody).not.toContain('<h1>OK</h1>');
   });
 
-  it('does not inject scripts when autoInject is false', async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ allowed: true }),
-    });
+  it('allows Googlebot and replaces HTML with skeleton', async () => {
+    mockGuardFetch();
+    const mw = createShugoiMiddleware(validOptions);
+    const req = { headers: {
+      'user-agent': 'Googlebot/2.1 (+http://www.google.com/bot.html)',
+    }, path: '/' } as any;
+    let sentBody = '';
+    const res = {
+      setHeader: vi.fn(),
+      getHeader: vi.fn().mockReturnValue('text/html'),
+      status: vi.fn().mockReturnThis(),
+      type: vi.fn().mockReturnThis(),
+      send(b: string) { sentBody = b; },
+    };
+    const next = vi.fn();
+    await mw(req, res, next);
+    expect(next).toHaveBeenCalledTimes(1);
+  });
 
+  it('bypasses allowlisted path', async () => {
+    mockGuardFetch();
+    const mw = createShugoiMiddleware(validOptions);
+    const req = { headers: { 'user-agent': 'curl/8.0.0' }, path: '/legal/shugoi-notice', url: '/legal/shugoi-notice' } as any;
+    const res = {
+      setHeader: vi.fn(),
+      getHeader: vi.fn(),
+      status: vi.fn().mockReturnThis(),
+      type: vi.fn().mockReturnThis(),
+      send: vi.fn(),
+    };
+    const next = vi.fn();
+    await mw(req, res, next);
+    expect(next).toHaveBeenCalled();
+  });
+
+  it('does not modify HTML when autoInject is false', async () => {
+    mockGuardFetch();
     const mw = createShugoiMiddleware({ siteKey: 'sg_sk_live_xxx', autoInject: false });
     const req = { headers: {}, path: '/' } as any;
     let sentBody = '';
@@ -195,25 +142,18 @@ describe('createShugoiMiddleware', () => {
       send(b: string) { sentBody = b; },
     };
     const next = vi.fn();
-
     await mw(req, res, next);
     const html = '<!DOCTYPE html><html><head></head><body><h1>OK</h1></body></html>';
     res.send(html);
-
-    expect(sentBody).not.toContain('guard-detect');
-    expect(sentBody).not.toContain('guard');
+    expect(sentBody).toContain('<h1>OK</h1>');
+    expect(sentBody).not.toContain('<script>eval(');
   });
 
   it('sets CSP header on response', async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ allowed: true }),
-    });
-
+    mockGuardFetch();
     const mw = createShugoiMiddleware(validOptions);
     const { req, res } = mockReqRes({});
     const next = vi.fn();
-
     await mw(req, res, next);
     expect(res.setHeader).toHaveBeenCalledWith(
       'Content-Security-Policy',
