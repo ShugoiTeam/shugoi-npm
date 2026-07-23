@@ -113,20 +113,19 @@ export function createShugoiMiddleware(options) {
         let injected = false;
         const originalSend = res.send?.bind(res);
         const originalEnd = res.end?.bind(res);
-        const doInject = (body) => {
+        const doInject = async (body) => {
           if (injected) return body;
           if (typeof body === 'string') {
             const ct = res.getHeader ? res.getHeader('content-type') : undefined;
             if (!ct || String(ct).includes('text/html')) {
-              // whitelist is handled by dashboard via guard-detect endpoint injection
-              body = injectGuardScripts(body, options.siteKey, baseUrl, undefined, restrictedAccess, signingSecret, req);
+              try { body = await injectGuardScripts(body, options.siteKey, baseUrl, undefined, restrictedAccess, signingSecret, req); } catch (e) { log('inject error:', e); }
               injected = true;
             }
           }
           return body;
         };
-        if (originalSend) { res.send = function (body) { return originalSend(doInject(body)); }; }
-        if (originalEnd) { res.end = function (body) { return originalEnd(doInject(body)); }; }
+        if (originalSend) { res.send = function (body) { return doInject(body).then(b => originalSend(b)); }; }
+        if (originalEnd) { res.end = function (body) { return doInject(body).then(b => originalEnd(b)); }; }
       }
 
       next();
