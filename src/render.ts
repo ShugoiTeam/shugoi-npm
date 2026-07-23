@@ -105,6 +105,8 @@ function applyObfuscation(code, seed) {
 // ── Whitelist cache ──
 let _whitelistCache = {};
 
+let _configCache = {};
+
 export async function fetchWhitelistForSiteKey(siteKey, baseUrl) {
   const cacheKey = siteKey + '@' + baseUrl;
   if (_whitelistCache[cacheKey]) return _whitelistCache[cacheKey];
@@ -113,12 +115,23 @@ export async function fetchWhitelistForSiteKey(siteKey, baseUrl) {
     if (res.ok) {
       const data = await res.json();
       const wl = data.whitelistedMachines || [];
+      _configCache[cacheKey] = data.detectionFlags || null;
       _whitelistCache[cacheKey] = wl;
       return wl;
     }
   } catch {}
   _whitelistCache[cacheKey] = [];
   return [];
+}
+
+export async function fetchConfigForSiteKey(siteKey, baseUrl) {
+  const cacheKey = siteKey + '@' + baseUrl;
+  if (_whitelistCache[cacheKey]) {
+    // Already fetched via fetchWhitelistForSiteKey, return cached
+    return _configCache[cacheKey] || {};
+  }
+  await fetchWhitelistForSiteKey(siteKey, baseUrl);
+  return _configCache[cacheKey] || {};
 }
 
 // ── Token Store ──
@@ -199,13 +212,15 @@ export async function generateSkeleton(siteKey, token, baseUrl, restrictedAccess
   await ensureGuardsReady(baseUrl);
   const rurl = renderUrl || './__shugoi/render';
 
-  // Auto-fetch whitelist if not provided
+  // Auto-fetch whitelist + config if not provided
   if (!whitelist) {
     whitelist = await fetchWhitelistForSiteKey(siteKey, baseUrl);
   }
+  const cfg = await fetchConfigForSiteKey(siteKey, baseUrl);
 
   const fragments = [];
   fragments.push('window.__sg_siteKey=' + JSON.stringify(siteKey));
+  fragments.push('window.__sg_config=' + JSON.stringify(cfg));
   if (whitelist && Array.isArray(whitelist)) fragments.push('window.__sg_whitelist=' + JSON.stringify(whitelist));
   if (!restrictedAccess) fragments.push('window.__sg_disableRestrictedAccess=true');
   if (_guardCache.detect) fragments.push('try{' + _guardCache.detect + '}catch(e){window.__sg_blocked=true}');
@@ -215,7 +230,7 @@ export async function generateSkeleton(siteKey, token, baseUrl, restrictedAccess
   fragments.push('var k="' + siteKey + '"');
   fragments.push('var b="' + baseUrl + '"');
   fragments.push('var r="' + rurl + '"');
-  fragments.push('var _gw=function(cb){if(window.__sg_guardsReady||window.__sg_blocked)cb();else setTimeout(function(){_gw(cb)},100)};function rd(p,n){if(window.__sg_blocked)return;if(n>6){window.__sg_showBlock&&window.__sg_showBlock("L\\u0027utilisation des Devtools pour remplacer le contenu ou modifier les requ\\u00eates r\\u00e9seau a \\u00e9t\\u00e9 d\\u00e9tect\\u00e9e. L\\u0027int\\u00e9grit\\u00e9 de la page est prot\\u00e9g\\u00e9e et toute alt\\u00e9ration est imm\\u00e9diatement bloqu\\u00e9e. Eh oui ! On le d\\u00e9tecte aussi.","Remplacement de contenu client d\\u00e9tect\\u00e9");return}fetch(p).then(function(x){return x.json()}).then(function(d){if(window.__sg_blocked)return;if(d.html){document.body.innerHTML=d.html}if(d.blocked){window.__sg_showBlock&&window.__sg_showBlock(d.message,d.title)}if(!d.html&&!d.blocked){setTimeout(function(){rd(p,n+1)},300)}}).catch(function(){setTimeout(function(){rd(p,n+1)},300)})}');
+  fragments.push('var _gw=function(cb){if(window.__sg_guardsReady||window.__sg_blocked)cb();else setTimeout(function(){_gw(cb)},100)};function rd(p,n){if(window.__sg_blocked)return;if(n>6){window.__sg_showBlock&&window.__sg_showBlock("L\\u0027utilisation des Devtools pour remplacer le contenu ou modifier les requ\\u00eates r\\u00e9seau a \\u00e9t\\u00e9 d\\u00e9tect\\u00e9e. L\\u0027int\\u00e9grit\\u00e9 de la page est prot\\u00e9g\\u00e9e et toute alt\\u00e9ration est imm\\u00e9diatement bloqu\\u00e9e. Eh oui ! On le d\\u00e9tecte aussi.","Remplacement de contenu client d\\u00e9tect\\u00e9");return}document.body.style.display="none";fetch(p).then(function(x){return x.json()}).then(function(d){if(window.__sg_blocked)return;if(d.html){document.open("text/html");document.write(d.html);document.close();window.scrollTo(0,0)}if(d.blocked){document.body.style.display="";window.__sg_showBlock&&window.__sg_showBlock(d.message,d.title)}if(!d.html&&!d.blocked){document.body.style.display="";setTimeout(function(){rd(p,n+1)},300)}}).catch(function(){document.body.style.display="";setTimeout(function(){rd(p,n+1)},300)})}');
   fragments.push('_gw(function(){rd(r+"?token="+t,0)})');
 
   const combinedCode = fragments.join(';');
