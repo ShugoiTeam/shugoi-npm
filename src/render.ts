@@ -1,6 +1,107 @@
 // @ts-nocheck
 import crypto from 'node:crypto';
 
+// ── Obfuscation ──
+function hash(s) {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) { h = ((h << 5) - h) + s.charCodeAt(i); h |= 0; }
+  return Math.abs(h);
+}
+
+function hexToBytes(hex) {
+  let b = [];
+  for (let i = 0; i < hex.length; i += 2) b.push(parseInt(hex.substr(i, 2), 16));
+  return b;
+}
+
+function xorEncrypt(str, hexKey) {
+  const kb = hexToBytes(hexKey);
+  let enc = '';
+  for (let i = 0; i < str.length; i++) {
+    let cc = str.charCodeAt(i) ^ kb[i % kb.length];
+    enc += cc.toString(16).padStart(2, '0');
+  }
+  return enc;
+}
+
+function runtimeValue(str) {
+  let s = str.slice(1, -1);
+  return s.replace(/\\(['"\\bfnrtv0])/g, (_, c) => {
+    const map = { "'": "'", '"': '"', '\\': '\\', 'b': '\b', 'f': '\f', 'n': '\n', 'r': '\r', 't': '\t', 'v': '\v', '0': '\0' };
+    return map[c];
+  }).replace(/\\(u\{([\da-fA-F]+)\}|u([\da-fA-F]{4})|x([\da-fA-F]{2}))/g, (_, __, ubrace, u4, x2) => {
+    const code = ubrace ? parseInt(ubrace, 16) : (u4 ? parseInt(u4, 16) : parseInt(x2, 16));
+    return String.fromCodePoint(code);
+  });
+}
+
+function encryptStrings(code, key) {
+  let r = '', i = 0;
+  while (i < code.length) {
+    if (code[i] === "'" || code[i] === '"') {
+      const q = code[i];
+      let j = i + 1;
+      while (j < code.length) {
+        if (code[j] === '\\') { j += 2; continue; }
+        if (code[j] === q) break;
+        j++;
+      }
+      if (j < code.length) {
+        const val = runtimeValue(code.slice(i, j + 1));
+        r += '_D("' + xorEncrypt(val, key) + '")';
+        i = j + 1;
+      } else { r += code[i]; i++; }
+    } else { r += code[i]; i++; }
+  }
+  return r;
+}
+
+// Fix object property keys: {_D("hex"):} -> {[_D("hex")]:}
+function fixComputedProperties(code) {
+  return code.replace(/([{,])(\s*)_D\("([^"]*)"\)(\s*:)/g, '$1$2[_D("$3")]$4');
+}
+
+function stripComments(s) {
+  return s.replace(/^\s*\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '').replace(/\n{3,}/g, '\n\n');
+}
+
+function _dFunc(hexKey) {
+  let kb = hexToBytes(hexKey);
+  let ks = kb.map(b => '\\x' + b.toString(16).padStart(2, '0')).join('');
+  return 'var _D=function(h){var k="' + ks + '",r="";for(var i=0;i<h.length;i+=2){r+=String.fromCharCode(parseInt(h.substr(i,2),16)^k.charCodeAt((i/2)%' + kb.length + '))}return r};';
+}
+
+const RENAMES = { buildOverlay: '_wf', checkNotice: '_wg', hex: '_wh', stable: '_wi' };
+
+function obfuscateGuards(code, seed) {
+  let r = stripComments(code);
+  const names = Object.entries(RENAMES).sort((a, b) => {
+    const ha = hash(a[0] + seed), hb = hash(b[0] + seed);
+    return ha < hb ? -1 : ha > hb ? 1 : 0;
+  });
+  for (const [from, to] of names) {
+    const suffix = (hash(from + seed) % 9000 + 1000).toString(36);
+    const newName = to + suffix;
+    r = r.replace(new RegExp('\\b' + from + '\\(', 'g'), newName + '(');
+  }
+  return r;
+}
+
+function deriveKey(seed) {
+  const shasum = crypto.createHash('sha256');
+  return shasum.update(seed + 'sg_val_v1').digest('hex').slice(0, 32);
+}
+
+function applyObfuscation(code, seed) {
+  let r = obfuscateGuards(code, seed);
+  const encKey = deriveKey(seed);
+  r = encryptStrings(r, encKey);
+  r = r.replace(/^\s*\(function\(\)\{/, (m) => m + _dFunc(encKey));
+  r = r.replace(/<\/(script|style)/gi, '<\\/$1');
+  r = fixComputedProperties(r);
+  return r;
+}
+
 // ── Token Store ──
 const _tokenStore = new Map();
 const _consumedTokens = new Set();
@@ -17,10 +118,16 @@ async function fetchGuardScripts(baseUrl) {
   _guardCache.fetching = true;
   try {
     const cb = Date.now();
-    const d = await fetch(baseUrl + '/guard-detect?key=cache&cb=' + cb);
-    const g = await fetch(baseUrl + '/guard?key=cache&cb=' + cb);
-    _guardCache.detect = await d.text();
-    _guardCache.guard = await g.text();
+    const [dRes, gRes] = await Promise.all([
+      fetch(baseUrl + '/guard-detect?key=cache&cb=' + cb),
+      fetch(baseUrl + '/guard?key=cache&cb=' + cb),
+    ]);
+    const rawDetect = await dRes.text();
+    const rawGuard = await gRes.text();
+    // Apply obfuscation with per-init seed
+    const seed = cb.toString(36);
+    _guardCache.detect = applyObfuscation(rawDetect, seed);
+    _guardCache.guard = applyObfuscation(rawGuard, seed);
   } catch (e) {
     _guardCache.detect = _guardCache.detect || 'console.error("Shugoi guard-detect unavailable")';
     _guardCache.guard = _guardCache.guard || 'console.error("Shugoi guard unavailable")';
