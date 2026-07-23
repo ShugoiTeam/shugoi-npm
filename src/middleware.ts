@@ -165,6 +165,7 @@ export function createShugoiMiddleware(options: ShugoiOptions) {
                   options.whitelist,
                   restrictedAccess,
                   options.signingSecret,
+                  './__shugoi/render',
                 );
               }
             }
@@ -184,6 +185,7 @@ export function createShugoiMiddleware(options: ShugoiOptions) {
                   options.whitelist,
                   restrictedAccess,
                   options.signingSecret,
+                  './__shugoi/render',
                 );
               }
             }
