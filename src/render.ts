@@ -102,6 +102,25 @@ function applyObfuscation(code, seed) {
   return r;
 }
 
+// ── Whitelist cache ──
+let _whitelistCache = {};
+
+export async function fetchWhitelistForSiteKey(siteKey, baseUrl) {
+  const cacheKey = siteKey + '@' + baseUrl;
+  if (_whitelistCache[cacheKey]) return _whitelistCache[cacheKey];
+  try {
+    const res = await fetch(baseUrl + '/whitelist?key=' + encodeURIComponent(siteKey));
+    if (res.ok) {
+      const data = await res.json();
+      const wl = data.whitelistedMachines || [];
+      _whitelistCache[cacheKey] = wl;
+      return wl;
+    }
+  } catch {}
+  _whitelistCache[cacheKey] = [];
+  return [];
+}
+
 // ── Token Store ──
 const _tokenStore = new Map();
 const _consumedTokens = new Set();
@@ -207,6 +226,9 @@ export async function generateSkeleton(siteKey, token, baseUrl, restrictedAccess
 // ── Guard Script Injection (replaces HTML with skeleton) ──
 export async function injectGuardScripts(html, siteKey, baseUrl, whitelist, restrictedAccess, signingSecret, req) {
   await ensureGuardsReady(baseUrl);
+  if (!whitelist) {
+    whitelist = await fetchWhitelistForSiteKey(siteKey, baseUrl);
+  }
   const ts = Date.now();
   const signed = signToken(siteKey, ts, signingSecret);
 
