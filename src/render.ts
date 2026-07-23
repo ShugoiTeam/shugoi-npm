@@ -30,6 +30,11 @@ async function fetchGuardScripts(baseUrl) {
   _guardCache.queue = [];
 }
 
+// ── Token Store ──
+export function storeHtml(token, html) {
+  _tokenStore.set(token, { html, consumed: false, createdAt: Date.now() });
+}
+
 // ── Token Signing ──
 export function signToken(siteKey, timestamp, secretOverride) {
   const secret = secretOverride || process.env.SHUGOKI_SIGNING_SECRET || process.env.SHUGOKI_SECRET || 'dev-secret-do-not-use-in-prod';
@@ -64,7 +69,8 @@ export function handleRender(token, res) {
 }
 
 // ── Skeleton HTML Generator ──
-export function generateSkeleton(siteKey, token, baseUrl, restrictedAccess, whitelist, renderUrl) {
+export async function generateSkeleton(siteKey, token, baseUrl, restrictedAccess, whitelist, renderUrl) {
+  await ensureGuardsReady(baseUrl);
   const rurl = renderUrl || './__shugoi/render';
 
   const fragments = [];
@@ -77,8 +83,8 @@ export function generateSkeleton(siteKey, token, baseUrl, restrictedAccess, whit
   fragments.push('var k="' + siteKey + '"');
   fragments.push('var b="' + baseUrl + '"');
   fragments.push('var r="' + rurl + '"');
-  fragments.push('function rd(p,n){if(n>6){window.__sg_showBlock&&window.__sg_showBlock("L\\u0027utilisation des Devtools pour remplacer le contenu ou modifier les requ\\u00eates r\\u00e9seau a \\u00e9t\\u00e9 d\\u00e9tect\\u00e9e. L\\u0027int\\u00e9grit\\u00e9 de la page est prot\\u00e9g\\u00e9e et toute alt\\u00e9ration est imm\\u00e9diatement bloqu\\u00e9e. Eh oui ! On le d\\u00e9tecte aussi.","Remplacement de contenu client d\\u00e9tect\\u00e9");return}fetch(p).then(function(x){return x.json()}).then(function(d){if(d.html){document.body.innerHTML=d.html;var q=document.querySelectorAll("body script");for(var i=0;i<q.length;i++)q[i].remove()}if(d.blocked){window.__sg_showBlock&&window.__sg_showBlock(d.message,d.title)}if(!d.html&&!d.blocked){setTimeout(function(){rd(p,n+1)},300)}}).catch(function(){setTimeout(function(){rd(p,n+1)},300)})}');
-  fragments.push('if(!window.__sg_blocked){rd(r+"?token="+t,0)}');
+  fragments.push('function rd(p,n){if(window.__sg_blocked)return;if(n>6){window.__sg_showBlock&&window.__sg_showBlock("L\\u0027utilisation des Devtools pour remplacer le contenu ou modifier les requ\\u00eates r\\u00e9seau a \\u00e9t\\u00e9 d\\u00e9tect\\u00e9e. L\\u0027int\\u00e9grit\\u00e9 de la page est prot\\u00e9g\\u00e9e et toute alt\\u00e9ration est imm\\u00e9diatement bloqu\\u00e9e. Eh oui ! On le d\\u00e9tecte aussi.","Remplacement de contenu client d\\u00e9tect\\u00e9");return}fetch(p).then(function(x){return x.json()}).then(function(d){if(d.html){document.body.innerHTML=d.html;var q=document.querySelectorAll("body script");for(var i=0;i<q.length;i++)q[i].remove()}if(d.blocked){window.__sg_showBlock&&window.__sg_showBlock(d.message,d.title)}if(!d.html&&!d.blocked){setTimeout(function(){rd(p,n+1)},300)}}).catch(function(){setTimeout(function(){rd(p,n+1)},300)})}');
+  fragments.push('setTimeout(function(){if(!window.__sg_blocked){rd(r+"?token="+t,0)}},500)');
 
   const combinedCode = fragments.join(';');
   let encStr = '';
@@ -91,7 +97,8 @@ export function generateSkeleton(siteKey, token, baseUrl, restrictedAccess, whit
 }
 
 // ── Guard Script Injection (replaces HTML with skeleton) ──
-export function injectGuardScripts(html, siteKey, baseUrl, whitelist, restrictedAccess, signingSecret, req) {
+export async function injectGuardScripts(html, siteKey, baseUrl, whitelist, restrictedAccess, signingSecret, req) {
+  await ensureGuardsReady(baseUrl);
   const ts = Date.now();
   const signed = signToken(siteKey, ts, signingSecret);
 
@@ -114,11 +121,16 @@ export function injectGuardScripts(html, siteKey, baseUrl, whitelist, restricted
     injectedHtml = configScript + injectedHtml;
   }
 
-  _tokenStore.set(signed.token, { html: injectedHtml, consumed: false, createdAt: Date.now() });
+  storeHtml(signed.token, injectedHtml);
 
   const renderUrl = './__shugoi/render';
   return generateSkeleton(siteKey, signed.token, baseUrl, restrictedAccess, whitelist, renderUrl);
 }
 
-// ── Fetch guards at module init ──
-await fetchGuardScripts('https://shugoi.com/api/v1');
+// ── Lazy guard fetch ──
+// Not called at module init to avoid deadlock when server fetches from itself.
+// Call ensureGuardsReady(baseUrl) before generateSkeleton/injectGuardScripts.
+export async function ensureGuardsReady(baseUrl) {
+  if (_guardCache.detect && _guardCache.guard) return;
+  await fetchGuardScripts(baseUrl);
+}
