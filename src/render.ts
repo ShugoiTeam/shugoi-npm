@@ -102,36 +102,24 @@ function applyObfuscation(code, seed) {
   return r;
 }
 
-// ── Whitelist cache ──
-let _whitelistCache = {};
-
-let _configCache = {};
+// ── Whitelist + config fetch (no cache — always live) ──
+let _lastConfig = {};
 
 export async function fetchWhitelistForSiteKey(siteKey, baseUrl) {
-  const cacheKey = siteKey + '@' + baseUrl;
-  if (_whitelistCache[cacheKey]) return _whitelistCache[cacheKey];
   try {
-    const res = await fetch(baseUrl + '/whitelist?key=' + encodeURIComponent(siteKey));
+    const res = await fetch(baseUrl + '/whitelist?key=' + encodeURIComponent(siteKey) + '&_=' + Date.now());
     if (res.ok) {
       const data = await res.json();
-      const wl = data.whitelistedMachines || [];
-      _configCache[cacheKey] = data.detectionFlags || null;
-      _whitelistCache[cacheKey] = wl;
-      return wl;
+      _lastConfig[baseUrl + '@' + siteKey] = data.detectionFlags || {};
+      return data.whitelistedMachines || [];
     }
   } catch {}
-  _whitelistCache[cacheKey] = [];
   return [];
 }
 
 export async function fetchConfigForSiteKey(siteKey, baseUrl) {
-  const cacheKey = siteKey + '@' + baseUrl;
-  if (_whitelistCache[cacheKey]) {
-    // Already fetched via fetchWhitelistForSiteKey, return cached
-    return _configCache[cacheKey] || {};
-  }
   await fetchWhitelistForSiteKey(siteKey, baseUrl);
-  return _configCache[cacheKey] || {};
+  return _lastConfig[baseUrl + '@' + siteKey] || {};
 }
 
 // ── Token Store ──
