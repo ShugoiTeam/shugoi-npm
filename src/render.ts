@@ -1,5 +1,8 @@
 // @ts-nocheck
 import crypto from 'node:crypto';
+import { writeFileSync, readFileSync, existsSync, unlinkSync, mkdirSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 
 // ── Obfuscation ──
 function hash(s) {
@@ -122,14 +125,17 @@ export async function fetchConfigForSiteKey(siteKey, baseUrl) {
   return _lastConfig[baseUrl + '@' + siteKey] || {};
 }
 
-// ── Token Store ──
-const _tokenStore = new Map();
-const _consumedTokens = new Set();
+// ── Token Store (file-based for multi-worker support) ──
+const TOKEN_DIR = join(tmpdir(), 'shugoi-render');
+const TOKEN_TTL = 120000;
+if (!existsSync(TOKEN_DIR)) try { mkdirSync(TOKEN_DIR, { recursive: true }); } catch {}
+// Cleanup stale tokens every 30s
 setInterval(() => {
-  const now = Date.now();
-  for (const [key, val] of _tokenStore) if (now - val.createdAt > 30000) _tokenStore.delete(key);
-  for (const key of _consumedTokens) if (now - parseInt(key.split(':')[1] || '0') > 60000) _consumedTokens.delete(key);
-}, 10000).unref();
+  try { for (const f of readdirSync(TOKEN_DIR)) {
+    const p = join(TOKEN_DIR, f);
+    if (Date.now() - parseInt(f.split('_')[0] || '0') > TOKEN_TTL) try { unlinkSync(p); } catch {}
+  }} catch {}
+}, 30000).unref();
 
 // ── Guard Script Cache ──
 const _guardCache = { detect: null, guard: null, fetching: false, queue: [] };
@@ -159,7 +165,7 @@ async function fetchGuardScripts(baseUrl) {
 
 // ── Token Store ──
 export function storeHtml(token, html) {
-  _tokenStore.set(token, { html, consumed: false, createdAt: Date.now() });
+  try { writeFileSync(join(TOKEN_DIR, Date.now() + '_' + token.slice(-16)), html, 'utf-8'); } catch {}
 }
 
 // ── Token Signing ──
@@ -173,18 +179,13 @@ export function signToken(siteKey, timestamp, secretOverride) {
 
 // ── Render Response Data ──
 export function renderResponseData(token) {
-  const entry = _tokenStore.get(token);
-  if (!entry) {
-    const parts = token.split(':');
-    if (parts.length === 4 && !_consumedTokens.has(token)) {
-      return { blocked: true, reason: 'manual_modification', message: 'Remplacement de contenu client d\u00e9tect\u00e9', title: 'Remplacement de contenu client d\u00e9tect\u00e9' };
-    }
-    return { error: 'not_found' };
+  const suffix = token.slice(-16);
+  try { for (const f of readdirSync(TOKEN_DIR)) { if (f.endsWith(suffix)) { const html = readFileSync(join(TOKEN_DIR, f), 'utf-8'); try { unlinkSync(join(TOKEN_DIR, f)); } catch {} return { html }; } } } catch {}
+  const parts = token.split(':');
+  if (parts.length === 4 && parts[3] && parts[3].length === 64) {
+    return { blocked: true, reason: 'manual_modification', message: 'Remplacement de contenu client d\u00e9tect\u00e9', title: 'Remplacement de contenu client d\u00e9tect\u00e9' };
   }
-  if (entry.consumed) return { error: 'not_found' };
-  entry.consumed = true;
-  _consumedTokens.add(token);
-  return { html: entry.html };
+  return { error: 'not_found' };
 }
 
 // ── Handle Render Endpoint ──
