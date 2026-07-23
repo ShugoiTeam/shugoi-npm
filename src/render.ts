@@ -27,14 +27,15 @@ setInterval(() => {
   }
 }, 10000).unref();
 
-async function fetchGuardScripts(baseUrl: string): Promise<void> {
+async function fetchGuardScripts(baseUrl: string, siteKey?: string): Promise<void> {
   if (_cachePromise) return _cachePromise;
+  const sk = siteKey || "cache";
   _cachePromise = (async () => {
     try {
       const cb = Date.now();
       const [dRes, gRes] = await Promise.all([
-        fetch(`${baseUrl}/guard-detect?key=cache&cb=${cb}`),
-        fetch(`${baseUrl}/guard?key=cache&cb=${cb}`),
+        fetch(`${baseUrl}/guard-detect?key=${sk}&cb=${cb}`),
+        fetch(`${baseUrl}/guard?key=${sk}&cb=${cb}`),
       ]);
       _guardCache = {
         detect: await dRes.text(),
@@ -47,8 +48,8 @@ async function fetchGuardScripts(baseUrl: string): Promise<void> {
   return _cachePromise;
 }
 
-export async function ensureGuardsFetched(baseUrl: string): Promise<void> {
-  await fetchGuardScripts(baseUrl);
+export async function ensureGuardsFetched(baseUrl: string, siteKey?: string): Promise<void> {
+  await fetchGuardScripts(baseUrl, siteKey);
 }
 
 export function signToken(

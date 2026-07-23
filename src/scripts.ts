@@ -34,7 +34,7 @@ export async function scriptTags(options: ScriptTagsOptions): Promise<{
 }> {
   const base = options.baseUrl ?? 'https://shugoi.com/api/v1';
 
-  await ensureGuardsFetched(base);
+  await ensureGuardsFetched(base, options.siteKey);
 
   const ts = Date.now();
   const signed = signToken(options.siteKey, ts, options.signingSecret);

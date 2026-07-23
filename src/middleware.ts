@@ -148,7 +148,7 @@ export function createShugoiMiddleware(options: ShugoiOptions) {
 
       // Split-render: replace HTML with skeleton
       if (autoInject) {
-        await ensureGuardsFetched(baseUrl);
+        await ensureGuardsFetched(baseUrl, options.siteKey);
 
         const originalSend = res.send?.bind(res);
         const originalEnd = res.end?.bind(res);
