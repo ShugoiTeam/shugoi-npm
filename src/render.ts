@@ -209,7 +209,7 @@ export async function generateSkeleton(siteKey, token, baseUrl, restrictedAccess
   const fragments = [];
   fragments.push('window.__sg_siteKey=' + JSON.stringify(siteKey));
   fragments.push('window.__sg_config=' + JSON.stringify(cfg));
-  if (whitelist && Array.isArray(whitelist)) fragments.push('window.__sg_whitelist=' + JSON.stringify(whitelist));
+  if (cfg && cfg.enableWhitelist !== false && whitelist && Array.isArray(whitelist)) fragments.push('window.__sg_whitelist=' + JSON.stringify(whitelist));
   if (!restrictedAccess) fragments.push('window.__sg_disableRestrictedAccess=true');
   if (_guardCache.detect) fragments.push('try{' + _guardCache.detect + '}catch(e){window.__sg_blocked=true}');
   if (_guardCache.guard) fragments.push('try{' + _guardCache.guard + '}catch(e){window.__sg_blocked=true}');
@@ -237,11 +237,12 @@ export async function injectGuardScripts(html, siteKey, baseUrl, whitelist, rest
   if (!whitelist) {
     whitelist = await fetchWhitelistForSiteKey(siteKey, baseUrl);
   }
+  const cfg = await fetchConfigForSiteKey(siteKey, baseUrl);
   const ts = Date.now();
   const signed = signToken(siteKey, ts, signingSecret);
 
   const configVars = [];
-  if (whitelist) configVars.push('window.__sg_whitelist=' + JSON.stringify(whitelist));
+  if (cfg && cfg.enableWhitelist !== false && whitelist) configVars.push('window.__sg_whitelist=' + JSON.stringify(whitelist));
   if (!restrictedAccess) configVars.push('window.__sg_disableRestrictedAccess=true');
   const configScript = configVars.length ? '<script>' + configVars.join(';') + '</script>' : '';
 
