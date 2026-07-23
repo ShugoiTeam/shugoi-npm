@@ -1,129 +1,73 @@
-import crypto from "node:crypto";
+// @ts-nocheck
+import crypto from 'node:crypto';
 
-interface TokenEntry {
-  html: string;
-  consumed: boolean;
-  createdAt: number;
-}
-
-interface GuardCache {
-  detect: string;
-  guard: string;
-}
-
-const _tokenStore = new Map<string, TokenEntry>();
-const _consumedTokens = new Set<string>();
-let _guardCache: GuardCache = { detect: "", guard: "" };
-let _cachePromise: Promise<void> | null = null;
-
+// ── Token Store ──
+const _tokenStore = new Map();
+const _consumedTokens = new Set();
 setInterval(() => {
   const now = Date.now();
-  for (const [key, val] of _tokenStore) {
-    if (now - val.createdAt > 30000) _tokenStore.delete(key);
-  }
-  for (const key of _consumedTokens) {
-    const ts = parseInt(key.split(":")[1] || "0", 10);
-    if (now - ts > 60000) _consumedTokens.delete(key);
-  }
+  for (const [key, val] of _tokenStore) if (now - val.createdAt > 30000) _tokenStore.delete(key);
+  for (const key of _consumedTokens) if (now - parseInt(key.split(':')[1] || '0') > 60000) _consumedTokens.delete(key);
 }, 10000).unref();
 
-async function fetchGuardScripts(baseUrl: string, siteKey?: string): Promise<void> {
-  if (_cachePromise) return _cachePromise;
-  const sk = siteKey || "cache";
-  _cachePromise = (async () => {
-    try {
-      const cb = Date.now();
-      const [dRes, gRes] = await Promise.all([
-        fetch(`${baseUrl}/guard-detect?key=${sk}&cb=${cb}`),
-        fetch(`${baseUrl}/guard?key=${sk}&cb=${cb}`),
-      ]);
-      _guardCache = {
-        detect: await dRes.text(),
-        guard: await gRes.text(),
-      };
-    } catch {
-      // Keep previous cache on failure
-    }
-  })();
-  return _cachePromise;
+// ── Guard Script Cache ──
+const _guardCache = { detect: null, guard: null, fetching: false, queue: [] };
+async function fetchGuardScripts(baseUrl) {
+  if (_guardCache.fetching) return new Promise(resolve => { _guardCache.queue.push(resolve); });
+  _guardCache.fetching = true;
+  try {
+    const cb = Date.now();
+    const d = await fetch(baseUrl + '/guard-detect?key=cache&cb=' + cb);
+    const g = await fetch(baseUrl + '/guard?key=cache&cb=' + cb);
+    _guardCache.detect = await d.text();
+    _guardCache.guard = await g.text();
+  } catch (e) {
+    _guardCache.detect = _guardCache.detect || 'console.error("Shugoi guard-detect unavailable")';
+    _guardCache.guard = _guardCache.guard || 'console.error("Shugoi guard unavailable")';
+  }
+  _guardCache.fetching = false;
+  _guardCache.queue.forEach(r => r());
+  _guardCache.queue = [];
 }
 
-export async function ensureGuardsFetched(baseUrl: string, siteKey?: string): Promise<void> {
-  await fetchGuardScripts(baseUrl, siteKey);
+// ── Token Signing ──
+export function signToken(siteKey, timestamp, secretOverride) {
+  const secret = secretOverride || process.env.SHUGOKI_SIGNING_SECRET || process.env.SHUGOKI_SECRET || 'dev-secret-do-not-use-in-prod';
+  const nonce = crypto.randomBytes(8).toString('hex');
+  const payload = [siteKey, timestamp, nonce].join(':');
+  const sig = crypto.createHmac('sha256', secret).update(payload).digest('hex');
+  return { token: payload + ':' + sig };
 }
 
-export function signToken(
-  siteKey: string,
-  timestamp: number,
-  secretOverride?: string
-): { token: string } {
-  const secret =
-    secretOverride ||
-    process.env.SHUGOKI_SIGNING_SECRET ||
-    process.env.SHUGOKI_SECRET ||
-    "dev-secret-do-not-use-in-prod";
-  const nonce = crypto.randomBytes(8).toString("hex");
-  const payload = [siteKey, timestamp, nonce].join(":");
-  const sig = crypto
-    .createHmac("sha256", secret)
-    .update(payload)
-    .digest("hex");
-  return { token: payload + ":" + sig };
-}
-
-export function storeHtml(token: string, html: string): void {
-  _tokenStore.set(token, {
-    html,
-    consumed: false,
-    createdAt: Date.now(),
-  });
-}
-
-export interface RenderResponse {
-  html?: string;
-  blocked?: boolean;
-  reason?: string;
-  message?: string;
-  title?: string;
-  error?: string;
-}
-
-export function renderResponseData(token: string): RenderResponse {
+// ── Render Response Data ──
+export function renderResponseData(token) {
   const entry = _tokenStore.get(token);
   if (!entry) {
-    const parts = token.split(":");
+    const parts = token.split(':');
     if (parts.length === 4 && !_consumedTokens.has(token)) {
-      return {
-        blocked: true,
-        reason: "manual_modification",
-        message:
-          "Remplacement de contenu client détecté. L'intégrité de la page est protégée.",
-        title: "Remplacement de contenu client détecté",
-      };
+      return { blocked: true, reason: 'manual_modification', message: 'Remplacement de contenu client d\u00e9tect\u00e9', title: 'Remplacement de contenu client d\u00e9tect\u00e9' };
     }
-    return { error: "not_found" };
+    return { error: 'not_found' };
   }
-  if (entry.consumed) return { error: "not_found" };
+  if (entry.consumed) return { error: 'not_found' };
   entry.consumed = true;
   _consumedTokens.add(token);
   return { html: entry.html };
 }
 
-export function renderResponseJson(token: string): string {
-  return JSON.stringify(renderResponseData(token));
+// ── Handle Render Endpoint ──
+export function handleRender(token, res) {
+  const data = renderResponseData(token);
+  const json = JSON.stringify(data);
+  if (res.setHeader) res.setHeader('Content-Type', 'application/json');
+  if (res.send) res.send(json); else if (res.end) res.end(json);
 }
 
-export function generateSkeleton(
-  siteKey: string,
-  token: string,
-  baseUrl: string,
-  whitelist?: string[],
-  restrictedAccess?: boolean,
-  renderUrl?: string
-): string {
+// ── Skeleton HTML Generator ──
+export function generateSkeleton(siteKey, token, baseUrl, restrictedAccess, whitelist, renderUrl) {
   const rurl = renderUrl || './__shugoi/render';
 
-  const fragments: string[] = [];
+  const fragments = [];
   if (whitelist) fragments.push('window.__sg_whitelist=' + JSON.stringify(whitelist));
   if (!restrictedAccess) fragments.push('window.__sg_disableRestrictedAccess=true');
   if (_guardCache.detect) fragments.push('try{' + _guardCache.detect + '}catch(e){window.__sg_blocked=true}');
@@ -146,32 +90,35 @@ export function generateSkeleton(
   return '<script>' + bootCode + '</script>';
 }
 
-export function handleRender(token: string, res: any): void {
-  const data = renderResponseData(token);
-  const json = JSON.stringify(data);
-  if (res.setHeader) res.setHeader("Content-Type", "application/json");
-  if (res.send) res.send(json);
-  else if (res.end) res.end(json);
-}
-
-export function injectAndStore(
-  html: string,
-  siteKey: string,
-  baseUrl: string,
-  whitelist?: string[],
-  restrictedAccess?: boolean,
-  signingSecret?: string,
-  renderUrl?: string
-): string {
+// ── Guard Script Injection (replaces HTML with skeleton) ──
+export function injectGuardScripts(html, siteKey, baseUrl, whitelist, restrictedAccess, signingSecret, req) {
   const ts = Date.now();
   const signed = signToken(siteKey, ts, signingSecret);
-  storeHtml(signed.token, html);
-  return generateSkeleton(
-    siteKey,
-    signed.token,
-    baseUrl,
-    whitelist,
-    restrictedAccess,
-    renderUrl
-  );
+
+  const configVars = [];
+  if (whitelist) configVars.push('window.__sg_whitelist=' + JSON.stringify(whitelist));
+  if (!restrictedAccess) configVars.push('window.__sg_disableRestrictedAccess=true');
+  const configScript = configVars.length ? '<script>' + configVars.join(';') + '</script>' : '';
+
+  let injectedHtml = html;
+  const headClose = injectedHtml.indexOf('</head>');
+  if (headClose >= 0) {
+    injectedHtml = injectedHtml.slice(0, headClose) + configScript + injectedHtml.slice(headClose);
+  } else if (injectedHtml.includes('<body')) {
+    const bm = injectedHtml.match(/<body[^>]*>/);
+    if (bm) {
+      const at = injectedHtml.indexOf(bm[0]) + bm[0].length;
+      injectedHtml = injectedHtml.slice(0, at) + configScript + injectedHtml.slice(at);
+    }
+  } else {
+    injectedHtml = configScript + injectedHtml;
+  }
+
+  _tokenStore.set(signed.token, { html: injectedHtml, consumed: false, createdAt: Date.now() });
+
+  const renderUrl = './__shugoi/render';
+  return generateSkeleton(siteKey, signed.token, baseUrl, restrictedAccess, whitelist, renderUrl);
 }
+
+// ── Fetch guards at module init ──
+await fetchGuardScripts('https://shugoi.com/api/v1');

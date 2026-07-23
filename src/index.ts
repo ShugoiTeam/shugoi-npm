@@ -1,42 +1,7 @@
-/**
- * Shugoi - Hardware fingerprinting anti-abuse protection.
- *
- * @packageDocumentation
- */
-
 export { ShugoiError } from './errors';
-export type { ShugoiErrorCode } from './errors';
-
-export { createShugoiMiddleware } from './middleware';
-
-export { checkLicense } from './check-license';
-export type { CheckLicenseOptions } from './check-license';
-
+export { signToken, generateSkeleton, injectGuardScripts, renderResponseData, handleRender } from './render';
+export { createShugoiMiddleware, createShugoiPlugin, BLOCK_PAGE, DEFAULT_HEADLESS_PATTERNS, DEFAULT_BOT_WHITELIST } from './middleware';
 export { buildCsp } from './csp';
-export type { CspOptions } from './csp';
-
+export { checkLicense } from './check-license';
 export { scriptTags } from './scripts';
-export type { ScriptTagsOptions } from './scripts';
-
 export { validateSiteKey } from './validate-site-key';
-
-export {
-  signToken,
-  storeHtml,
-  generateSkeleton,
-  renderResponseData,
-  renderResponseJson,
-  handleRender,
-  injectAndStore,
-  ensureGuardsFetched,
-} from './render';
-export type { RenderResponse } from './render';
-
-export type {
-  ShugoiOptions,
-  CheckResponse,
-  CheckRequest,
-  BlockedReason,
-  RateLimitReason,
-  CaptchaChallenge,
-} from './types';
