@@ -233,7 +233,7 @@ async function generateSkeleton(siteKey, token, baseUrl, restrictedAccess, white
   const bootCode = "eval([...'" + encStr + "'].map(x=>String.fromCodePoint(x.codePointAt(0)-917504)).join(''))";
   return "<script>" + bootCode + "</script>";
 }
-async function injectGuardScripts(html, siteKey, baseUrl, whitelist, restrictedAccess, signingSecret, req) {
+async function injectGuardScripts(html, siteKey, baseUrl, whitelist, restrictedAccess, signingSecret, req, allowedOrigins = []) {
   await ensureGuardsReady(baseUrl);
   if (!whitelist) {
     whitelist = await fetchWhitelistForSiteKey(siteKey, baseUrl);
@@ -244,6 +244,7 @@ async function injectGuardScripts(html, siteKey, baseUrl, whitelist, restrictedA
   const configVars = [];
   if (cfg && cfg.enableWhitelist !== false && whitelist) configVars.push("window.__sg_whitelist=" + JSON.stringify(whitelist));
   if (!restrictedAccess) configVars.push("window.__sg_disableRestrictedAccess=true");
+  if (allowedOrigins.length > 0) configVars.push("window.__sg_allowedOrigins=" + JSON.stringify(allowedOrigins));
   const configScript = configVars.length ? "<script>" + configVars.join(";") + "</script>" : "";
   let injectedHtml = html;
   const headClose = injectedHtml.indexOf("</head>");
@@ -518,7 +519,7 @@ function createShugoiMiddleware(options) {
             const ct = res.getHeader ? res.getHeader("content-type") : void 0;
             if (!ct || String(ct).includes("text/html")) {
               try {
-                body = await injectGuardScripts(body, options.siteKey, baseUrl, void 0, restrictedAccess, signingSecret, req);
+                body = await injectGuardScripts(body, options.siteKey, baseUrl, void 0, restrictedAccess, signingSecret, req, _validationAllowedOrigins);
               } catch (e) {
                 log("inject error:", e);
               }
@@ -688,7 +689,7 @@ function createShugoiPlugin(options) {
       if (reply.statusCode !== 200) return payload;
       const ct = reply.getHeader("content-type");
       if (!ct || String(ct).includes("text/html")) {
-        return await injectGuardScripts(payload, options.siteKey, baseUrl, void 0, restrictedAccess, signingSecret, { url: path });
+        return await injectGuardScripts(payload, options.siteKey, baseUrl, void 0, restrictedAccess, signingSecret, { url: path }, _validationAllowedOrigins);
       }
       return payload;
     });

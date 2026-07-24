@@ -215,7 +215,7 @@ export function createShugoiMiddleware(options) {
           if (typeof body === 'string') {
             const ct = res.getHeader ? res.getHeader('content-type') : undefined;
             if (!ct || String(ct).includes('text/html')) {
-              try { body = await injectGuardScripts(body, options.siteKey, baseUrl, undefined, restrictedAccess, signingSecret, req); } catch (e) { log('inject error:', e); }
+              try { body = await injectGuardScripts(body, options.siteKey, baseUrl, undefined, restrictedAccess, signingSecret, req, _validationAllowedOrigins); } catch (e) { log('inject error:', e); }
               injected = true;
             }
           }
@@ -383,7 +383,7 @@ fetch(baseUrl + '/event', { method: 'POST', headers: { 'Content-Type': 'applicat
       if (reply.statusCode !== 200) return payload;
       const ct = reply.getHeader('content-type');
       if (!ct || String(ct).includes('text/html')) {
-        return await injectGuardScripts(payload, options.siteKey, baseUrl, undefined, restrictedAccess, signingSecret, { url: path });
+        return await injectGuardScripts(payload, options.siteKey, baseUrl, undefined, restrictedAccess, signingSecret, { url: path }, _validationAllowedOrigins);
       }
       return payload;
     });

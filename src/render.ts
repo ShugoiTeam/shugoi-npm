@@ -233,7 +233,7 @@ export async function generateSkeleton(siteKey, token, baseUrl, restrictedAccess
 }
 
 // ── Guard Script Injection (replaces HTML with skeleton) ──
-export async function injectGuardScripts(html, siteKey, baseUrl, whitelist, restrictedAccess, signingSecret, req) {
+export async function injectGuardScripts(html, siteKey, baseUrl, whitelist, restrictedAccess, signingSecret, req, allowedOrigins = []) {
   await ensureGuardsReady(baseUrl);
   if (!whitelist) {
     whitelist = await fetchWhitelistForSiteKey(siteKey, baseUrl);
@@ -245,6 +245,7 @@ export async function injectGuardScripts(html, siteKey, baseUrl, whitelist, rest
   const configVars = [];
   if (cfg && cfg.enableWhitelist !== false && whitelist) configVars.push('window.__sg_whitelist=' + JSON.stringify(whitelist));
   if (!restrictedAccess) configVars.push('window.__sg_disableRestrictedAccess=true');
+  if (allowedOrigins.length > 0) configVars.push('window.__sg_allowedOrigins=' + JSON.stringify(allowedOrigins));
   const configScript = configVars.length ? '<script>' + configVars.join(';') + '</script>' : '';
 
   let injectedHtml = html;
