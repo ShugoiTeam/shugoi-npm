@@ -1,10 +1,68 @@
 // @ts-nocheck
-import crypto from 'node:crypto';
-import { writeFileSync, readFileSync, existsSync, unlinkSync, mkdirSync, readdirSync } from 'node:fs';
-import { join } from 'node:path';
-import { tmpdir } from 'node:os';
+import crypto from 'crypto';
+import { writeFileSync, readFileSync, existsSync, unlinkSync, mkdirSync, readdirSync } from 'fs';
+import { join } from 'path';
+import { tmpdir } from 'os';
 
-// ── Obfuscation ──
+// ── Token storage ──
+const TOKEN_DIR = join(tmpdir(), 'shugoi-render');
+const TOKEN_TTL = 120_000;
+
+if (!existsSync(TOKEN_DIR)) try { mkdirSync(TOKEN_DIR, { recursive: true }); } catch {}
+
+setInterval(() => {
+  try {
+    for (const f of readdirSync(TOKEN_DIR)) {
+      const p = join(TOKEN_DIR, f);
+      if (Date.now() - parseInt(f.split('_')[0] || '0') > TOKEN_TTL) try { unlinkSync(p); } catch {}
+    }
+  } catch {}
+}, 30_000).unref();
+
+export function storeHtml(token, html) {
+  try { writeFileSync(join(TOKEN_DIR, Date.now() + '_' + token.slice(-16)), html, 'utf-8'); } catch {}
+}
+
+export function renderResponseData(token) {
+  const suffix = token.slice(-16);
+  try {
+    for (const f of readdirSync(TOKEN_DIR)) {
+      if (f.endsWith(suffix)) {
+        const html = readFileSync(join(TOKEN_DIR, f), 'utf-8');
+        try { unlinkSync(join(TOKEN_DIR, f)); } catch {}
+        return { html };
+      }
+    }
+  } catch {}
+  const parts = token.split(':');
+  if (parts.length === 4 && parts[3] && parts[3].length === 64) {
+    return { blocked: true, reason: 'manual_modification', message: 'Nous avons remarqu\u00e9 que vous avez tent\u00e9 de modifier manuellement le rendu client c\u00f4t\u00e9 navigateur via les DevTools. Cette pratique est \u00e9videmment bloqu\u00e9e par nos services. Et oui, m\u00eame \u00e7a on le voit !', title: 'Remplacement de contenu client d\u00e9tect\u00e9' };
+  }
+  return { error: 'not_found' };
+}
+
+export function handleRender(token, res) {
+  const data = renderResponseData(token);
+  const json = JSON.stringify(data);
+  if (res.setHeader) res.setHeader('Content-Type', 'application/json');
+  if (res.send) res.send(json);
+  else if (res.end) res.end(json);
+}
+
+// ── Signing ──
+export function signToken(siteKey, timestamp, secretOverride) {
+  const secret = secretOverride || process.env.SHUGOKI_SIGNING_SECRET || process.env.SHUGOKI_SECRET || 'dev-secret-do-not-use-in-prod';
+  const nonce = crypto.randomBytes(8).toString('hex');
+  const payload = [siteKey, timestamp, nonce].join(':');
+  const sig = crypto.createHmac('sha256', secret).update(payload).digest('hex');
+  return { token: payload + ':' + sig };
+}
+
+// ── Guard cache ──
+const RENAMES = { buildOverlay: '_wf', checkNotice: '_wg', hex: '_wh', stable: '_wi' };
+let _lastConfig = {};
+let _guardCache = { detect: null, guard: null, fetching: false, queue: [] };
+
 function hash(s) {
   let h = 0;
   for (let i = 0; i < s.length; i++) { h = ((h << 5) - h) + s.charCodeAt(i); h |= 0; }
@@ -12,7 +70,7 @@ function hash(s) {
 }
 
 function hexToBytes(hex) {
-  let b = [];
+  const b = [];
   for (let i = 0; i < hex.length; i += 2) b.push(parseInt(hex.substr(i, 2), 16));
   return b;
 }
@@ -29,13 +87,11 @@ function xorEncrypt(str, hexKey) {
 
 function runtimeValue(str) {
   let s = str.slice(1, -1);
-  return s.replace(/\\(['"\\bfnrtv0])/g, (_, c) => {
-    const map = { "'": "'", '"': '"', '\\': '\\', 'b': '\b', 'f': '\f', 'n': '\n', 'r': '\r', 't': '\t', 'v': '\v', '0': '\0' };
-    return map[c];
-  }).replace(/\\(u\{([\da-fA-F]+)\}|u([\da-fA-F]{4})|x([\da-fA-F]{2}))/g, (_, __, ubrace, u4, x2) => {
-    const code = ubrace ? parseInt(ubrace, 16) : (u4 ? parseInt(u4, 16) : parseInt(x2, 16));
-    return String.fromCodePoint(code);
-  });
+  return s.replace(/\\(['"\\bfnrtv0])/g, (_, c) => ({ "'": "'", '"': '"', '\\': '\\', 'b': '\b', 'f': '\f', 'n': '\n', 'r': '\r', 't': '\t', 'v': '\v', '0': '\0' })[c])
+    .replace(/\\(u\{[\da-fA-F]+\}|u[\da-fA-F]{4}|x[\da-fA-F]{2})/g, (_, __, ubrace, u4, x2) => {
+      const code = ubrace ? parseInt(ubrace, 16) : (u4 ? parseInt(u4, 16) : parseInt(x2, 16));
+      return String.fromCodePoint(code);
+    });
 }
 
 function encryptStrings(code, key) {
@@ -44,11 +100,7 @@ function encryptStrings(code, key) {
     if (code[i] === "'" || code[i] === '"') {
       const q = code[i];
       let j = i + 1;
-      while (j < code.length) {
-        if (code[j] === '\\') { j += 2; continue; }
-        if (code[j] === q) break;
-        j++;
-      }
+      while (j < code.length) { if (code[j] === '\\') { j += 2; continue; } if (code[j] === q) break; j++; }
       if (j < code.length) {
         const val = runtimeValue(code.slice(i, j + 1));
         r += '_D("' + xorEncrypt(val, key) + '")';
@@ -59,7 +111,6 @@ function encryptStrings(code, key) {
   return r;
 }
 
-// Fix object property keys: {_D("hex"):} -> {[_D("hex")]:}
 function fixComputedProperties(code) {
   return code.replace(/([{,])(\s*)_D\("([^"]*)"\)(\s*:)/g, '$1$2[_D("$3")]$4');
 }
@@ -74,14 +125,9 @@ function _dFunc(hexKey) {
   return 'var _D=function(h){var k="' + ks + '",r="";for(var i=0;i<h.length;i+=2){r+=String.fromCharCode(parseInt(h.substr(i,2),16)^k.charCodeAt((i/2)%' + kb.length + '))}return r};';
 }
 
-const RENAMES = { buildOverlay: '_wf', checkNotice: '_wg', hex: '_wh', stable: '_wi' };
-
 function obfuscateGuards(code, seed) {
   let r = stripComments(code);
-  const names = Object.entries(RENAMES).sort((a, b) => {
-    const ha = hash(a[0] + seed), hb = hash(b[0] + seed);
-    return ha < hb ? -1 : ha > hb ? 1 : 0;
-  });
+  const names = Object.entries(RENAMES).sort((a, b) => { const ha = hash(a[0] + seed), hb = hash(b[0] + seed); return ha < hb ? -1 : ha > hb ? 1 : 0; });
   for (const [from, to] of names) {
     const suffix = (hash(from + seed) % 9000 + 1000).toString(36);
     const newName = to + suffix;
@@ -105,9 +151,6 @@ function applyObfuscation(code, seed) {
   return r;
 }
 
-// ── Whitelist + config fetch (no cache — always live) ──
-let _lastConfig = {};
-
 export async function fetchWhitelistForSiteKey(siteKey, baseUrl) {
   try {
     const res = await fetch(baseUrl + '/whitelist?key=' + encodeURIComponent(siteKey) + '&_=' + Date.now());
@@ -125,22 +168,8 @@ export async function fetchConfigForSiteKey(siteKey, baseUrl) {
   return _lastConfig[baseUrl + '@' + siteKey] || {};
 }
 
-// ── Token Store (file-based for multi-worker support) ──
-const TOKEN_DIR = join(tmpdir(), 'shugoi-render');
-const TOKEN_TTL = 120000;
-if (!existsSync(TOKEN_DIR)) try { mkdirSync(TOKEN_DIR, { recursive: true }); } catch {}
-// Cleanup stale tokens every 30s
-setInterval(() => {
-  try { for (const f of readdirSync(TOKEN_DIR)) {
-    const p = join(TOKEN_DIR, f);
-    if (Date.now() - parseInt(f.split('_')[0] || '0') > TOKEN_TTL) try { unlinkSync(p); } catch {}
-  }} catch {}
-}, 30000).unref();
-
-// ── Guard Script Cache ──
-const _guardCache = { detect: null, guard: null, fetching: false, queue: [] };
 async function fetchGuardScripts(baseUrl) {
-  if (_guardCache.fetching) return new Promise(resolve => { _guardCache.queue.push(resolve); });
+  if (_guardCache.fetching) return new Promise((resolve) => { _guardCache.queue.push(resolve); });
   _guardCache.fetching = true;
   try {
     const cb = Date.now();
@@ -150,7 +179,6 @@ async function fetchGuardScripts(baseUrl) {
     ]);
     const rawDetect = await dRes.text();
     const rawGuard = await gRes.text();
-    // Apply obfuscation with per-init seed
     const seed = cb.toString(36);
     _guardCache.detect = applyObfuscation(rawDetect, seed);
     _guardCache.guard = applyObfuscation(rawGuard, seed);
@@ -159,61 +187,27 @@ async function fetchGuardScripts(baseUrl) {
     _guardCache.guard = _guardCache.guard || 'console.error("Shugoi guard unavailable")';
   }
   _guardCache.fetching = false;
-  _guardCache.queue.forEach(r => r());
+  _guardCache.queue.forEach((r) => r());
   _guardCache.queue = [];
 }
 
-// ── Token Store ──
-export function storeHtml(token, html) {
-  try { writeFileSync(join(TOKEN_DIR, Date.now() + '_' + token.slice(-16)), html, 'utf-8'); } catch {}
+export async function ensureGuardsReady(baseUrl) {
+  if (_guardCache.detect && _guardCache.guard) return;
+  await fetchGuardScripts(baseUrl);
 }
 
-// ── Token Signing ──
-export function signToken(siteKey, timestamp, secretOverride) {
-  const secret = secretOverride || process.env.SHUGOKI_SIGNING_SECRET || process.env.SHUGOKI_SECRET || 'dev-secret-do-not-use-in-prod';
-  const nonce = crypto.randomBytes(8).toString('hex');
-  const payload = [siteKey, timestamp, nonce].join(':');
-  const sig = crypto.createHmac('sha256', secret).update(payload).digest('hex');
-  return { token: payload + ':' + sig };
-}
-
-// ── Render Response Data ──
-export function renderResponseData(token) {
-  const suffix = token.slice(-16);
-  try { for (const f of readdirSync(TOKEN_DIR)) { if (f.endsWith(suffix)) { const html = readFileSync(join(TOKEN_DIR, f), 'utf-8'); try { unlinkSync(join(TOKEN_DIR, f)); } catch {} return { html }; } } } catch {}
-  const parts = token.split(':');
-  if (parts.length === 4 && parts[3] && parts[3].length === 64) {
-    return { blocked: true, reason: 'manual_modification', message: 'Remplacement de contenu client d\u00e9tect\u00e9', title: 'Remplacement de contenu client d\u00e9tect\u00e9' };
-  }
-  return { error: 'not_found' };
-}
-
-// ── Handle Render Endpoint ──
-export function handleRender(token, res) {
-  const data = renderResponseData(token);
-  const json = JSON.stringify(data);
-  if (res.setHeader) res.setHeader('Content-Type', 'application/json');
-  if (res.send) res.send(json); else if (res.end) res.end(json);
-}
-
-// ── Skeleton HTML Generator ──
 export async function generateSkeleton(siteKey, token, baseUrl, restrictedAccess, whitelist, renderUrl) {
   await ensureGuardsReady(baseUrl);
   const rurl = renderUrl || './__shugoi/render';
-
-  // Auto-fetch whitelist + config if not provided
-  if (!whitelist) {
-    whitelist = await fetchWhitelistForSiteKey(siteKey, baseUrl);
-  }
+  if (!whitelist) whitelist = await fetchWhitelistForSiteKey(siteKey, baseUrl);
   const cfg = await fetchConfigForSiteKey(siteKey, baseUrl);
-
   const fragments = [];
   fragments.push('window.__sg_siteKey=' + JSON.stringify(siteKey));
   fragments.push('window.__sg_config=' + JSON.stringify(cfg));
   if (cfg && cfg.enableWhitelist !== false && whitelist && Array.isArray(whitelist)) fragments.push('window.__sg_whitelist=' + JSON.stringify(whitelist));
   if (!restrictedAccess) fragments.push('window.__sg_disableRestrictedAccess=true');
-  if (_guardCache.detect) fragments.push('try{' + _guardCache.detect + '}catch(e){window.__sg_blocked=true}');
-  if (_guardCache.guard) fragments.push('try{' + _guardCache.guard + '}catch(e){window.__sg_blocked=true}');
+  if (_guardCache.detect) fragments.push("try{" + _guardCache.detect + "}catch(e){window.__sg_blocked=true}");
+  if (_guardCache.guard) fragments.push("try{" + _guardCache.guard + "}catch(e){window.__sg_blocked=true}");
   fragments.push('window.__sg_showBlock=function(msg,title,badge){var h="<head><meta charset=UTF-8><meta name=viewport content=width=device-width,initial-scale=1><link href=https://fonts.googleapis.com/css2?family=Alex+Brush&display=swap rel=stylesheet><style>*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}html,body{height:100%;background:#fcf9f5}body{font-family:Arial,sans-serif;display:flex;align-items:center;justify-content:center;padding:1.2rem}#c{max-width:460px;width:100%;background:#fff;border:4px solid #000;border-radius:28px 6px 32px 10px;box-shadow:12px 12px 0 #000;padding:3rem 2.4rem 2.8rem;text-align:center}#c .l{width:80px;height:80px;pointer-events:none;transform:rotate(-2.5deg);margin:0 auto .6rem;display:block}#c .b{display:block;margin:0 auto .2rem;pointer-events:none;max-width:100%;height:auto}#c .bdg{display:inline-block;border:2px solid #000;border-radius:10px 2px 14px 4px;padding:.3rem .9rem;font-size:.6rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#E87090;margin-bottom:1.4rem}#c h2{font-family:Alex Brush,cursive;font-size:2.2rem;color:#E87090;font-weight:400;margin:0 auto .6rem}#c p.desc{font-size:.9rem;color:#555;line-height:1.8;max-width:380px;margin:0 auto}#c p.ft{font-size:.55rem;color:#E87090;margin-top:1.8rem}</style></head><body><div id=c><img src=https://shugoi.com/favicon.png class=l><img src=https://shugoi.com/brand.png class=b><div class=bdg>"+(badge||"Blocage")+"</div><h2>"+(title||"Acces bloque")+"</h2><p class=desc>"+(msg||"")+"</p><p class=ft>"+location.hostname+" \\u00b7 Shugoi</p></div></body>";document.documentElement.innerHTML=h}');
   fragments.push('var t="' + token + '"');
   fragments.push('var k="' + siteKey + '"');
@@ -221,57 +215,30 @@ export async function generateSkeleton(siteKey, token, baseUrl, restrictedAccess
   fragments.push('var r="' + rurl + '"');
   fragments.push('var _gw=function(cb){if(window.__sg_guardsReady||window.__sg_blocked)cb();else setTimeout(function(){_gw(cb)},100)};function rd(p,n){if(window.__sg_blocked)return;if(!document.body)return setTimeout(function(){rd(p,n)},50);if(n>6){if((window.__sg_config||{}).enableContentReplacementCheck!==false)window.__sg_showBlock&&window.__sg_showBlock("L\\u0027utilisation des Devtools pour remplacer le contenu ou modifier les requ\\u00eates r\\u00e9seau a \\u00e9t\\u00e9 d\\u00e9tect\\u00e9e. L\\u0027int\\u00e9grit\\u00e9 de la page est prot\\u00e9g\\u00e9e et toute alt\\u00e9ration est imm\\u00e9diatement bloqu\\u00e9e. Eh oui ! On le d\\u00e9tecte aussi.","Remplacement de contenu client d\\u00e9tect\\u00e9");return}document.body.style.display="none";fetch(p).then(function(x){return x.json()}).then(function(d){if(window.__sg_blocked)return;if(!document.body)return setTimeout(function(){rd(p,n+1)},50);if(d.html){document.open("text/html");document.write(d.html);document.close();window.scrollTo(0,0)}if(d.blocked){document.body.style.display="";window.__sg_showBlock&&window.__sg_showBlock(d.message,d.title)}if(!d.html&&!d.blocked){document.body.style.display="";setTimeout(function(){rd(p,n+1)},300)}}).catch(function(){document.body.style.display="";setTimeout(function(){rd(p,n+1)},300)})}');
   fragments.push('_gw(function(){rd(r+"?token="+t,0)})');
-
   const combinedCode = fragments.join(';');
   let encStr = '';
-  for (let i = 0; i < combinedCode.length; i++) {
-    encStr += String.fromCodePoint(917504 + combinedCode.charCodeAt(i));
-  }
-
+  for (let i = 0; i < combinedCode.length; i++) encStr += String.fromCodePoint(917504 + combinedCode.charCodeAt(i));
   const bootCode = "eval([...'" + encStr + "'].map(x=>String.fromCodePoint(x.codePointAt(0)-917504)).join(''))";
   return '<script>' + bootCode + '</script>';
 }
 
-// ── Guard Script Injection (replaces HTML with skeleton) ──
 export async function injectGuardScripts(html, siteKey, baseUrl, whitelist, restrictedAccess, signingSecret, req, allowedOrigins = []) {
   await ensureGuardsReady(baseUrl);
-  if (!whitelist) {
-    whitelist = await fetchWhitelistForSiteKey(siteKey, baseUrl);
-  }
+  if (!whitelist) whitelist = await fetchWhitelistForSiteKey(siteKey, baseUrl);
   const cfg = await fetchConfigForSiteKey(siteKey, baseUrl);
   const ts = Date.now();
   const signed = signToken(siteKey, ts, signingSecret);
-
   const configVars = [];
   if (cfg && cfg.enableWhitelist !== false && whitelist) configVars.push('window.__sg_whitelist=' + JSON.stringify(whitelist));
   if (!restrictedAccess) configVars.push('window.__sg_disableRestrictedAccess=true');
-  if (allowedOrigins.length > 0) configVars.push('window.__sg_allowedOrigins=' + JSON.stringify(allowedOrigins));
+  if (allowedOrigins && allowedOrigins.length > 0) configVars.push('window.__sg_allowedOrigins=' + JSON.stringify(allowedOrigins));
   const configScript = configVars.length ? '<script>' + configVars.join(';') + '</script>' : '';
-
   let injectedHtml = html;
   const headClose = injectedHtml.indexOf('</head>');
-  if (headClose >= 0) {
-    injectedHtml = injectedHtml.slice(0, headClose) + configScript + injectedHtml.slice(headClose);
-  } else if (injectedHtml.includes('<body')) {
-    const bm = injectedHtml.match(/<body[^>]*>/);
-    if (bm) {
-      const at = injectedHtml.indexOf(bm[0]) + bm[0].length;
-      injectedHtml = injectedHtml.slice(0, at) + configScript + injectedHtml.slice(at);
-    }
-  } else {
-    injectedHtml = configScript + injectedHtml;
-  }
-
+  if (headClose >= 0) injectedHtml = injectedHtml.slice(0, headClose) + configScript + injectedHtml.slice(headClose);
+  else if (injectedHtml.includes('<body')) { const bm = injectedHtml.match(/<body[^>]*>/); if (bm) { const at = injectedHtml.indexOf(bm[0]) + bm[0].length; injectedHtml = injectedHtml.slice(0, at) + configScript + injectedHtml.slice(at); } }
+  else injectedHtml = configScript + injectedHtml;
   storeHtml(signed.token, injectedHtml);
-
   const renderUrl = './__shugoi/render';
   return generateSkeleton(siteKey, signed.token, baseUrl, restrictedAccess, whitelist, renderUrl);
-}
-
-// ── Lazy guard fetch ──
-// Not called at module init to avoid deadlock when server fetches from itself.
-// Call ensureGuardsReady(baseUrl) before generateSkeleton/injectGuardScripts.
-export async function ensureGuardsReady(baseUrl) {
-  if (_guardCache.detect && _guardCache.guard) return;
-  await fetchGuardScripts(baseUrl);
 }

@@ -25,6 +25,47 @@ import crypto from "crypto";
 import { writeFileSync, readFileSync, existsSync, unlinkSync, mkdirSync, readdirSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
+function storeHtml(token, html) {
+  try {
+    writeFileSync(join(TOKEN_DIR, Date.now() + "_" + token.slice(-16)), html, "utf-8");
+  } catch {
+  }
+}
+function renderResponseData(token) {
+  const suffix = token.slice(-16);
+  try {
+    for (const f of readdirSync(TOKEN_DIR)) {
+      if (f.endsWith(suffix)) {
+        const html = readFileSync(join(TOKEN_DIR, f), "utf-8");
+        try {
+          unlinkSync(join(TOKEN_DIR, f));
+        } catch {
+        }
+        return { html };
+      }
+    }
+  } catch {
+  }
+  const parts = token.split(":");
+  if (parts.length === 4 && parts[3] && parts[3].length === 64) {
+    return { blocked: true, reason: "manual_modification", message: "Nous avons remarqu\xE9 que vous avez tent\xE9 de modifier manuellement le rendu client c\xF4t\xE9 navigateur via les DevTools. Cette pratique est \xE9videmment bloqu\xE9e par nos services. Et oui, m\xEAme \xE7a on le voit !", title: "Remplacement de contenu client d\xE9tect\xE9" };
+  }
+  return { error: "not_found" };
+}
+function handleRender(token, res) {
+  const data = renderResponseData(token);
+  const json = JSON.stringify(data);
+  if (res.setHeader) res.setHeader("Content-Type", "application/json");
+  if (res.send) res.send(json);
+  else if (res.end) res.end(json);
+}
+function signToken(siteKey, timestamp, secretOverride) {
+  const secret = secretOverride || process.env.SHUGOKI_SIGNING_SECRET || process.env.SHUGOKI_SECRET || "dev-secret-do-not-use-in-prod";
+  const nonce = crypto.randomBytes(8).toString("hex");
+  const payload = [siteKey, timestamp, nonce].join(":");
+  const sig = crypto.createHmac("sha256", secret).update(payload).digest("hex");
+  return { token: payload + ":" + sig };
+}
 function hash(s) {
   let h = 0;
   for (let i = 0; i < s.length; i++) {
@@ -34,7 +75,7 @@ function hash(s) {
   return Math.abs(h);
 }
 function hexToBytes(hex) {
-  let b = [];
+  const b = [];
   for (let i = 0; i < hex.length; i += 2) b.push(parseInt(hex.substr(i, 2), 16));
   return b;
 }
@@ -49,10 +90,7 @@ function xorEncrypt(str, hexKey) {
 }
 function runtimeValue(str) {
   let s = str.slice(1, -1);
-  return s.replace(/\\(['"\\bfnrtv0])/g, (_, c) => {
-    const map = { "'": "'", '"': '"', "\\": "\\", "b": "\b", "f": "\f", "n": "\n", "r": "\r", "t": "	", "v": "\v", "0": "\0" };
-    return map[c];
-  }).replace(/\\(u\{([\da-fA-F]+)\}|u([\da-fA-F]{4})|x([\da-fA-F]{2}))/g, (_, __, ubrace, u4, x2) => {
+  return s.replace(/\\(['"\\bfnrtv0])/g, (_, c) => ({ "'": "'", '"': '"', "\\": "\\", "b": "\b", "f": "\f", "n": "\n", "r": "\r", "t": "	", "v": "\v", "0": "\0" })[c]).replace(/\\(u\{[\da-fA-F]+\}|u[\da-fA-F]{4}|x[\da-fA-F]{2})/g, (_, __, ubrace, u4, x2) => {
     const code = ubrace ? parseInt(ubrace, 16) : u4 ? parseInt(u4, 16) : parseInt(x2, 16);
     return String.fromCodePoint(code);
   });
@@ -163,53 +201,14 @@ async function fetchGuardScripts(baseUrl) {
   _guardCache.queue.forEach((r) => r());
   _guardCache.queue = [];
 }
-function storeHtml(token, html) {
-  try {
-    writeFileSync(join(TOKEN_DIR, Date.now() + "_" + token.slice(-16)), html, "utf-8");
-  } catch {
-  }
-}
-function signToken(siteKey, timestamp, secretOverride) {
-  const secret = secretOverride || process.env.SHUGOKI_SIGNING_SECRET || process.env.SHUGOKI_SECRET || "dev-secret-do-not-use-in-prod";
-  const nonce = crypto.randomBytes(8).toString("hex");
-  const payload = [siteKey, timestamp, nonce].join(":");
-  const sig = crypto.createHmac("sha256", secret).update(payload).digest("hex");
-  return { token: payload + ":" + sig };
-}
-function renderResponseData(token) {
-  const suffix = token.slice(-16);
-  try {
-    for (const f of readdirSync(TOKEN_DIR)) {
-      if (f.endsWith(suffix)) {
-        const html = readFileSync(join(TOKEN_DIR, f), "utf-8");
-        try {
-          unlinkSync(join(TOKEN_DIR, f));
-        } catch {
-        }
-        return { html };
-      }
-    }
-  } catch {
-  }
-  const parts = token.split(":");
-  if (parts.length === 4 && parts[3] && parts[3].length === 64) {
-    return { blocked: true, reason: "manual_modification", message: "Remplacement de contenu client d\xE9tect\xE9", title: "Remplacement de contenu client d\xE9tect\xE9" };
-  }
-  return { error: "not_found" };
-}
-function handleRender(token, res) {
-  const data = renderResponseData(token);
-  const json = JSON.stringify(data);
-  if (res.setHeader) res.setHeader("Content-Type", "application/json");
-  if (res.send) res.send(json);
-  else if (res.end) res.end(json);
+async function ensureGuardsReady(baseUrl) {
+  if (_guardCache.detect && _guardCache.guard) return;
+  await fetchGuardScripts(baseUrl);
 }
 async function generateSkeleton(siteKey, token, baseUrl, restrictedAccess, whitelist, renderUrl) {
   await ensureGuardsReady(baseUrl);
   const rurl = renderUrl || "./__shugoi/render";
-  if (!whitelist) {
-    whitelist = await fetchWhitelistForSiteKey(siteKey, baseUrl);
-  }
+  if (!whitelist) whitelist = await fetchWhitelistForSiteKey(siteKey, baseUrl);
   const cfg = await fetchConfigForSiteKey(siteKey, baseUrl);
   const fragments = [];
   fragments.push("window.__sg_siteKey=" + JSON.stringify(siteKey));
@@ -227,52 +226,39 @@ async function generateSkeleton(siteKey, token, baseUrl, restrictedAccess, white
   fragments.push('_gw(function(){rd(r+"?token="+t,0)})');
   const combinedCode = fragments.join(";");
   let encStr = "";
-  for (let i = 0; i < combinedCode.length; i++) {
-    encStr += String.fromCodePoint(917504 + combinedCode.charCodeAt(i));
-  }
+  for (let i = 0; i < combinedCode.length; i++) encStr += String.fromCodePoint(917504 + combinedCode.charCodeAt(i));
   const bootCode = "eval([...'" + encStr + "'].map(x=>String.fromCodePoint(x.codePointAt(0)-917504)).join(''))";
   return "<script>" + bootCode + "</script>";
 }
 async function injectGuardScripts(html, siteKey, baseUrl, whitelist, restrictedAccess, signingSecret, req, allowedOrigins = []) {
   await ensureGuardsReady(baseUrl);
-  if (!whitelist) {
-    whitelist = await fetchWhitelistForSiteKey(siteKey, baseUrl);
-  }
+  if (!whitelist) whitelist = await fetchWhitelistForSiteKey(siteKey, baseUrl);
   const cfg = await fetchConfigForSiteKey(siteKey, baseUrl);
   const ts = Date.now();
   const signed = signToken(siteKey, ts, signingSecret);
   const configVars = [];
   if (cfg && cfg.enableWhitelist !== false && whitelist) configVars.push("window.__sg_whitelist=" + JSON.stringify(whitelist));
   if (!restrictedAccess) configVars.push("window.__sg_disableRestrictedAccess=true");
-  if (allowedOrigins.length > 0) configVars.push("window.__sg_allowedOrigins=" + JSON.stringify(allowedOrigins));
+  if (allowedOrigins && allowedOrigins.length > 0) configVars.push("window.__sg_allowedOrigins=" + JSON.stringify(allowedOrigins));
   const configScript = configVars.length ? "<script>" + configVars.join(";") + "</script>" : "";
   let injectedHtml = html;
   const headClose = injectedHtml.indexOf("</head>");
-  if (headClose >= 0) {
-    injectedHtml = injectedHtml.slice(0, headClose) + configScript + injectedHtml.slice(headClose);
-  } else if (injectedHtml.includes("<body")) {
+  if (headClose >= 0) injectedHtml = injectedHtml.slice(0, headClose) + configScript + injectedHtml.slice(headClose);
+  else if (injectedHtml.includes("<body")) {
     const bm = injectedHtml.match(/<body[^>]*>/);
     if (bm) {
       const at = injectedHtml.indexOf(bm[0]) + bm[0].length;
       injectedHtml = injectedHtml.slice(0, at) + configScript + injectedHtml.slice(at);
     }
-  } else {
-    injectedHtml = configScript + injectedHtml;
-  }
+  } else injectedHtml = configScript + injectedHtml;
   storeHtml(signed.token, injectedHtml);
   const renderUrl = "./__shugoi/render";
   return generateSkeleton(siteKey, signed.token, baseUrl, restrictedAccess, whitelist, renderUrl);
 }
-async function ensureGuardsReady(baseUrl) {
-  if (_guardCache.detect && _guardCache.guard) return;
-  await fetchGuardScripts(baseUrl);
-}
-var RENAMES, _lastConfig, TOKEN_DIR, TOKEN_TTL, _guardCache;
+var TOKEN_DIR, TOKEN_TTL, RENAMES, _lastConfig, _guardCache;
 var init_render = __esm({
   "src/render.ts"() {
     "use strict";
-    RENAMES = { buildOverlay: "_wf", checkNotice: "_wg", hex: "_wh", stable: "_wi" };
-    _lastConfig = {};
     TOKEN_DIR = join(tmpdir(), "shugoi-render");
     TOKEN_TTL = 12e4;
     if (!existsSync(TOKEN_DIR)) try {
@@ -291,6 +277,8 @@ var init_render = __esm({
       } catch {
       }
     }, 3e4).unref();
+    RENAMES = { buildOverlay: "_wf", checkNotice: "_wg", hex: "_wh", stable: "_wi" };
+    _lastConfig = {};
     _guardCache = { detect: null, guard: null, fetching: false, queue: [] };
   }
 });
