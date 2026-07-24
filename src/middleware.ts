@@ -73,6 +73,8 @@ export function createShugoiMiddleware(options) {
   const autoInject = options.autoInject ?? true;
   const restrictedAccess = options.restrictedAccess ?? false;
   const signingSecret = options.signingSecret;
+  // Pre-fetch guard scripts so first request doesn't block
+  ensureGuardsReady(baseUrl).catch(() => {});
   const csp = buildCsp({ siteKey: options.siteKey, extraDirectives: {} });
 
   function log(...args) { if (debug) console.log('[shugoi]', ...args); }
@@ -107,11 +109,10 @@ export function createShugoiMiddleware(options) {
       if (flags.enableRateLimit !== false) {
         try {
           const ip = req.headers?.['x-forwarded-for']?.split(',')[0]?.trim() || req.ip || 'unknown';
-          const rlUrl = baseUrl + '/check';
-          const rlRes = await fetch(rlUrl, {
+          const rlRes = await fetch(baseUrl + '/rate-limit-check', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ siteKey: options.siteKey, action: 'api_call', fingerprint: { browser: ip }, signals: {}, metadata: { ip, middleware: true } }),
+            body: JSON.stringify({ siteKey: options.siteKey, fingerprint: { browser: ip }, metadata: { ip, userAgent: req.headers?.['user-agent'] || '', middleware: true } }),
             signal: AbortSignal.timeout(2000)
           });
           if (rlRes.ok) {
@@ -194,6 +195,8 @@ export function createShugoiPlugin(options) {
   const debug = options.debug ?? false;
   const restrictedAccess = options.restrictedAccess ?? false;
   const signingSecret = options.signingSecret;
+  // Pre-fetch guard scripts so first request doesn't block
+  ensureGuardsReady(baseUrl).catch(() => {});
   const csp = buildCsp({ siteKey: options.siteKey, extraDirectives: {} });
 
   function log(...args) { if (debug) console.log('[shugoi]', ...args); }
@@ -234,11 +237,10 @@ export function createShugoiPlugin(options) {
         if (flags.enableRateLimit !== false) {
           try {
             const ip = request.headers['x-forwarded-for']?.split(',')[0]?.trim() || request.ip || 'unknown';
-            const rlUrl = baseUrl + '/check';
-            const rlRes = await fetch(rlUrl, {
+            const rlRes = await fetch(baseUrl + '/rate-limit-check', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ siteKey: options.siteKey, action: 'api_call', fingerprint: { browser: ip }, signals: {}, metadata: { ip, middleware: true } }),
+              body: JSON.stringify({ siteKey: options.siteKey, fingerprint: { browser: ip }, metadata: { ip, userAgent: request.headers['user-agent'] || '', middleware: true } }),
               signal: AbortSignal.timeout(2000)
             });
             if (rlRes.ok) {
