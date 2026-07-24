@@ -74,66 +74,8 @@ function hash(s) {
   }
   return Math.abs(h);
 }
-function hexToBytes(hex) {
-  const b = [];
-  for (let i = 0; i < hex.length; i += 2) b.push(parseInt(hex.substr(i, 2), 16));
-  return b;
-}
-function xorEncrypt(str, hexKey) {
-  const kb = hexToBytes(hexKey);
-  let enc = "";
-  for (let i = 0; i < str.length; i++) {
-    let cc = str.charCodeAt(i) ^ kb[i % kb.length];
-    enc += cc.toString(16).padStart(2, "0");
-  }
-  return enc;
-}
-function runtimeValue(str) {
-  let s = str.slice(1, -1);
-  return s.replace(/\\(['"\\bfnrtv0])/g, (_, c) => ({ "'": "'", '"': '"', "\\": "\\", "b": "\b", "f": "\f", "n": "\n", "r": "\r", "t": "	", "v": "\v", "0": "\0" })[c]).replace(/\\(u\{[\da-fA-F]+\}|u[\da-fA-F]{4}|x[\da-fA-F]{2})/g, (_, __, ubrace, u4, x2) => {
-    const code = ubrace ? parseInt(ubrace, 16) : u4 ? parseInt(u4, 16) : parseInt(x2, 16);
-    return String.fromCodePoint(code);
-  });
-}
-function encryptStrings(code, key) {
-  let r = "", i = 0;
-  while (i < code.length) {
-    if (code[i] === "'" || code[i] === '"') {
-      const q = code[i];
-      let j = i + 1;
-      while (j < code.length) {
-        if (code[j] === "\\") {
-          j += 2;
-          continue;
-        }
-        if (code[j] === q) break;
-        j++;
-      }
-      if (j < code.length) {
-        const val = runtimeValue(code.slice(i, j + 1));
-        r += '_D("' + xorEncrypt(val, key) + '")';
-        i = j + 1;
-      } else {
-        r += code[i];
-        i++;
-      }
-    } else {
-      r += code[i];
-      i++;
-    }
-  }
-  return r;
-}
-function fixComputedProperties(code) {
-  return code.replace(/([{,])(\s*)_D\("([^"]*)"\)(\s*:)/g, '$1$2[_D("$3")]$4');
-}
 function stripComments(s) {
   return s.replace(/^\s*\/\/.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "").replace(/\n{3,}/g, "\n\n");
-}
-function _dFunc(hexKey) {
-  let kb = hexToBytes(hexKey);
-  let ks = kb.map((b) => "\\x" + b.toString(16).padStart(2, "0")).join("");
-  return 'var _D=function(h){var k="' + ks + '",r="";for(var i=0;i<h.length;i+=2){r+=String.fromCharCode(parseInt(h.substr(i,2),16)^k.charCodeAt((i/2)%' + kb.length + "))}return r};";
 }
 function obfuscateGuards(code, seed) {
   let r = stripComments(code);
@@ -148,17 +90,9 @@ function obfuscateGuards(code, seed) {
   }
   return r;
 }
-function deriveKey(seed) {
-  const shasum = crypto.createHash("sha256");
-  return shasum.update(seed + "sg_val_v1").digest("hex").slice(0, 32);
-}
 function applyObfuscation(code, seed) {
   let r = obfuscateGuards(code, seed);
-  const encKey = deriveKey(seed);
-  r = encryptStrings(r, encKey);
-  r = r.replace(/^\s*\(function\(\)\{/, (m) => m + _dFunc(encKey));
   r = r.replace(/<\/(script|style)/gi, "<\\/$1");
-  r = fixComputedProperties(r);
   return r;
 }
 async function fetchWhitelistForSiteKey(siteKey, baseUrl) {

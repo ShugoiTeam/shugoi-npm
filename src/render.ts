@@ -143,11 +143,7 @@ function deriveKey(seed) {
 
 function applyObfuscation(code, seed) {
   let r = obfuscateGuards(code, seed);
-  const encKey = deriveKey(seed);
-  r = encryptStrings(r, encKey);
-  r = r.replace(/^\s*\(function\(\)\{/, (m) => m + _dFunc(encKey));
   r = r.replace(/<\/(script|style)/gi, '<\\/$1');
-  r = fixComputedProperties(r);
   return r;
 }
 
