@@ -107,7 +107,8 @@ export function createShugoiMiddleware(options) {
       if (flags.enableRateLimit !== false) {
         try {
           const ip = req.headers?.['x-forwarded-for']?.split(',')[0]?.trim() || req.ip || 'unknown';
-          const rlRes = await fetch('http://localhost:3002/api/v1/check', {
+          const rlUrl = options.checkUrl || baseUrl + '/check';
+          const rlRes = await fetch(rlUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ siteKey: options.siteKey, action: 'api_call', fingerprint: { browser: ip }, signals: {}, metadata: { ip, middleware: true } }),
@@ -233,7 +234,8 @@ export function createShugoiPlugin(options) {
         if (flags.enableRateLimit !== false) {
           try {
             const ip = request.headers['x-forwarded-for']?.split(',')[0]?.trim() || request.ip || 'unknown';
-            const rlRes = await fetch('http://localhost:3002/api/v1/check', {
+            const rlUrl = options.checkUrl || baseUrl + '/check';
+            const rlRes = await fetch(rlUrl, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ siteKey: options.siteKey, action: 'api_call', fingerprint: { browser: ip }, signals: {}, metadata: { ip, middleware: true } }),
@@ -241,14 +243,14 @@ export function createShugoiPlugin(options) {
             });
             if (rlRes.ok) {
               const rlData = await rlRes.json();
-               if (rlData.allowed === false) {
-                 const remain = Math.max(0, Math.ceil((rlData.resetAt - Date.now()) / 1000));
-                 const mins = Math.floor(remain / 60);
-                 const secs = remain % 60;
-                 const timeStr = mins > 0 ? mins + ' min' + (mins > 1 ? 's' : '') + (secs > 0 ? ' ' + secs + ' s' : '') : secs + ' seconde' + (secs > 1 ? 's' : '');
-                 reply.code(429).type('text/html').send(shieldPage('Trop de requ\u00eates', "Vous avez effectu\u00e9 trop de requ\u00eates en peu de temps. Il reste " + timeStr + " avant de pouvoir r\u00e9essayer.", 'Rate Limit', request.headers?.host));
-                 return;
-               }
+              if (rlData.allowed === false) {
+                const remain = Math.max(0, Math.ceil((rlData.resetAt - Date.now()) / 1000));
+                const mins = Math.floor(remain / 60);
+                const secs = remain % 60;
+                const timeStr = mins > 0 ? mins + ' min' + (mins > 1 ? 's' : '') + (secs > 0 ? ' ' + secs + ' s' : '') : secs + ' seconde' + (secs > 1 ? 's' : '');
+                reply.code(429).type('text/html').send(shieldPage('Trop de requ\u00eates', "Vous avez effectu\u00e9 trop de requ\u00eates en peu de temps. Il reste " + timeStr + " avant de pouvoir r\u00e9essayer.", 'Rate Limit', request.headers?.host));
+                return;
+              }
             }
           } catch (e) {}
         }

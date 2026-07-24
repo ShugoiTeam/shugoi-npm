@@ -414,7 +414,8 @@ function createShugoiMiddleware(options) {
       if (flags.enableRateLimit !== false) {
         try {
           const ip = req.headers?.["x-forwarded-for"]?.split(",")[0]?.trim() || req.ip || "unknown";
-          const rlRes = await fetch("http://localhost:3002/api/v1/check", {
+          const rlUrl = options.checkUrl || baseUrl + "/check";
+          const rlRes = await fetch(rlUrl, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ siteKey: options.siteKey, action: "api_call", fingerprint: { browser: ip }, signals: {}, metadata: { ip, middleware: true } }),
@@ -545,7 +546,8 @@ function createShugoiPlugin(options) {
         if (flags.enableRateLimit !== false) {
           try {
             const ip = request.headers["x-forwarded-for"]?.split(",")[0]?.trim() || request.ip || "unknown";
-            const rlRes = await fetch("http://localhost:3002/api/v1/check", {
+            const rlUrl = options.checkUrl || baseUrl + "/check";
+            const rlRes = await fetch(rlUrl, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ siteKey: options.siteKey, action: "api_call", fingerprint: { browser: ip }, signals: {}, metadata: { ip, middleware: true } }),
