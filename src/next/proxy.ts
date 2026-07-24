@@ -1,20 +1,14 @@
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-import { NextResponse } from "next/server";
-import type { NextRequest } from "next/server";
+import { NextResponse } from "next/server.js";
+import type { NextRequest } from "next/server.js";
+import { injectGuardScripts, storeHtml, signToken } from "../render";
 
-/**
- * Options for {@link createShugoiProxy}.
- */
 export interface ShugoiProxyOptions {
-  /** Paths that bypass the anti-headless block. @default ["/legal"] */
+  siteKey: string;
   allowlist?: string[];
-  /**
-   * Local whitelist of machine IDs.
-   * Empty array `[]` allows all machines.
-   */
   whitelist?: string[];
-  /** Headless User-Agent patterns. @default curl, wget, python... */
   headlessPatterns?: RegExp[];
+  /** Internal URL to fetch page content (e.g. "http://127.0.0.1:3009") */
+  target?: string;
 }
 
 const DEFAULT_HEADLESS = [
@@ -22,31 +16,26 @@ const DEFAULT_HEADLESS = [
   /^Java\//, /HTTPie/i, /^node-fetch/i, /axios/i,
   /^okhttp/i, /^scrapy/i, /PowerShell/i, /WinHttp/i,
 ];
+const BASE_URL = "https://shugoi.com/api/v1";
 
-/**
- * Creates a Next.js proxy function for Shugoi anti-bot protection.
- *
- * Use in `src/proxy.ts` (Next.js 16+):
- *
- * ```ts
- * import { createShugoiProxy } from "shugoi/next";
- * export const proxy = createShugoiProxy();
- * export const config = { matcher: "/((?!_next/static|_next/image|favicon.ico).*)" };
- * ```
- *
- * @param options - Proxy configuration
- * @returns Next.js proxy function
- */
-export function createShugoiProxy(options: ShugoiProxyOptions = {}) {
+export function createShugoiProxy(options: ShugoiProxyOptions) {
+  const { siteKey, target } = options;
   const allowlist = options.allowlist ?? ["/legal"];
   const headless = options.headlessPatterns ?? DEFAULT_HEADLESS;
 
-  return function proxy(request: NextRequest) {
+  return async function proxy(request: NextRequest) {
     const path = request.nextUrl.pathname;
+    const accept = request.headers.get("accept") || "";
+
+    // Prevent recursion on internal sub-requests
+    if (request.headers.get("x-shugoi-internal") === "1")
+      return NextResponse.next();
+
     if (path.startsWith("/_next/") || path.startsWith("/api/"))
       return NextResponse.next();
     if (allowlist.some((p) => path === p || path.startsWith(p + "/")))
       return NextResponse.next();
+
     const ua = request.headers.get("user-agent") || "";
     if (headless.some((p) => p.test(ua))) {
       const block = [
@@ -64,6 +53,43 @@ export function createShugoiProxy(options: ShugoiProxyOptions = {}) {
       ].join('\n') + '\n';
       return new NextResponse(block, { status: 200 });
     }
-    return NextResponse.next();
+
+    // Split-render: inject guard skeleton for HTML pages
+    if (!accept.includes("text/html")) return NextResponse.next();
+
+    try {
+      const fetchUrl = target ? target + path : new URL(path, request.url).toString();
+      const pageRes = await fetch(fetchUrl, {
+        headers: {
+          accept: "text/html",
+          "user-agent": "Shugoi",
+          cookie: request.headers.get("cookie") || "",
+          "x-shugoi-internal": "1",
+        },
+        signal: AbortSignal.timeout(10000),
+      });
+
+      if (!pageRes.ok) return NextResponse.next();
+
+      const html = await pageRes.text();
+      const ts = Date.now();
+      const signed = signToken(siteKey, ts, undefined);
+      storeHtml(signed.token, html);
+
+      const skeleton = await injectGuardScripts(
+        html, siteKey, BASE_URL, undefined, false, undefined,
+        { url: path }
+      );
+
+      return new NextResponse(skeleton, {
+        status: 200,
+        headers: {
+          "content-type": "text/html; charset=utf-8",
+          "cache-control": "private, no-cache, no-store, max-age=0, must-revalidate",
+        },
+      });
+    } catch {
+      return NextResponse.next();
+    }
   };
 }

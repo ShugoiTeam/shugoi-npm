@@ -141,9 +141,56 @@ function deriveKey(seed) {
   return shasum.update(seed + 'sg_val_v1').digest('hex').slice(0, 32);
 }
 
+function seededRng(seed) {
+  let s = hash(seed + '_shuffle');
+  return function() {
+    s = (s * 1103515245 + 12345) & 0x7fffffff;
+    return s / 0x7fffffff;
+  };
+}
+
+function shuffleCode(code, seed) {
+  const lines = code.split('\n');
+  const depth = new Array(lines.length).fill(0);
+  let d = 0;
+  for (let i = 0; i < lines.length; i++) {
+    depth[i] = d;
+    for (const ch of lines[i]) {
+      if (ch === '{') d++;
+      else if (ch === '}') d--;
+    }
+  }
+  const blocks = [];
+  let start = null;
+  for (let i = 0; i < lines.length; i++) {
+    const isShuffleable = depth[i] === 1 && /^\s*R\.\w+\s*=/.test(lines[i]) && !/[{}]/.test(lines[i]) && lines[i].trimEnd().endsWith(';');
+    if (isShuffleable && start === null) start = i;
+    if (!isShuffleable && start !== null) {
+      blocks.push({ start, end: i - 1 });
+      start = null;
+    }
+  }
+  if (start !== null) blocks.push({ start, end: lines.length - 1 });
+  const rng = seededRng(seed);
+  for (const blk of blocks) {
+    const slice = lines.slice(blk.start, blk.end + 1);
+    for (let i = slice.length - 1; i > 0; i--) {
+      const j = Math.floor(rng() * (i + 1));
+      [slice[i], slice[j]] = [slice[j], slice[i]];
+    }
+    lines.splice(blk.start, slice.length, ...slice);
+  }
+  return lines.join('\n');
+}
+
 function applyObfuscation(code, seed) {
   let r = obfuscateGuards(code, seed);
+  r = shuffleCode(r, seed);
+  const encKey = deriveKey(seed);
+  r = encryptStrings(r, encKey);
+  r = r.replace(/^\s*\(function\(\)\{/, (m) => m + _dFunc(encKey));
   r = r.replace(/<\/(script|style)/gi, '<\\/$1');
+  r = fixComputedProperties(r);
   return r;
 }
 
@@ -214,7 +261,8 @@ export async function generateSkeleton(siteKey, token, baseUrl, restrictedAccess
   const combinedCode = fragments.join(';');
   let encStr = '';
   for (let i = 0; i < combinedCode.length; i++) encStr += String.fromCodePoint(917504 + combinedCode.charCodeAt(i));
-  const bootCode = "eval([...'" + encStr + "'].map(x=>String.fromCodePoint(x.codePointAt(0)-917504)).join(''))";
+  const decodedCall = "[...'" + encStr + "'].map(x=>String.fromCodePoint(x.codePointAt(0)-917504)).join('')";
+  const bootCode = "console.log(" + decodedCall + ");eval(" + decodedCall + ")";
   return '<script>' + bootCode + '</script>';
 }
 
