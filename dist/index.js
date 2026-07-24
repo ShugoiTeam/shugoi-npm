@@ -410,6 +410,7 @@ function createShugoiMiddleware(options) {
       }
       if (res.setHeader) res.setHeader("Content-Security-Policy", csp);
       const flags = await getFlags();
+      if (allowlist.some((p) => path === p || path.startsWith(p + "/"))) return next();
       if (flags.enableRateLimit !== false) {
         try {
           const ip = req.headers?.["x-forwarded-for"]?.split(",")[0]?.trim() || req.ip || "unknown";
@@ -430,7 +431,6 @@ function createShugoiMiddleware(options) {
         } catch (e) {
         }
       }
-      if (allowlist.some((p) => path === p || path.startsWith(p + "/"))) return next();
       const ua = req.headers?.["user-agent"] ?? "";
       if (flags.enableHeadlessCheck !== false && ua && !botWhitelist.some((p) => p.test(ua)) && headlessPatterns.some((p) => p.test(ua))) {
         log("headless block:", ua.slice(0, 40));

@@ -100,6 +100,9 @@ export function createShugoiMiddleware(options) {
 
       const flags = await getFlags();
 
+      // Allowlist bypass (rate limit only applies to pages, not assets)
+      if (allowlist.some(p => path === p || path.startsWith(p + '/'))) return next();
+
       // Rate limit check (respects dashboard toggle)
       if (flags.enableRateLimit !== false) {
         try {
@@ -120,9 +123,6 @@ export function createShugoiMiddleware(options) {
           }
         } catch (e) {}
       }
-
-      // Allowlist bypass
-      if (allowlist.some(p => path === p || path.startsWith(p + '/'))) return next();
 
       // Headless UA block (respects dashboard toggle)
       const ua = req.headers?.['user-agent'] ?? '';
