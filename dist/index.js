@@ -383,6 +383,41 @@ function createShugoiMiddleware(options) {
   const autoInject = options.autoInject ?? true;
   const restrictedAccess = options.restrictedAccess ?? false;
   const signingSecret = options.signingSecret;
+  const siteSecret = options.secret;
+  let _validationValid = false;
+  let _validationFailed = false;
+  let _validationAllowedOrigins = [];
+  (async () => {
+    if (siteSecret && baseUrl) {
+      try {
+        const res = await fetch(baseUrl + "/validate-key", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ siteKey: options.siteKey, secret: siteSecret }),
+          signal: AbortSignal.timeout(5e3)
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.valid) {
+            _validationValid = true;
+            _validationAllowedOrigins = data.allowedOrigins || [];
+            if (debug) console.log("[shugoi] key validation OK");
+          } else {
+            _validationFailed = true;
+            console.warn("[shugoi] KEY VALIDATION FAILED:", data.reason || "unknown");
+          }
+        } else {
+          _validationFailed = true;
+          console.warn("[shugoi] KEY VALIDATION FAILED: HTTP", res.status);
+        }
+      } catch (e) {
+        _validationFailed = true;
+        console.warn("[shugoi] KEY VALIDATION FAILED: network error", e);
+      }
+    } else if (debug) {
+      console.log("[shugoi] no secret provided, skipping key validation");
+    }
+  })();
   ensureGuardsReady(baseUrl).catch(() => {
   });
   const csp = buildCsp({ siteKey: options.siteKey, extraDirectives: {} });
@@ -406,6 +441,16 @@ function createShugoiMiddleware(options) {
   return async function shugoiMiddleware(req, res, next) {
     try {
       const path = (req.path ?? req.url ?? "/").split("?")[0];
+      if (siteSecret && !_validationValid && !_validationFailed) {
+        for (let i = 0; i < 40; i++) {
+          await new Promise((r) => setTimeout(r, 50));
+          if (_validationValid || _validationFailed) break;
+        }
+      }
+      if (siteSecret && _validationFailed) {
+        log("secret validation failed \u2014 skipping protection");
+        return next();
+      }
       if (path.endsWith("/__shugoi/render")) {
         const { handleRender: handleRender2 } = await Promise.resolve().then(() => (init_render(), render_exports));
         return handleRender2(req.query && req.query.token || "", res);
@@ -508,6 +553,41 @@ function createShugoiPlugin(options) {
   const debug = options.debug ?? false;
   const restrictedAccess = options.restrictedAccess ?? false;
   const signingSecret = options.signingSecret;
+  const siteSecret = options.secret;
+  let _validationValid = false;
+  let _validationFailed = false;
+  let _validationAllowedOrigins = [];
+  (async () => {
+    if (siteSecret && baseUrl) {
+      try {
+        const res = await fetch(baseUrl + "/validate-key", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ siteKey: options.siteKey, secret: siteSecret }),
+          signal: AbortSignal.timeout(5e3)
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.valid) {
+            _validationValid = true;
+            _validationAllowedOrigins = data.allowedOrigins || [];
+            if (debug) console.log("[shugoi] key validation OK");
+          } else {
+            _validationFailed = true;
+            console.warn("[shugoi] KEY VALIDATION FAILED:", data.reason || "unknown");
+          }
+        } else {
+          _validationFailed = true;
+          console.warn("[shugoi] KEY VALIDATION FAILED: HTTP", res.status);
+        }
+      } catch (e) {
+        _validationFailed = true;
+        console.warn("[shugoi] KEY VALIDATION FAILED: network error", e);
+      }
+    } else if (debug) {
+      console.log("[shugoi] no secret provided, skipping key validation");
+    }
+  })();
   ensureGuardsReady(baseUrl).catch(() => {
   });
   const csp = buildCsp({ siteKey: options.siteKey, extraDirectives: {} });
@@ -543,6 +623,16 @@ function createShugoiPlugin(options) {
         const path = request.url.split("?")[0];
         if (path.endsWith("/__shugoi/render") || path.endsWith("/__shugoi/healthcheck")) return;
         if (allowlist.some((p) => path === p || path.startsWith(p + "/"))) return;
+        if (siteSecret && !_validationValid && !_validationFailed) {
+          for (let i = 0; i < 40; i++) {
+            await new Promise((r) => setTimeout(r, 50));
+            if (_validationValid || _validationFailed) break;
+          }
+        }
+        if (siteSecret && _validationFailed) {
+          log("secret validation failed \u2014 skipping protection");
+          return;
+        }
         await ensureGuardsReady(baseUrl).catch(() => {
         });
         const flags = await getFlags();
