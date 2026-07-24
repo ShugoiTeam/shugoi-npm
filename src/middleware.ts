@@ -107,7 +107,7 @@ export function createShugoiMiddleware(options) {
       if (flags.enableRateLimit !== false) {
         try {
           const ip = req.headers?.['x-forwarded-for']?.split(',')[0]?.trim() || req.ip || 'unknown';
-          const rlUrl = options.checkUrl || baseUrl + '/check';
+          const rlUrl = baseUrl + '/check';
           const rlRes = await fetch(rlUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -234,7 +234,7 @@ export function createShugoiPlugin(options) {
         if (flags.enableRateLimit !== false) {
           try {
             const ip = request.headers['x-forwarded-for']?.split(',')[0]?.trim() || request.ip || 'unknown';
-            const rlUrl = options.checkUrl || baseUrl + '/check';
+            const rlUrl = baseUrl + '/check';
             const rlRes = await fetch(rlUrl, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
