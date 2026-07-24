@@ -360,8 +360,8 @@ function buildCsp(options) {
     "default-src": ["'self'"],
     "script-src": ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://shugoi.com"],
     "connect-src": ["'self'", "https://shugoi.com"],
-    "style-src": ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
-    "font-src": ["'self'", "https://fonts.gstatic.com"],
+    "style-src": ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com", "https://cdnjs.cloudflare.com"],
+    "font-src": ["'self'", "https://fonts.gstatic.com", "https://cdnjs.cloudflare.com"],
     "img-src": ["'self'", "https://shugoi.com", "data:"],
     "frame-src": ["'self'", "https://shugoi.com"]
   };
@@ -701,8 +701,8 @@ var DEFAULT_DIRECTIVES = {
   "default-src": ["'self'"],
   "script-src": ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://shugoi.com"],
   "connect-src": ["'self'", "https://shugoi.com"],
-  "style-src": ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
-  "font-src": ["'self'", "https://fonts.gstatic.com"],
+  "style-src": ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com", "https://cdnjs.cloudflare.com"],
+  "font-src": ["'self'", "https://fonts.gstatic.com", "https://cdnjs.cloudflare.com"],
   "img-src": ["'self'", "https://shugoi.com", "data:"],
   "frame-src": ["'self'", "https://shugoi.com"]
 };
