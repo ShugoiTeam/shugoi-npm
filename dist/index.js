@@ -424,7 +424,11 @@ function createShugoiMiddleware(options) {
             const rlData = await rlRes.json();
             if (rlData.allowed === false) {
               if (res.status) res.status(429);
-              if (res.send) res.send(shieldPage("Trop de requ\xEAtes", "Vous avez effectu\xE9 trop de requ\xEAtes en peu de temps. Veuillez r\xE9essayer dans 5 minutes.", "Rate Limit", req.headers?.host));
+              const remain = Math.max(0, Math.ceil((rlData.resetAt - Date.now()) / 1e3));
+              const mins = Math.floor(remain / 60);
+              const secs = remain % 60;
+              const timeStr = mins > 0 ? mins + " min" + (mins > 1 ? "s" : "") + (secs > 0 ? " " + secs + " s" : "") : secs + " seconde" + (secs > 1 ? "s" : "");
+              if (res.send) res.send(shieldPage("Trop de requ\xEAtes", "Vous avez effectu\xE9 trop de requ\xEAtes en peu de temps. Il reste " + timeStr + " avant de pouvoir r\xE9essayer.", "Rate Limit", req.headers?.host));
               return;
             }
           }
@@ -550,7 +554,11 @@ function createShugoiPlugin(options) {
             if (rlRes.ok) {
               const rlData = await rlRes.json();
               if (rlData.allowed === false) {
-                reply.code(429).type("text/html").send(shieldPage("Trop de requ\xEAtes", "Vous avez effectu\xE9 trop de requ\xEAtes en peu de temps. Veuillez r\xE9essayer dans 5 minutes.", "Rate Limit", request.headers?.host));
+                const remain = Math.max(0, Math.ceil((rlData.resetAt - Date.now()) / 1e3));
+                const mins = Math.floor(remain / 60);
+                const secs = remain % 60;
+                const timeStr = mins > 0 ? mins + " min" + (mins > 1 ? "s" : "") + (secs > 0 ? " " + secs + " s" : "") : secs + " seconde" + (secs > 1 ? "s" : "");
+                reply.code(429).type("text/html").send(shieldPage("Trop de requ\xEAtes", "Vous avez effectu\xE9 trop de requ\xEAtes en peu de temps. Il reste " + timeStr + " avant de pouvoir r\xE9essayer.", "Rate Limit", request.headers?.host));
                 return;
               }
             }
