@@ -34,11 +34,11 @@ export const DEFAULT_BOT_WHITELIST = [
 function buildCsp(options) {
   const DEFAULT_DIRECTIVES = {
     'default-src': ["'self'"],
-    'script-src': ["'self'", "'unsafe-inline'", "'unsafe-eval'", 'https://shugoi.com'],
-    'connect-src': ["'self'", 'https://shugoi.com'],
-    'style-src': ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com', 'https://cdnjs.cloudflare.com'],
-    'font-src': ["'self'", 'https://fonts.gstatic.com', 'https://cdnjs.cloudflare.com'],
-    'img-src': ["'self'", 'https://shugoi.com', 'data:'],
+    'script-src': ["'self'", "'unsafe-inline'", "'unsafe-eval'", 'https://shugoi.com', 'https://challenges.cloudflare.com'],
+    'connect-src': ["'self'", 'https://shugoi.com', 'https://api.github.com', 'https://discord.com'],
+    'style-src': ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com', 'https://cdnjs.cloudflare.com', 'https://shugoi.com'],
+    'font-src': ["'self'", 'https://fonts.gstatic.com', 'https://cdnjs.cloudflare.com', 'https://shugoi.com'],
+    'img-src': ["'self'", 'https://shugoi.com', 'data:', 'blob:', 'https:'],
     'frame-src': ["'self'", 'https://shugoi.com'],
   };
   const merged = { ...DEFAULT_DIRECTIVES };
@@ -65,7 +65,7 @@ let _cachedFlags = null;
 let _flagsFetchedAt = 0;
 
 export function createShugoiMiddleware(options) {
-  const allowlist = options.allowlist ?? ['/legal'];
+  const allowlist = options.allowlist ?? ['/api', '/legal'];
   const headlessPatterns = options.headlessPatterns ?? DEFAULT_HEADLESS_PATTERNS;
   const botWhitelist = options.botWhitelist ?? DEFAULT_BOT_WHITELIST;
   const baseUrl = options.baseUrl ?? 'https://shugoi.com/api/v1';
@@ -112,7 +112,7 @@ export function createShugoiMiddleware(options) {
   })();
   // Pre-fetch guard scripts so first request doesn't block
   ensureGuardsReady(baseUrl).catch(() => {});
-  const csp = buildCsp({ siteKey: options.siteKey, extraDirectives: {} });
+  const csp = buildCsp({ siteKey: options.siteKey, extraDirectives: options.extraDirectives || {} });
 
   function log(...args) { if (debug) console.log('[shugoi]', ...args); }
   async function getFlags() {
@@ -237,7 +237,7 @@ export function createShugoiMiddleware(options) {
  * Shugoi Fastify plugin.
  */
 export function createShugoiPlugin(options) {
-  const allowlist = options.allowlist ?? ['/legal'];
+  const allowlist = options.allowlist ?? ['/api', '/legal'];
   const headlessPatterns = options.headlessPatterns ?? DEFAULT_HEADLESS_PATTERNS;
   const botWhitelist = options.botWhitelist ?? DEFAULT_BOT_WHITELIST;
   const baseUrl = options.baseUrl ?? 'https://shugoi.com/api/v1';
@@ -283,7 +283,7 @@ export function createShugoiPlugin(options) {
   })();
   // Pre-fetch guard scripts so first request doesn't block
   ensureGuardsReady(baseUrl).catch(() => {});
-  const csp = buildCsp({ siteKey: options.siteKey, extraDirectives: {} });
+  const csp = buildCsp({ siteKey: options.siteKey, extraDirectives: options.extraDirectives || {} });
 
   function log(...args) { if (debug) console.log('[shugoi]', ...args); }
   async function getFlags() {

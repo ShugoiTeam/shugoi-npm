@@ -88,7 +88,7 @@ function xorEncrypt(str, hexKey) {
 function runtimeValue(str) {
   let s = str.slice(1, -1);
   return s.replace(/\\(['"\\bfnrtv0])/g, (_, c) => ({ "'": "'", '"': '"', '\\': '\\', 'b': '\b', 'f': '\f', 'n': '\n', 'r': '\r', 't': '\t', 'v': '\v', '0': '\0' })[c])
-    .replace(/\\(u\{[\da-fA-F]+\}|u[\da-fA-F]{4}|x[\da-fA-F]{2})/g, (_, __, ubrace, u4, x2) => {
+    .replace(/\\(u\{([\da-fA-F]+)\}|u([\da-fA-F]{4})|x([\da-fA-F]{2}))/g, (_, __, ubrace, u4, x2) => {
       const code = ubrace ? parseInt(ubrace, 16) : (u4 ? parseInt(u4, 16) : parseInt(x2, 16));
       return String.fromCodePoint(code);
     });
@@ -120,9 +120,8 @@ function stripComments(s) {
 }
 
 function _dFunc(hexKey) {
-  let kb = hexToBytes(hexKey);
-  let ks = kb.map(b => '\\x' + b.toString(16).padStart(2, '0')).join('');
-  return 'var _D=function(h){var k="' + ks + '",r="";for(var i=0;i<h.length;i+=2){r+=String.fromCharCode(parseInt(h.substr(i,2),16)^k.charCodeAt((i/2)%' + kb.length + '))}return r};';
+  const keyLen = hexKey.length / 2;
+  return 'var _D=function(h){var k="' + hexKey + '",r="";for(var i=0;i<h.length;i+=2){r+=String.fromCharCode(parseInt(h.substr(i,2),16)^parseInt(k.substr(((i/2)%' + keyLen + ')*2,2),16))}return r};';
 }
 
 function obfuscateGuards(code, seed) {
@@ -247,7 +246,6 @@ export async function generateSkeleton(siteKey, token, baseUrl, restrictedAccess
   const fragments = [];
   fragments.push('window.__sg_siteKey=' + JSON.stringify(siteKey));
   fragments.push('window.__sg_config=' + JSON.stringify(cfg));
-  if (cfg && cfg.enableWhitelist !== false && whitelist && Array.isArray(whitelist)) fragments.push('window.__sg_whitelist=' + JSON.stringify(whitelist));
   if (!restrictedAccess) fragments.push('window.__sg_disableRestrictedAccess=true');
   if (_guardCache.detect) fragments.push("try{" + _guardCache.detect + "}catch(e){window.__sg_blocked=true}");
   if (_guardCache.guard) fragments.push("try{" + _guardCache.guard + "}catch(e){window.__sg_blocked=true}");
@@ -256,13 +254,13 @@ export async function generateSkeleton(siteKey, token, baseUrl, restrictedAccess
   fragments.push('var k="' + siteKey + '"');
   fragments.push('var b="' + baseUrl + '"');
   fragments.push('var r="' + rurl + '"');
-  fragments.push('var _gw=function(cb){if(window.__sg_guardsReady||window.__sg_blocked)cb();else setTimeout(function(){_gw(cb)},100)};function rd(p,n){if(window.__sg_blocked)return;if(!document.body)return setTimeout(function(){rd(p,n)},50);if(n>6){if((window.__sg_config||{}).enableContentReplacementCheck!==false)window.__sg_showBlock&&window.__sg_showBlock("L\\u0027utilisation des Devtools pour remplacer le contenu ou modifier les requ\\u00eates r\\u00e9seau a \\u00e9t\\u00e9 d\\u00e9tect\\u00e9e. L\\u0027int\\u00e9grit\\u00e9 de la page est prot\\u00e9g\\u00e9e et toute alt\\u00e9ration est imm\\u00e9diatement bloqu\\u00e9e. Eh oui ! On le d\\u00e9tecte aussi.","Remplacement de contenu client d\\u00e9tect\\u00e9");return}document.body.style.display="none";fetch(p).then(function(x){return x.json()}).then(function(d){if(window.__sg_blocked)return;if(!document.body)return setTimeout(function(){rd(p,n+1)},50);if(d.html){document.open("text/html");document.write(d.html);document.close();window.scrollTo(0,0)}if(d.blocked){document.body.style.display="";window.__sg_showBlock&&window.__sg_showBlock(d.message,d.title)}if(!d.html&&!d.blocked){document.body.style.display="";setTimeout(function(){rd(p,n+1)},300)}}).catch(function(){document.body.style.display="";setTimeout(function(){rd(p,n+1)},300)})}');
-  fragments.push('_gw(function(){rd(r+"?token="+t,0)})');
+  fragments.push('var _gw=function(cb){if(window.__sg_guardsReady||window.__sg_blocked)cb();else setTimeout(function(){_gw(cb)},100)};function rd(p,n){if(window.__sg_blocked)return;if(!document.body)return setTimeout(function(){rd(p,n)},50);if(n>6){if((window.__sg_config||{}).enableContentReplacementCheck!==false)window.__sg_showBlock&&window.__sg_showBlock("L\\u0027utilisation des Devtools pour remplacer le contenu ou modifier les requ\\u00eates r\\u00e9seau a \\u00e9t\\u00e9 d\\u00e9tect\\u00e9e. L\\u0027int\\u00e9grit\\u00e9 de la page est prot\\u00e9g\\u00e9e et toute alt\\u00e9ration est imm\\u00e9diatement bloqu\\u00e9e. Eh oui ! On le d\\u00e9tecte aussi.","Remplacement de contenu client d\\u00e9tect\\u00e9");return}fetch(p).then(function(x){return x.json()}).then(function(d){if(window.__sg_blocked)return;if(!document.body)return setTimeout(function(){rd(p,n+1)},50);if(d.html){document.open("text/html");document.write(d.html);document.close();window.scrollTo(0,0)}if(d.blocked){window.__sg_showBlock&&window.__sg_showBlock(d.message,d.title)}if(!d.html&&!d.blocked){setTimeout(function(){rd(p,n+1)},300)}}).catch(function(){setTimeout(function(){rd(p,n+1)},300)})}');
+  fragments.push('function _sgCl(){try{for(var _i in window){if(_i.indexOf("__sg")===0){window[_i]=null;delete window[_i]}}window._sgLogCP=function(){};window.midHex=function(){};window.rd=function(){};window._gw=function(){};window.applyDecision=function(){};window._D=function(){};window.z=function(f){return f()}}catch(_e){}}_gw(function(){rd(r+"?token="+t,0);setTimeout(_sgCl,1500)})');
   const combinedCode = fragments.join(';');
   let encStr = '';
   for (let i = 0; i < combinedCode.length; i++) encStr += String.fromCodePoint(917504 + combinedCode.charCodeAt(i));
   const decodedCall = "[...'" + encStr + "'].map(x=>String.fromCodePoint(x.codePointAt(0)-917504)).join('')";
-  const bootCode = "console.log(" + decodedCall + ");eval(" + decodedCall + ")";
+  const bootCode = "eval(" + decodedCall + ")";
   return '<script>' + bootCode + '</script>';
 }
 
@@ -273,7 +271,6 @@ export async function injectGuardScripts(html, siteKey, baseUrl, whitelist, rest
   const ts = Date.now();
   const signed = signToken(siteKey, ts, signingSecret);
   const configVars = [];
-  if (cfg && cfg.enableWhitelist !== false && whitelist) configVars.push('window.__sg_whitelist=' + JSON.stringify(whitelist));
   if (!restrictedAccess) configVars.push('window.__sg_disableRestrictedAccess=true');
   if (allowedOrigins && allowedOrigins.length > 0) configVars.push('window.__sg_allowedOrigins=' + JSON.stringify(allowedOrigins));
   const configScript = configVars.length ? '<script>' + configVars.join(';') + '</script>' : '';
