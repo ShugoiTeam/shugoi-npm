@@ -118,7 +118,7 @@ export function createShugoiMiddleware(options) {
     }
   })();
   // Pre-fetch guard scripts so first request doesn't block
-  ensureGuardsReady(baseUrl).catch(() => {});
+  ensureGuardsReady(baseUrl, siteSecret, options.siteKey).catch(() => {});
   const csp = buildCsp({ siteKey: options.siteKey, extraDirectives: options.extraDirectives || {} });
 
   function log(...args) { if (debug) console.log('[shugoi]', ...args); }
@@ -288,7 +288,7 @@ export function createShugoiPlugin(options) {
     }
   })();
   // Pre-fetch guard scripts so first request doesn't block
-  ensureGuardsReady(baseUrl).catch(() => {});
+  ensureGuardsReady(baseUrl, siteSecret, options.siteKey).catch(() => {});
   const csp = buildCsp({ siteKey: options.siteKey, extraDirectives: options.extraDirectives || {} });
 
   function log(...args) { if (debug) console.log('[shugoi]', ...args); }
@@ -332,7 +332,7 @@ export function createShugoiPlugin(options) {
         }
 
         // Pre-load guard scripts to avoid timeout in onSend
-        await ensureGuardsReady(baseUrl).catch(() => {});
+        await ensureGuardsReady(baseUrl, siteSecret, options.siteKey).catch(() => {});
 
         const flags = await getFlags();
 

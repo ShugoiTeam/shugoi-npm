@@ -32,6 +32,7 @@ function storeHtml(token, html) {
   }
 }
 function renderResponseData(token) {
+  if (!token || token.length < 16 || token.length > 300) return { error: "not_found" };
   const suffix = token.slice(-16);
   try {
     for (const f of readdirSync(TOKEN_DIR)) {
@@ -60,7 +61,8 @@ function handleRender(token, res) {
   else if (res.end) res.end(json);
 }
 function signToken(siteKey, timestamp, secretOverride) {
-  const secret = secretOverride || process.env.SHUGOKI_SIGNING_SECRET || process.env.SHUGOKI_SECRET || "dev-secret-do-not-use-in-prod";
+  const secret = secretOverride || process.env.SHUGOKI_SIGNING_SECRET || process.env.SHUGOKI_SECRET;
+  if (!secret) return { token: "" };
   const nonce = crypto.randomBytes(8).toString("hex");
   const payload = [siteKey, timestamp, nonce].join(":");
   const sig = crypto.createHmac("sha256", secret).update(payload).digest("hex");
@@ -217,22 +219,25 @@ async function fetchConfigForSiteKey(siteKey, baseUrl) {
   await fetchWhitelistForSiteKey(siteKey, baseUrl);
   return _lastConfig[baseUrl + "@" + siteKey] || {};
 }
-async function fetchGuardScripts(baseUrl) {
+async function fetchGuardScripts(baseUrl, secret, siteKey) {
   if (_guardCache.fetching) return new Promise((resolve) => {
     _guardCache.queue.push(resolve);
   });
   _guardCache.fetching = true;
   try {
     const cb = Date.now();
+    const sk = siteKey || "cache";
+    const sig = secret ? crypto.createHmac("sha256", secret).update(cb.toString()).digest("hex") : "";
     const [dRes, gRes] = await Promise.all([
-      fetch(baseUrl + "/guard-detect?key=cache&raw=1&cb=" + cb),
-      fetch(baseUrl + "/guard?key=cache&raw=1&cb=" + cb)
+      fetch(baseUrl + "/guard-detect?key=" + sk + "&raw=1&cb=" + cb + (sig ? "&sig=" + sig : "")),
+      fetch(baseUrl + "/guard?key=" + sk + "&raw=1&cb=" + cb + (sig ? "&sig=" + sig : ""))
     ]);
     const rawDetect = await dRes.text();
     const rawGuard = await gRes.text();
     const seed = cb.toString(36);
     _guardCache.detect = applyObfuscation(rawDetect, seed);
     _guardCache.guard = applyObfuscation(rawGuard, seed);
+    _guardCache.fetchedAt = Date.now();
   } catch (e) {
     _guardCache.detect = _guardCache.detect || 'console.error("Shugoi guard-detect unavailable")';
     _guardCache.guard = _guardCache.guard || 'console.error("Shugoi guard unavailable")';
@@ -241,9 +246,9 @@ async function fetchGuardScripts(baseUrl) {
   _guardCache.queue.forEach((r) => r());
   _guardCache.queue = [];
 }
-async function ensureGuardsReady(baseUrl) {
-  if (_guardCache.detect && _guardCache.guard) return;
-  await fetchGuardScripts(baseUrl);
+async function ensureGuardsReady(baseUrl, secret, siteKey) {
+  if (_guardCache.detect && _guardCache.guard && Date.now() - _guardCache.fetchedAt < GUARD_CACHE_TTL) return;
+  await fetchGuardScripts(baseUrl, secret, siteKey);
 }
 async function generateSkeleton(siteKey, token, baseUrl, restrictedAccess, whitelist, renderUrl) {
   await ensureGuardsReady(baseUrl);
@@ -294,7 +299,7 @@ async function injectGuardScripts(html, siteKey, baseUrl, whitelist, restrictedA
   const renderUrl = "./__shugoi/render";
   return generateSkeleton(siteKey, signed.token, baseUrl, restrictedAccess, whitelist, renderUrl);
 }
-var TOKEN_DIR, TOKEN_TTL, RENAMES, _lastConfig, _guardCache;
+var TOKEN_DIR, TOKEN_TTL, RENAMES, _lastConfig, GUARD_CACHE_TTL, _guardCache;
 var init_render = __esm({
   "src/render.ts"() {
     "use strict";
@@ -318,7 +323,8 @@ var init_render = __esm({
     }, 3e4).unref();
     RENAMES = { buildOverlay: "_wf", checkNotice: "_wg", hex: "_wh", stable: "_wi" };
     _lastConfig = {};
-    _guardCache = { detect: null, guard: null, fetching: false, queue: [] };
+    GUARD_CACHE_TTL = 3e5;
+    _guardCache = { detect: null, guard: null, fetching: false, queue: [], fetchedAt: 0 };
   }
 });
 
@@ -449,7 +455,7 @@ function createShugoiMiddleware(options) {
       console.log("[shugoi] no secret provided, skipping key validation");
     }
   })();
-  ensureGuardsReady(baseUrl).catch(() => {
+  ensureGuardsReady(baseUrl, siteSecret, options.siteKey).catch(() => {
   });
   const csp = buildCsp({ siteKey: options.siteKey, extraDirectives: options.extraDirectives || {} });
   function log(...args) {
@@ -618,7 +624,7 @@ function createShugoiPlugin(options) {
       console.log("[shugoi] no secret provided, skipping key validation");
     }
   })();
-  ensureGuardsReady(baseUrl).catch(() => {
+  ensureGuardsReady(baseUrl, siteSecret, options.siteKey).catch(() => {
   });
   const csp = buildCsp({ siteKey: options.siteKey, extraDirectives: options.extraDirectives || {} });
   function log(...args) {
@@ -662,7 +668,7 @@ function createShugoiPlugin(options) {
         if (siteSecret && _validationFailed) {
           log("secret validation failed \u2014 proceeding without origin check");
         }
-        await ensureGuardsReady(baseUrl).catch(() => {
+        await ensureGuardsReady(baseUrl, siteSecret, options.siteKey).catch(() => {
         });
         const flags = await getFlags();
         if (flags.enableRateLimit !== false) {

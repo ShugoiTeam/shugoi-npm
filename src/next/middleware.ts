@@ -69,6 +69,7 @@ function generateBootcode(siteKey: string, config: string, detectCode: string, g
 }
 
 function renderResponseData(token: string): { html?: string; blocked?: boolean; error?: string } {
+  if (!token || token.length < 16 || token.length > 300) return { error: "not_found" };
   const suffix = token.slice(-16);
   try {
     for (const f of readdirSync(TOKEN_DIR)) {
