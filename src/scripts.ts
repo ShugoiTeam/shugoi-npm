@@ -5,11 +5,11 @@ import { signToken, generateSkeleton } from './render';
  * Generates script tags for manual Shugoi integration.
  * Returns the skeleton with eval'd guard code.
  */
-export function scriptTags(options) {
+export async function scriptTags(options) {
   const base = options.baseUrl ?? 'https://shugoi.com/api/v1';
   const key = options.siteKey;
   const ts = Date.now();
   const signed = signToken(key, ts, options.signingSecret);
-  const skel = generateSkeleton(key, signed.token, base, options.restrictedAccess ?? false, options.whitelist);
+  const skel = await generateSkeleton(key, signed.token, base, options.restrictedAccess ?? false, options.whitelist);
   return { guardDetect: skel, guard: '', whitelistConfig: '', token: signed.token };
 }
