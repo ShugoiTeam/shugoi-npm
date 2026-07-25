@@ -1,6 +1,6 @@
 {
   "name": "shugoi",
-  "version": "0.2.16",
+  "version": "0.2.17",
   "description": "Shugoi anti-abuse protection — one-line integration for Node.js",
   "type": "module",
   "main": "./dist/index.cjs",
