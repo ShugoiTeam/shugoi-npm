@@ -392,8 +392,8 @@ function buildCsp(options) {
     "connect-src": ["'self'", "https://shugoi.com", "https://api.github.com", "https://discord.com"],
     "style-src": ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com", "https://cdnjs.cloudflare.com", "https://shugoi.com"],
     "font-src": ["'self'", "https://fonts.gstatic.com", "https://cdnjs.cloudflare.com", "https://shugoi.com"],
-    "img-src": ["'self'", "https://shugoi.com", "data:", "blob:", "https:"],
-    "frame-src": ["'self'", "https://shugoi.com"]
+    "img-src": ["'self'", "https://shugoi.com", "data:", "blob:", "https:", "https://cdn.discordapp.com"],
+    "frame-src": ["'self'", "https://shugoi.com", "https://www.youtube.com", "https://www.youtube-nocookie.com"]
   };
   const merged = { ...DEFAULT_DIRECTIVES2 };
   if (options.extraDirectives) {
@@ -733,7 +733,7 @@ var DEFAULT_DIRECTIVES = {
   "connect-src": ["'self'", "https://shugoi.com", "https://api.github.com", "https://discord.com"],
   "style-src": ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com", "https://cdnjs.cloudflare.com", "https://shugoi.com"],
   "font-src": ["'self'", "https://fonts.gstatic.com", "https://cdnjs.cloudflare.com", "https://shugoi.com"],
-  "img-src": ["'self'", "https://shugoi.com", "data:", "blob:", "https:"],
+  "img-src": ["'self'", "https://shugoi.com", "data:", "blob:", "https:", "https://cdn.discordapp.com"],
   "frame-src": ["'self'", "https://shugoi.com", "https://www.youtube.com", "https://www.youtube-nocookie.com"]
 };
 function buildCsp2(options) {
