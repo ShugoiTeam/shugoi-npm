@@ -413,7 +413,7 @@ function createShugoiMiddleware(options) {
   const debug = options.debug ?? false;
   const autoInject = options.autoInject ?? true;
   const restrictedAccess = options.restrictedAccess ?? false;
-  const signingSecret = options.signingSecret;
+  const signingSecret = options.signingSecret || options.secret;
   const siteSecret = options.secret;
   let _validationValid = false;
   let _validationFailed = false;
@@ -479,8 +479,7 @@ function createShugoiMiddleware(options) {
         }
       }
       if (siteSecret && _validationFailed) {
-        log("secret validation failed \u2014 skipping protection");
-        return next();
+        log("secret validation failed \u2014 proceeding without origin check");
       }
       if (path.endsWith("/__shugoi/render")) {
         const { handleRender: handleRender2 } = await Promise.resolve().then(() => (init_render(), render_exports));
@@ -583,7 +582,7 @@ function createShugoiPlugin(options) {
   const baseUrl = options.baseUrl ?? "https://shugoi.com/api/v1";
   const debug = options.debug ?? false;
   const restrictedAccess = options.restrictedAccess ?? false;
-  const signingSecret = options.signingSecret;
+  const signingSecret = options.signingSecret || options.secret;
   const siteSecret = options.secret;
   let _validationValid = false;
   let _validationFailed = false;
@@ -661,8 +660,7 @@ function createShugoiPlugin(options) {
           }
         }
         if (siteSecret && _validationFailed) {
-          log("secret validation failed \u2014 skipping protection");
-          return;
+          log("secret validation failed \u2014 proceeding without origin check");
         }
         await ensureGuardsReady(baseUrl).catch(() => {
         });

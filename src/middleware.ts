@@ -79,7 +79,7 @@ export function createShugoiMiddleware(options) {
   const debug = options.debug ?? false;
   const autoInject = options.autoInject ?? true;
   const restrictedAccess = options.restrictedAccess ?? false;
-  const signingSecret = options.signingSecret;
+  const signingSecret = options.signingSecret || options.secret;
   const siteSecret = options.secret;
   let _validationValid = false;
   let _validationFailed = false;
@@ -135,7 +135,7 @@ export function createShugoiMiddleware(options) {
     try {
       const path = (req.path ?? req.url ?? '/').split('?')[0];
 
-      // If secret configured, wait for validation & bail if it failed
+      // If secret configured, wait a moment for validation to complete
       if (siteSecret && !_validationValid && !_validationFailed) {
         for (let i = 0; i < 40; i++) {
           await new Promise(r => setTimeout(r, 50));
@@ -143,8 +143,7 @@ export function createShugoiMiddleware(options) {
         }
       }
       if (siteSecret && _validationFailed) {
-        log('secret validation failed — skipping protection');
-        return next();
+        log('secret validation failed — proceeding without origin check');
       }
 
       // Render endpoint
@@ -250,7 +249,7 @@ export function createShugoiPlugin(options) {
   const baseUrl = options.baseUrl ?? 'https://shugoi.com/api/v1';
   const debug = options.debug ?? false;
   const restrictedAccess = options.restrictedAccess ?? false;
-  const signingSecret = options.signingSecret;
+  const signingSecret = options.signingSecret || options.secret;
   const siteSecret = options.secret;
   let _validationValid = false;
   let _validationFailed = false;
@@ -329,8 +328,7 @@ export function createShugoiPlugin(options) {
           }
         }
         if (siteSecret && _validationFailed) {
-          log('secret validation failed — skipping protection');
-          return;
+          log('secret validation failed — proceeding without origin check');
         }
 
         // Pre-load guard scripts to avoid timeout in onSend
