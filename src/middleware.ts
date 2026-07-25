@@ -21,8 +21,15 @@ export const BLOCK_PAGE = [
   "+---------------------------------------------+",
 ].join('\n') + '\n';
 
-function shieldPage(title, msg, badge, host) {
-  return '<!DOCTYPE html><html lang="fr"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link href="https://fonts.googleapis.com/css2?family=Alex+Brush&family=Itim&display=swap" rel="stylesheet"><style>*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}html,body{height:100%;background:#fcf9f5}body{font-family:Itim,sans-serif;display:flex;align-items:center;justify-content:center;padding:1.2rem}#c{max-width:460px;width:100%;background:#fff;border:4px solid #000;border-radius:28px 6px 32px 10px;box-shadow:12px 12px 0 #000;padding:3rem 2.4rem 2.8rem;text-align:center}#c .l{width:80px;height:80px;pointer-events:none;transform:rotate(-2.5deg);margin:0 auto .6rem;display:block}#c .b{display:block;margin:0 auto .2rem;pointer-events:none;max-width:100%;height:auto}#c .bdg{display:inline-block;border:2px solid #000;border-radius:10px 2px 14px 4px;padding:.3rem .9rem;font-size:.6rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#E87090;margin-bottom:1.4rem}#c h2{font-family:"Alex Brush",cursive;font-size:2.2rem;color:#E87090;font-weight:400;margin:0 auto .6rem}#c p.desc{font-size:.9rem;color:#555;line-height:1.8;max-width:380px;margin:0 auto}#c p.ft{font-size:.55rem;color:#E87090;margin-top:1.8rem}</style></head><body><div id=c><img src=https://shugoi.com/favicon.png alt class=l><img src=https://shugoi.com/brand.png alt class=b><div class=bdg>' + (badge || 'Blocage') + '</div><h2>' + (title || 'Acc\u00e8s bloqu\u00e9') + '</h2><p class=desc>' + (msg || '') + '</p><p class=ft>' + (host || 'shugoi.com') + ' \u00b7 Shugoi</p></div></body></html>';
+function shieldPage(title, msg, badge, host, remainSecs) {
+  const prefix = msg ? msg.replace(/Il reste \d+ seconde?s?.*$/, '').trim() : '';
+  const countdownScript = remainSecs > 0
+    ? '<script>var s=' + remainSecs + ';var i=setInterval(function(){s--;var e=document.getElementById("cd");if(e){if(s<=0){e.innerHTML="0s";clearInterval(i);setTimeout(function(){location.reload()},500)}else{e.innerHTML=s+"s"}}},1000)</script>'
+    : '';
+  const desc = remainSecs > 0
+    ? prefix + ' Il reste <span id="cd">' + remainSecs + 's</span> avant de pouvoir r\u00e9essayer.'
+    : (msg || '');
+  return '<!DOCTYPE html><html lang="fr"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link href="https://fonts.googleapis.com/css2?family=Alex+Brush&family=Itim&display=swap" rel="stylesheet"><style>*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}html,body{height:100%;background:#fcf9f5}body{font-family:Itim,sans-serif;display:flex;align-items:center;justify-content:center;padding:1.2rem}#c{max-width:460px;width:100%;background:#fff;border:4px solid #000;border-radius:28px 6px 32px 10px;box-shadow:12px 12px 0 #000;padding:3rem 2.4rem 2.8rem;text-align:center}#c .l{width:80px;height:80px;pointer-events:none;transform:rotate(-2.5deg);margin:0 auto .6rem;display:block}#c .b{display:block;margin:0 auto .2rem;pointer-events:none;max-width:100%;height:auto}#c .bdg{display:inline-block;border:2px solid #000;border-radius:10px 2px 14px 4px;padding:.3rem .9rem;font-size:.6rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#E87090;margin-bottom:1.4rem}#c h2{font-family:"Alex Brush",cursive;font-size:2.2rem;color:#E87090;font-weight:400;margin:0 auto .6rem}#c p.desc{font-size:.9rem;color:#555;line-height:1.8;max-width:380px;margin:0 auto}#c p.ft{font-size:.55rem;color:#E87090;margin-top:1.8rem}</style></head><body><div id=c><img src=https://shugoi.com/favicon.png alt class=l><img src=https://shugoi.com/brand.png alt class=b><div class=bdg>' + (badge || 'Blocage') + '</div><h2>' + (title || 'Acc\u00e8s bloqu\u00e9') + '</h2><p class=desc>' + desc + '</p><p class=ft>' + (host || 'shugoi.com') + ' \u00b7 Shugoi</p></div>' + countdownScript + '</body></html>';
 }
 
 export const DEFAULT_BOT_WHITELIST = [
@@ -172,7 +179,7 @@ export function createShugoiMiddleware(options) {
               const mins = Math.floor(remain / 60);
               const secs = remain % 60;
               const timeStr = mins > 0 ? mins + ' min' + (mins > 1 ? 's' : '') + (secs > 0 ? ' ' + secs + ' s' : '') : secs + ' seconde' + (secs > 1 ? 's' : '');
-              if (res.send) res.send(shieldPage('Trop de requ\u00eates', "Vous avez effectu\u00e9 trop de requ\u00eates en peu de temps. Il reste " + timeStr + " avant de pouvoir r\u00e9essayer.", 'Rate Limit', req.headers?.host));
+              if (res.send) res.send(shieldPage('Trop de requ\u00eates', "Vous avez effectu\u00e9 trop de requ\u00eates en peu de temps. Il reste " + timeStr + " avant de pouvoir r\u00e9essayer.", 'Rate Limit', req.headers?.host, remain));
               return;
             }
           }
@@ -348,7 +355,7 @@ export function createShugoiPlugin(options) {
                 const mins = Math.floor(remain / 60);
                 const secs = remain % 60;
                 const timeStr = mins > 0 ? mins + ' min' + (mins > 1 ? 's' : '') + (secs > 0 ? ' ' + secs + ' s' : '') : secs + ' seconde' + (secs > 1 ? 's' : '');
-                reply.code(429).type('text/html').send(shieldPage('Trop de requ\u00eates', "Vous avez effectu\u00e9 trop de requ\u00eates en peu de temps. Il reste " + timeStr + " avant de pouvoir r\u00e9essayer.", 'Rate Limit', request.headers?.host));
+                reply.code(429).type('text/html').send(shieldPage('Trop de requ\u00eates', "Vous avez effectu\u00e9 trop de requ\u00eates en peu de temps. Il reste " + timeStr + " avant de pouvoir r\u00e9essayer.", 'Rate Limit', request.headers?.host, remain));
                 return;
               }
             }
