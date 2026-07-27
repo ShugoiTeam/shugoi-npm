@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server.js";
 import type { NextRequest } from "next/server.js";
-import { injectGuardScripts, storeHtml, signToken } from "../render";
+import { injectGuardScripts } from "../render";
 
 export interface ShugoiProxyOptions {
   siteKey: string;
@@ -39,19 +39,19 @@ export function createShugoiProxy(options: ShugoiProxyOptions) {
     const ua = request.headers.get("user-agent") || "";
     if (headless.some((p) => p.test(ua))) {
       const block = [
-        '╔═══════════════════════════════════════════╗',
-        '║           BLOCKED BY SHUGOI               ║',
-        '╠═══════════════════════════════════════════╣',
-        '║  Bots, scrapers and headless clients      ║',
-        '║  are blocked by Shugoi protection.        ║',
-        '║                                           ║',
-        '║  Use a standard browser to access         ║',
-        '║  this site.                               ║',
-        '║                                           ║',
-        '║  ─ contact: support@shugoi.com ─          ║',
-        '╚═══════════════════════════════════════════╝',
+        "+---------------------------------------------+",
+        "|           BLOCKED BY SHUGOI                 |",
+        "+---------------------------------------------+",
+        "|  Bots, scrapers and headless clients        |",
+        "|  are blocked by Shugoi protection.          |",
+        "|                                             |",
+        "|  Use a standard browser to access           |",
+        "|  this site.                                 |",
+        "|                                             |",
+        "|  - contact: support@shugoi.com -            |",
+        "+---------------------------------------------+",
       ].join('\n') + '\n';
-      return new NextResponse(block, { status: 200 });
+      return new NextResponse(block, { status: 403 });
     }
 
     // Split-render: inject guard skeleton for HTML pages
@@ -72,9 +72,6 @@ export function createShugoiProxy(options: ShugoiProxyOptions) {
       if (!pageRes.ok) return NextResponse.next();
 
       const html = await pageRes.text();
-      const ts = Date.now();
-      const signed = signToken(siteKey, ts, undefined);
-      storeHtml(signed.token, html);
 
       const skeleton = await injectGuardScripts(
         html, siteKey, BASE_URL, undefined, false, undefined,

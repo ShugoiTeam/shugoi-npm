@@ -30,8 +30,29 @@ const DEFAULT_HEADLESS = [
   /^okhttp/i, /^scrapy/i, /PowerShell/i, /WinHttp/i,
 ];
 
+const DEFAULT_BOT_WHITELIST = [
+  /Googlebot/i, /Bingbot/i, /Slurp/i, /DuckDuckBot/i, /YandexBot/i,
+  /FacebookExternalHit/i, /Twitterbot/i, /LinkedInBot/i, /Applebot/i,
+  /AhrefsBot/i, /SemrushBot/i,
+];
+
+const BLOCK_PAGE = [
+  "+---------------------------------------------+",
+  "|           BLOCKED BY SHUGOI                 |",
+  "+---------------------------------------------+",
+  "|  Bots, scrapers and headless clients        |",
+  "|  are blocked by Shugoi protection.          |",
+  "|                                             |",
+  "|  Use a standard browser to access           |",
+  "|  this site.                                 |",
+  "|                                             |",
+  "|  - contact: support@shugoi.com -            |",
+  "+---------------------------------------------+",
+].join('\n') + '\n';
+
 function signToken(siteKey: string, timestamp: number, secretOverride?: string) {
-  const secret = secretOverride || process.env.SHUGOKI_SIGNING_SECRET || "dev-secret-do-not-use-in-prod";
+  const secret = secretOverride || process.env.SHUGOKI_SIGNING_SECRET || process.env.SHUGOKI_SECRET;
+  if (!secret) return { token: '' };
   const nonce = crypto.randomBytes(8).toString("hex");
   const payload = [siteKey, timestamp, nonce].join(":");
   const sig = crypto.createHmac("sha256", secret).update(payload).digest("hex");
@@ -56,6 +77,32 @@ function loadGuardSource(root: string, name: string, assets: Record<string, stri
   } catch { return ""; }
 }
 
+let _httpGuardCache: { detect: string | null; guard: string | null; fetchedAt: number } = { detect: null, guard: null, fetchedAt: 0 };
+
+async function fetchGuardsHttp(baseUrl: string, siteKey: string, signingSecret?: string): Promise<{ detect: string; guard: string } | null> {
+  const GUARD_CACHE_TTL = 300_000;
+  if (_httpGuardCache.detect && _httpGuardCache.guard && Date.now() - _httpGuardCache.fetchedAt < GUARD_CACHE_TTL) {
+    return { detect: _httpGuardCache.detect, guard: _httpGuardCache.guard };
+  }
+  try {
+    const cb = Date.now();
+    const sk = siteKey || 'cache';
+    const secret = signingSecret || process.env.SHUGOKI_SIGNING_SECRET || process.env.SHUGOKI_SECRET;
+    const sig = secret ? crypto.createHmac('sha256', secret).update(cb.toString()).digest('hex') : '';
+    const [dRes, gRes] = await Promise.all([
+      fetch(baseUrl + '/guard-detect?key=' + sk + '&raw=1&cb=' + cb + (sig ? '&sig=' + sig : ''), { signal: AbortSignal.timeout(5000) }),
+      fetch(baseUrl + '/guard?key=' + sk + '&raw=1&cb=' + cb + (sig ? '&sig=' + sig : ''), { signal: AbortSignal.timeout(5000) }),
+    ]);
+    if (!dRes.ok || !gRes.ok) return null;
+    _httpGuardCache.detect = await dRes.text();
+    _httpGuardCache.guard = await gRes.text();
+    _httpGuardCache.fetchedAt = Date.now();
+    return { detect: _httpGuardCache.detect, guard: _httpGuardCache.guard };
+  } catch {
+    return null;
+  }
+}
+
 function generateBootcode(siteKey: string, config: string, detectCode: string, guardCode: string): string {
   const combined = 'window.__sg_siteKey=' + JSON.stringify(siteKey) +
     ';window.__sg_config=' + config +
@@ -75,7 +122,6 @@ function renderResponseData(token: string): { html?: string; blocked?: boolean; 
     for (const f of readdirSync(TOKEN_DIR)) {
       if (f.endsWith(suffix)) {
         const html = readFileSync(join(TOKEN_DIR, f), "utf-8");
-        try { unlinkSync(join(TOKEN_DIR, f)); } catch {}
         return { html };
       }
     }
@@ -87,54 +133,56 @@ export function createShugoiNextMiddleware(options: ShugoiNextOptions) {
   const { siteKey, baseUrl, allowlist, signingSecret } = options;
   const headless = DEFAULT_HEADLESS;
   const root = process.cwd();
+  const BASE_URL = baseUrl ?? 'https://shugoi.com/api/v1';
 
   return async function shugoiMiddleware(request: NextRequest) {
-    // Prevent recursion on internal sub-requests
     if (request.headers.get("x-shugoi-internal") === "1")
       return NextResponse.next();
 
     const path = request.nextUrl.pathname;
     const accept = request.headers.get("accept") || "";
 
-    // Render endpoint
     if (path.endsWith("/__shugoi/render")) {
       const token = request.nextUrl.searchParams.get("token") || "";
       return NextResponse.json(renderResponseData(token));
     }
 
-    // Skip API and static paths
     if (path.startsWith("/_next/") || path.startsWith("/api/")) return NextResponse.next();
     if (allowlist?.some((p) => path === p || path.startsWith(p + "/"))) return NextResponse.next();
 
-    // Headless UA block
     const ua = request.headers.get("user-agent") || "";
+
     if (headless.some((p) => p.test(ua))) {
-      const block = [
-        '╔═══════════════════════════════════════════╗',
-        '║           BLOCKED BY SHUGOI               ║',
-        '╠═══════════════════════════════════════════╣',
-        '║  Bots, scrapers and headless clients      ║',
-        '║  are blocked by Shugoi protection.        ║',
-        '║                                           ║',
-        '║  Use a standard browser to access         ║',
-        '║  this site.                               ║',
-        '║                                           ║',
-        '║  ─ contact: support@shugoi.com ─          ║',
-        '╚═══════════════════════════════════════════╝',
-      ].join("\n") + "\n";
-      return new NextResponse(block, { status: 200 });
+      return new NextResponse(BLOCK_PAGE, { status: 403 });
     }
 
-    // Only process HTML pages
     if (!accept.includes("text/html")) return NextResponse.next();
 
-    try {
-      // Read guard scripts from disk (no HTTP fetch = no deadlock)
-      const assets = loadAssets(root);
-      const detectCode = loadGuardSource(root, "guard-detect.src.js", assets);
-      const guardCode = loadGuardSource(root, "guard.src.js", assets);
+    const isBot = DEFAULT_BOT_WHITELIST.some(p => p.test(ua));
+    if (isBot) return NextResponse.next();
 
-      if (!detectCode) return NextResponse.next(); // guards not found, skip
+    try {
+      let detectCode = "";
+      let guardCode = "";
+
+      // 1. Try disk first
+      const assets = loadAssets(root);
+      detectCode = loadGuardSource(root, "guard-detect.src.js", assets);
+      guardCode = loadGuardSource(root, "guard.src.js", assets);
+
+      // 2. Fallback: HTTP
+      if (!detectCode || !guardCode) {
+        const httpGuards = await fetchGuardsHttp(BASE_URL, siteKey, signingSecret);
+        if (httpGuards) {
+          detectCode = httpGuards.detect;
+          guardCode = httpGuards.guard;
+        }
+      }
+
+      if (!detectCode) {
+        console.error("[shugoi] WARNING: unable to load guard scripts — protection inactive");
+        return NextResponse.next();
+      }
 
       const ts = Date.now();
       const signed = signToken(siteKey, ts, signingSecret);
@@ -144,10 +192,9 @@ export function createShugoiNextMiddleware(options: ShugoiNextOptions) {
         enableContentReplacementCheck: false,
       });
 
-      // Store original HTML for render endpoint
       const internalFetch = await fetch(request.url, {
         headers: { accept: "text/html", "user-agent": "Shugoi", "x-shugoi-internal": "1", cookie: request.headers.get("cookie") || "" },
-        signal: AbortSignal.timeout(10000),
+        signal: AbortSignal.timeout(5000),
       });
 
       if (internalFetch.ok) {
@@ -155,7 +202,6 @@ export function createShugoiNextMiddleware(options: ShugoiNextOptions) {
         writeFileSync(join(TOKEN_DIR, ts + "_" + signed.token.slice(-16)), originalHtml, "utf-8");
       }
 
-      // Generate and return skeleton with eval bootcode
       const skeleton = generateBootcode(siteKey, cfg, detectCode, guardCode);
       const fullPage = '<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>' +
         skeleton +

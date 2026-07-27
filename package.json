@@ -1,7 +1,12 @@
 {
   "name": "shugoi",
-  "version": "0.2.20",
+  "version": "0.3.0",
   "description": "Shugoi anti-abuse protection — one-line integration for Node.js",
+  "author": "Yohan SANNIER <support@shugoi.com>",
+  "repository": { "type": "git", "url": "git+https://github.com/RoxasYTB/shugoi-npm.git" },
+  "homepage": "https://shugoi.com",
+  "bugs": { "url": "https://github.com/RoxasYTB/shugoi-npm/issues" },
+  "sideEffects": false,
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
@@ -26,11 +31,23 @@
         "types": "./dist/next/index.d.cts",
         "default": "./dist/next/index.cjs"
       }
+    },
+    "./obfuscate": {
+      "import": {
+        "types": "./dist/obfuscate.d.ts",
+        "default": "./dist/obfuscate.js"
+      },
+      "require": {
+        "types": "./dist/obfuscate.d.cts",
+        "default": "./dist/obfuscate.cjs"
+      }
     }
   },
   "files": [
     "dist/",
-    "README.md"
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
   ],
   "scripts": {
     "build": "tsup",

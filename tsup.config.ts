@@ -4,9 +4,10 @@ export default defineConfig({
   entry: {
     index: 'src/index.ts',
     'next/index': 'src/next/index.ts',
+    obfuscate: 'src/obfuscate.ts',
   },
   format: ['esm', 'cjs'],
-  dts: true,
+  dts: false,
   sourcemap: true,
   clean: true,
   target: 'node20',

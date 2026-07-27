@@ -1,48 +1,75 @@
-/**
- * Options for {@link buildCsp}.
- */
 export interface CspOptions {
-  /** SiteKey (used for future directives) */
   siteKey: string;
-  /** Additional CSP directives merged with defaults */
   extraDirectives?: Record<string, string[]>;
+  splitRender?: boolean;
+  apiOrigin?: string;
 }
 
-const DEFAULT_DIRECTIVES: Record<string, string[]> = {
-  'default-src': ["'self'"],
-  'script-src': ["'self'", "'unsafe-inline'", "'unsafe-eval'", 'https://shugoi.com', 'https://challenges.cloudflare.com'],
-  'connect-src': ["'self'", 'https://shugoi.com', 'https://api.github.com', 'https://discord.com'],
-  'style-src': ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com', 'https://cdnjs.cloudflare.com', 'https://shugoi.com'],
-  'font-src': ["'self'", 'https://fonts.gstatic.com', 'https://cdnjs.cloudflare.com', 'https://shugoi.com'],
-  'img-src': ["'self'", 'https://shugoi.com', 'data:', 'blob:', 'https:', 'https://cdn.discordapp.com'],
-  'frame-src': ["'self'", 'https://shugoi.com', 'https://www.youtube.com', 'https://www.youtube-nocookie.com'],
-};
+export function originOf(baseUrl: string | undefined): string | null {
+  if (!baseUrl) return null;
+  try {
+    const u = new URL(baseUrl);
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
+    return u.protocol + '//' + u.host;
+  } catch { return null; }
+}
 
-/**
- * Builds a Content-Security-Policy header string from options.
- *
- * Merges default Shugoi directives with any extra directives.
- * Extra directives override defaults when keys overlap.
- *
- * @param options - CSP configuration options
- * @returns The full CSP string, ready to use in an HTTP header
- *
- * @example
- * ```ts
- * const csp = buildCsp({ siteKey: 'sg_sk_live_xxx' });
- * res.setHeader('Content-Security-Policy', csp);
- * ```
- */
+const SHUGOI_ORIGIN = 'https://shugoi.com';
+
+function baseDirectives(apiOrigin: string): Record<string, string[]> {
+  const api = [...new Set([SHUGOI_ORIGIN, apiOrigin].filter(Boolean))];
+  return {
+    'default-src': ["'self'"],
+    'script-src': ["'self'", "'unsafe-inline'", "'unsafe-eval'", ...api],
+    'connect-src': ["'self'", ...api],
+    'style-src': ["'self'", "'unsafe-inline'", ...api],
+    'font-src': ["'self'", ...api, 'data:'],
+    'img-src': ["'self'", ...api, 'data:', 'blob:'],
+    'frame-ancestors': ["'self'"],
+    'object-src': ["'none'"],
+    'base-uri': ["'self'"],
+    'form-action': ["'self'"],
+  };
+}
+
 export function buildCsp(options: CspOptions): string {
-  const merged: Record<string, string[]> = { ...DEFAULT_DIRECTIVES };
+  const apiOrigin = options.apiOrigin ?? SHUGOI_ORIGIN;
+  const merged: Record<string, string[]> = {};
+  for (const [k, v] of Object.entries(baseDirectives(apiOrigin))) merged[k] = [...v];
 
   if (options.extraDirectives) {
     for (const [key, values] of Object.entries(options.extraDirectives)) {
-      merged[key] = values;
+      merged[key] = [...new Set([...(merged[key] ?? []), ...values])];
     }
+  }
+
+  if (options.splitRender === false && merged['script-src']) {
+    merged['script-src'] = merged['script-src'].filter((v) => v !== "'unsafe-eval'");
   }
 
   return Object.entries(merged)
     .map(([key, values]) => `${key} ${values.join(' ')}`)
     .join('; ');
+}
+
+export function mergeCsp(existing: string | undefined, added: string): string {
+  if (!existing) return added;
+  const parse = (s: string): Map<string, Set<string>> => {
+    const m = new Map<string, Set<string>>();
+    for (const part of s.split(';')) {
+      const [name, ...vals] = part.trim().split(/\s+/);
+      if (!name) continue;
+      const set = m.get(name) ?? new Set<string>();
+      vals.forEach((v) => set.add(v));
+      m.set(name, set);
+    }
+    return m;
+  };
+  const base = parse(existing);
+  for (const [k, v] of parse(added)) {
+    const set = base.get(k) ?? new Set<string>();
+    v.forEach((x) => set.add(x));
+    base.set(k, set);
+  }
+  return [...base.entries()].map(([k, v]) => `${k} ${[...v].join(' ')}`).join('; ');
 }

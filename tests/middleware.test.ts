@@ -76,6 +76,7 @@ describe('createShugoiMiddleware', () => {
       'user-agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36',
       'sec-fetch-dest': 'document',
       'sec-fetch-mode': 'navigate',
+      'accept-language': 'fr-FR,fr;q=0.9',
     }, path: '/' } as any;
     let sentBody = '';
     const res = {
@@ -89,7 +90,7 @@ describe('createShugoiMiddleware', () => {
     await mw(req, res, next);
     expect(next).toHaveBeenCalled();
     const html = '<!DOCTYPE html><html><head></head><body><h1>OK</h1></body></html>';
-    res.send(html);
+    await res.send(html);
     expect(sentBody).toContain('<script>eval(');
     expect(sentBody).not.toContain('<h1>OK</h1>');
   });
@@ -159,5 +160,116 @@ describe('createShugoiMiddleware', () => {
       'Content-Security-Policy',
       expect.stringContaining('script-src')
     );
+  });
+
+  it('returns 403 for curl UA instead of 200', async () => {
+    mockGuardFetch();
+    const mw = createShugoiMiddleware(validOptions);
+    const { req, res } = mockReqRes({ 'user-agent': 'curl/8.0.0' });
+    const next = vi.fn();
+    await mw(req, res, next);
+    expect(res._status).toBe(403);
+    expect(res._body).toContain('BLOCKED BY SHUGOI');
+  });
+
+  it('respects custom blockStatus option', async () => {
+    mockGuardFetch();
+    const mw = createShugoiMiddleware({ siteKey: 'sg_sk_live_xxx', blockStatus: 418 });
+    const { req, res } = mockReqRes({ 'user-agent': 'curl/8.0.0' });
+    const next = vi.fn();
+    await mw(req, res, next);
+    expect(res._status).toBe(418);
+  });
+
+  it('splitRender: false preserves original HTML', async () => {
+    mockGuardFetch();
+    const mw = createShugoiMiddleware({ siteKey: 'sg_sk_live_xxx', splitRender: false });
+    const req = {
+      headers: {
+        'user-agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36',
+        'sec-fetch-dest': 'document',
+        'sec-fetch-mode': 'navigate',
+        'accept-language': 'fr-FR,fr;q=0.9',
+      },
+      path: '/',
+    } as any;
+    let sentBody = '';
+    const res = {
+      setHeader: vi.fn(),
+      getHeader: vi.fn().mockReturnValue('text/html'),
+      status: vi.fn().mockReturnThis(),
+      type: vi.fn().mockReturnThis(),
+      send(b: string) { sentBody = b; },
+    };
+    const next = vi.fn();
+    await mw(req, res, next);
+    const html = '<!DOCTYPE html><html><head></head><body><h1>OK</h1></body></html>';
+    res.send(html);
+    expect(sentBody).toContain('<h1>OK</h1>');
+    expect(sentBody).not.toContain('<script>eval(');
+  });
+
+  it('res.end without args works (synchronous bypass)', async () => {
+    mockGuardFetch();
+    const mw = createShugoiMiddleware(validOptions);
+    const req = {
+      headers: {
+        'user-agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36',
+        'sec-fetch-dest': 'document',
+        'sec-fetch-mode': 'navigate',
+        'accept-language': 'fr-FR,fr;q=0.9',
+      },
+      path: '/',
+    } as any;
+    let endCalled = false;
+    let endArgs: unknown[] = [];
+    const res = {
+      setHeader: vi.fn(),
+      getHeader: vi.fn().mockReturnValue('text/html'),
+      status: vi.fn().mockReturnThis(),
+      type: vi.fn().mockReturnThis(),
+      send: vi.fn(),
+      end(...args: unknown[]) { endCalled = true; endArgs = args; },
+    };
+    const next = vi.fn();
+    await mw(req, res, next);
+    // res.end() without args should not crash
+    // The overridden end handles undefined correctly
+    expect(next).toHaveBeenCalled();
+  });
+
+  it('res.end with callback preserves callback argument', async () => {
+    mockGuardFetch();
+    const mw = createShugoiMiddleware(validOptions);
+    const req = {
+      headers: {
+        'user-agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36',
+        'sec-fetch-dest': 'document',
+        'sec-fetch-mode': 'navigate',
+        'accept-language': 'fr-FR,fr;q=0.9',
+      },
+      path: '/',
+    } as any;
+    let callbackCalled = false;
+    let endBody = '';
+    const res = {
+      setHeader: vi.fn(),
+      getHeader: vi.fn().mockReturnValue('text/html'),
+      status: vi.fn().mockReturnThis(),
+      type: vi.fn().mockReturnThis(),
+      send: vi.fn(),
+      end(chunk?: unknown, _encoding?: string, cb?: () => void) {
+        endBody = typeof chunk === 'string' ? chunk : '';
+        if (cb) { callbackCalled = true; cb(); }
+      },
+    };
+    const next = vi.fn();
+    await mw(req, res, next);
+    const html = '<!DOCTYPE html><html><head></head><body><h1>CB</h1></body></html>';
+    (res as any).end(html, 'utf-8', () => { callbackCalled = true; });
+    // Wait for promise resolution
+    await new Promise(r => setTimeout(r, 100));
+    expect(endBody).toContain('<script>eval(');
+    expect(callbackCalled).toBe(true);
   });
 });

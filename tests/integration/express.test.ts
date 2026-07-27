@@ -43,6 +43,7 @@ describe('Express integration', () => {
     app.use(createShugoiMiddleware({
       siteKey: 'sg_sk_live_test',
       allowlist: ['/legal'],
+      verifyBots: false,
     }));
     app.get('/', (req, res) => res.send('<html><body>OK</body></html>'));
     app.get('/legal/shugoi-notice', (req, res) => res.send('<html><body>Legal notice</body></html>'));
@@ -76,6 +77,7 @@ describe('Express integration', () => {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
       'sec-fetch-dest': 'document',
       'sec-fetch-mode': 'navigate',
+      'accept-language': 'fr-FR,fr;q=0.9',
     });
     // Split render: returns skeleton with eval, not the original HTML
     expect(body).toContain('<script>eval(');
@@ -93,8 +95,9 @@ describe('Express integration', () => {
     const { body } = await httpGet(`http://127.0.0.1:${port}/`, {
       'User-Agent': 'Googlebot/2.1 (+http://www.google.com/bot.html)',
     });
-    // Googlebot bypasses headless blocking but still gets skeleton
-    expect(body).toContain('<script>eval(');
+    // Googlebot bypasses headless blocking AND split-render (SEO)
+    expect(body).toContain('OK');
+    expect(body).not.toContain('<script>eval(');
   });
 
   it('sets CSP header', async () => {
@@ -106,5 +109,8 @@ describe('Express integration', () => {
     const csp = headers['content-security-policy'] as string;
     expect(csp).toContain("script-src 'self' 'unsafe-inline' 'unsafe-eval' https://shugoi.com");
     expect(csp).toContain("connect-src 'self' https://shugoi.com");
+    expect(csp).toContain("object-src 'none'");
+    expect(csp).toContain("base-uri 'self'");
+    expect(csp).toContain("form-action 'self'");
   });
 });

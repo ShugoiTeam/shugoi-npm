@@ -1,394 +1,217 @@
-// @ts-nocheck
-import { injectGuardScripts, ensureGuardsReady } from './render';
+import type { ShugoiCoreOptions } from './types'
+import { injectGuardScripts, ensureGuardsReady, enableDiskStore, getConfig, storeHtml, signToken, renderResponseData } from './render'
 
-export const DEFAULT_HEADLESS_PATTERNS = [
-  /^curl/i, /^wget/i, /^python/i, /^Go-http-client/i, /^Java\//,
-  /HTTPie/i, /^node-fetch/i, /axios/i, /^okhttp/i, /^scrapy/i,
-  /PowerShell/i, /WinHttp/i,
-];
+import { mergeCsp } from './csp'
+import { createCore, DEFAULT_HEADLESS_PATTERNS, BLOCK_PAGE, DEFAULT_BOT_WHITELIST } from './core'
+import { resolveLocale, type Locale } from './locales'
 
-export const BLOCK_PAGE = [
-  "+---------------------------------------------+",
-  "|           BLOCKED BY SHUGOI                 |",
-  "+---------------------------------------------+",
-  "|  Bots, scrapers and headless clients        |",
-  "|  are blocked by Shugoi protection.          |",
-  "|                                             |",
-  "|  Use a standard browser to access           |",
-  "|  this site.                                 |",
-  "|                                             |",
-  "|  - contact: support@shugoi.com -            |",
-  "+---------------------------------------------+",
-].join('\n') + '\n';
-
-function shieldPage(title, msg, badge, host, remainSecs) {
-  const prefix = msg ? msg.replace(/Il reste \d+ seconde?s?.*$/, '').trim() : '';
-  const countdownScript = remainSecs > 0
-    ? '<script>var s=' + remainSecs + ';var i=setInterval(function(){s--;var e=document.getElementById("cd");if(e){if(s<=0){e.innerHTML="0s";clearInterval(i);setTimeout(function(){location.reload()},500)}else{e.innerHTML=s+"s"}}},1000)</script>'
-    : '';
-  const desc = remainSecs > 0
-    ? prefix + ' Il reste <span id="cd">' + remainSecs + 's</span> avant de pouvoir r\u00e9essayer.'
-    : (msg || '');
-  return '<!DOCTYPE html><html lang="fr"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link href="https://fonts.googleapis.com/css2?family=Alex+Brush&family=Itim&display=swap" rel="stylesheet"><style>*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}html,body{height:100%;background:#fcf9f5}body{font-family:Itim,sans-serif;display:flex;align-items:center;justify-content:center;padding:1.2rem}#c{max-width:460px;width:100%;background:#fff;border:4px solid #000;border-radius:28px 6px 32px 10px;box-shadow:12px 12px 0 #000;padding:3rem 2.4rem 2.8rem;text-align:center}#c .l{width:80px;height:80px;pointer-events:none;transform:rotate(-2.5deg);margin:0 auto .6rem;display:block}#c .b{display:block;margin:0 auto .2rem;pointer-events:none;max-width:100%;height:auto}#c .bdg{display:inline-block;border:2px solid #000;border-radius:10px 2px 14px 4px;padding:.3rem .9rem;font-size:.6rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#E87090;margin-bottom:1.4rem}#c h2{font-family:"Alex Brush",cursive;font-size:2.2rem;color:#E87090;font-weight:400;margin:0 auto .6rem}#c p.desc{font-size:.9rem;color:#555;line-height:1.8;max-width:380px;margin:0 auto}#c p.ft{font-size:.55rem;color:#E87090;margin-top:1.8rem}</style></head><body><div id=c><img src=https://shugoi.com/favicon.png alt class=l><img src=https://shugoi.com/brand.png alt class=b><div class=bdg>' + (badge || 'Blocage') + '</div><h2>' + (title || 'Acc\u00e8s bloqu\u00e9') + '</h2><p class=desc>' + desc + '</p><p class=ft>' + (host || 'shugoi.com') + ' \u00b7 Shugoi</p></div>' + countdownScript + '</body></html>';
+interface MinimalRequest {
+  path?: string; url?: string; ip?: string;
+  headers?: Record<string, string | string[] | undefined>;
+  query?: Record<string, unknown>;
+}
+interface MinimalResponse {
+  setHeader?(k: string, v: string): void;
+  getHeader?(k: string): string | number | string[] | undefined;
+  status?(code: number): unknown;
+  type?(t: string): unknown;
+  send?(body: unknown): unknown;
+  end?(body?: unknown, ...rest: unknown[]): unknown;
 }
 
-export const DEFAULT_BOT_WHITELIST = [
-  /Googlebot/i, /Bingbot/i, /Slurp/i, /DuckDuckBot/i, /YandexBot/i,
-  /FacebookExternalHit/i, /Twitterbot/i, /LinkedInBot/i, /Applebot/i,
-  /AhrefsBot/i, /SemrushBot/i,
-];
+export { DEFAULT_HEADLESS_PATTERNS, BLOCK_PAGE, DEFAULT_BOT_WHITELIST } from './core';
 
-function buildCsp(options) {
-  const DEFAULT_DIRECTIVES = {
-    'default-src': ["'self'"],
-    'script-src': ["'self'", "'unsafe-inline'", "'unsafe-eval'", 'https://shugoi.com', 'https://challenges.cloudflare.com'],
-    'connect-src': ["'self'", 'https://shugoi.com', 'https://api.github.com', 'https://discord.com'],
-    'style-src': ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com', 'https://cdnjs.cloudflare.com', 'https://shugoi.com'],
-    'font-src': ["'self'", 'https://fonts.gstatic.com', 'https://cdnjs.cloudflare.com', 'https://shugoi.com'],
-    'img-src': ["'self'", 'https://shugoi.com', 'data:', 'blob:', 'https:', 'https://cdn.discordapp.com'],
-    'frame-src': ["'self'", 'https://shugoi.com', 'https://www.youtube.com', 'https://www.youtube-nocookie.com'],
-  };
-  const merged = { ...DEFAULT_DIRECTIVES };
-  if (options.extraDirectives) {
-    for (const [key, values] of Object.entries(options.extraDirectives)) {
-      merged[key] = values;
-    }
-  }
-  return Object.entries(merged).map(([key, values]) => `${key} ${values.join(' ')}`).join('; ');
-}
-
-/**
- * Creates a Connect-compatible middleware for Shugoi split-render protection.
- *
- * @param {object} options
- * @param {string} options.siteKey - Your Shugoi siteKey
- * @param {string[]} [options.allowlist] - Paths bypassing anti-bot checks (default: ['/legal'])
- * @param {boolean} [options.restrictedAccess] - Show restricted block page (default: false)
- * @param {string} [options.signingSecret] - HMAC secret for token signing
- * @param {boolean} [options.debug] - Enable console logs
- * @param {string} [options.baseUrl] - API base URL (default: https://shugoi.com/api/v1)
- */
-let _cachedFlags = null;
-let _flagsFetchedAt = 0;
-
-export function createShugoiMiddleware(options) {
-  const allowlist = options.allowlist ?? ['/api', '/legal'];
-  const headlessPatterns = options.headlessPatterns ?? DEFAULT_HEADLESS_PATTERNS;
-  const botWhitelist = options.botWhitelist ?? DEFAULT_BOT_WHITELIST;
-  const baseUrl = options.baseUrl ?? 'https://shugoi.com/api/v1';
-  const debug = options.debug ?? false;
+export function createShugoiMiddleware(options: ShugoiCoreOptions) {
+  const core = createCore(options);
   const autoInject = options.autoInject ?? true;
+  const splitRender = options.splitRender ?? true;
   const restrictedAccess = options.restrictedAccess ?? false;
   const signingSecret = options.signingSecret || options.secret;
-  const siteSecret = options.secret;
-  let _validationValid = false;
-  let _validationFailed = false;
-  let _validationAllowedOrigins: string[] = [];
+  const baseUrl = options.baseUrl ?? 'https://shugoi.com/api/v1';
+  const internalUrl = options.internalUrl || baseUrl;
 
-  // Validate siteKey + secret at init
-  (async () => {
-    if (siteSecret && baseUrl) {
-      try {
-        const res = await fetch(baseUrl + '/validate-key', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ siteKey: options.siteKey, secret: siteSecret }),
-          signal: AbortSignal.timeout(5000)
-        });
-        if (res.ok) {
-          const data = await res.json();
-          if (data.valid) {
-            _validationValid = true;
-            _validationAllowedOrigins = data.allowedOrigins || [];
-            if (debug) console.log('[shugoi] key validation OK');
-          } else {
-            _validationFailed = true;
-            console.warn('[shugoi] KEY VALIDATION FAILED:', data.reason || 'unknown');
-          }
-        } else {
-          _validationFailed = true;
-          console.warn('[shugoi] KEY VALIDATION FAILED: HTTP', res.status);
-        }
-      } catch (e) {
-        _validationFailed = true;
-        console.warn('[shugoi] KEY VALIDATION FAILED: network error', e);
-      }
-    } else if (debug) {
-      console.log('[shugoi] no secret provided, skipping key validation');
-    }
-  })();
-  // Pre-fetch guard scripts so first request doesn't block
-  ensureGuardsReady(baseUrl, siteSecret, options.siteKey).catch(() => {});
-  const csp = buildCsp({ siteKey: options.siteKey, extraDirectives: options.extraDirectives || {} });
+  if (options.multiProcess) enableDiskStore(true);
 
-  function log(...args) { if (debug) console.log('[shugoi]', ...args); }
-  async function getFlags() {
-    if (_cachedFlags && Date.now() - _flagsFetchedAt < 10000) return _cachedFlags;
-    try {
-      const res = await fetch(baseUrl + '/whitelist?key=' + encodeURIComponent(options.siteKey));
-      if (res.ok) { const d = await res.json(); _cachedFlags = d.detectionFlags || {}; _flagsFetchedAt = Date.now(); return _cachedFlags; }
-    } catch {}
-    return _cachedFlags || {};
-  }
-
-  return async function shugoiMiddleware(req, res, next) {
+  return async function shugoiMiddleware(req: MinimalRequest, res: MinimalResponse, next: () => void) {
     try {
       const path = (req.path ?? req.url ?? '/').split('?')[0];
 
-      // If secret configured, wait a moment for validation to complete
-      if (siteSecret && !_validationValid && !_validationFailed) {
-        for (let i = 0; i < 40; i++) {
-          await new Promise(r => setTimeout(r, 50));
-          if (_validationValid || _validationFailed) break;
-        }
-      }
-      if (siteSecret && _validationFailed) {
-        log('secret validation failed — proceeding without origin check');
-      }
-
-      // Render endpoint
+      // Render endpoint — handled by middleware adapter
       if (path.endsWith('/__shugoi/render')) {
         const { handleRender } = await import('./render');
-        return handleRender((req.query && req.query.token) || '', res);
+        return handleRender((req.query && (req.query as Record<string, string>).token) || '', res, internalUrl);
       }
 
-      // CSP
-      if (res.setHeader) res.setHeader('Content-Security-Policy', csp);
+      // CSP: merge with existing header
+      if (core.cspEnabled && res.setHeader) {
+        if (res.getHeader) {
+          const existing = res.getHeader('Content-Security-Policy');
+          res.setHeader('Content-Security-Policy', mergeCsp(
+            typeof existing === 'string' ? existing : undefined,
+            core.csp,
+          ));
+        } else {
+          res.setHeader('Content-Security-Policy', core.csp);
+        }
+      }
 
-      const flags = await getFlags();
+      // Delegate evaluation to core
+      const ua = (typeof req.headers?.['user-agent'] === 'string' ? req.headers['user-agent'] : '') || '';
+      const ip = (typeof req.headers?.['x-forwarded-for'] === 'string'
+        ? req.headers['x-forwarded-for'].split(',')[0]?.trim()
+        : undefined) || (typeof req.ip === 'string' ? req.ip : 'unknown');
+      const reqLocale: Locale = resolveLocale(options.locale, typeof req.headers?.['accept-language'] === 'string' ? req.headers?.['accept-language'] : undefined);
 
-      // Allowlist bypass (rate limit only applies to pages, not assets)
-      if (allowlist.some(p => path === p || path.startsWith(p + '/'))) return next();
-
-      // Rate limit check (respects dashboard toggle)
-      if (flags.enableRateLimit !== false) {
+      // SkipPaths check BEFORE detection — ces routes contournent toute protection
+      if (autoInject && options.siteKey) {
         try {
-          const ip = req.headers?.['x-forwarded-for']?.split(',')[0]?.trim() || req.ip || 'unknown';
-          const rlRes = await fetch(baseUrl + '/rate-limit-check', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ siteKey: options.siteKey, fingerprint: { browser: ip }, metadata: { ip, userAgent: req.headers?.['user-agent'] || '', middleware: true } }),
-            signal: AbortSignal.timeout(2000)
-          });
-          if (rlRes.ok) {
-            const rlData = await rlRes.json();
-            if (rlData.allowed === false) {
-              if (res.status) res.status(429);
-              const remain = Math.max(0, Math.ceil((rlData.resetAt - Date.now()) / 1000));
-              const mins = Math.floor(remain / 60);
-              const secs = remain % 60;
-              const timeStr = mins > 0 ? mins + ' min' + (mins > 1 ? 's' : '') + (secs > 0 ? ' ' + secs + ' s' : '') : secs + ' seconde' + (secs > 1 ? 's' : '');
-              if (res.send) res.send(shieldPage('Trop de requ\u00eates', "Vous avez effectu\u00e9 trop de requ\u00eates en peu de temps. Il reste " + timeStr + " avant de pouvoir r\u00e9essayer.", 'Rate Limit', req.headers?.host, remain));
+          const { skipPaths } = await getConfig(options.siteKey, internalUrl);
+          if (skipPaths?.some((p: string) => path === p || path.startsWith(p + '/'))) {
+            try {
+              // @ts-ignore
+              const { renderPage } = await import('../../../server/lib/ssr.js');
+              const html = await renderPage(path);
+              if (res.setHeader) res.setHeader('Content-Type', 'text/html; charset=utf-8');
+              if (res.send) res.send(html);
+              else if (res.end) res.end(html);
               return;
+            } catch (ssrErr) {
+              return next();
             }
           }
-        } catch (e) {}
+        } catch {}
       }
 
-      // Headless UA block (respects dashboard toggle)
-      const ua = req.headers?.['user-agent'] ?? '';
-      if (flags.enableHeadlessCheck !== false && ua && !botWhitelist.some(p => p.test(ua)) && headlessPatterns.some(p => p.test(ua))) {
-        log('headless block:', ua.slice(0, 40));
-        fetch(baseUrl + '/event', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ siteKey: options.siteKey, reason: 'headless' }), signal: AbortSignal.timeout(2000) }).catch(() => {});
-        if (res.status) res.status(200);
-        if (res.type) res.type('txt');
-        if (res.send) res.send(BLOCK_PAGE); else if (res.end) res.end(BLOCK_PAGE);
+      const decision = await core.evaluate({
+        path,
+        ua,
+        ip,
+        host: typeof req.headers?.['host'] === 'string' ? req.headers.host : undefined,
+        acceptLanguage: typeof req.headers?.['accept-language'] === 'string' ? req.headers['accept-language'] : undefined,
+        secFetchDest: typeof req.headers?.['sec-fetch-dest'] === 'string' ? req.headers['sec-fetch-dest'] : undefined,
+        secFetchMode: typeof req.headers?.['sec-fetch-mode'] === 'string' ? req.headers['sec-fetch-mode'] : undefined,
+      });
+
+      if (decision) {
+        if (res.status) res.status(decision.status);
+        if (res.type) res.type(decision.contentType.split('/')[1]);
+        if (res.send) res.send(decision.body);
+        else if (res.end) res.end(decision.body);
         return;
       }
 
-      // Sec-Fetch + Accept-Language check for fake browsers (respects dashboard toggle)
-      if (flags.enableHeadlessCheck !== false && /Mozilla/i.test(ua) && !botWhitelist.some(p => p.test(ua))) {
-        const sfd = req.headers?.['sec-fetch-dest'] ?? '';
-        const sfm = req.headers?.['sec-fetch-mode'] ?? '';
-        const al = req.headers?.['accept-language'] ?? '';
-        if (!al || (!sfd && !sfm)) {
-          log('fake browser block:', ua.slice(0, 40));
-          fetch(baseUrl + '/event', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ siteKey: options.siteKey, reason: 'headless' }), signal: AbortSignal.timeout(2000) }).catch(() => {});
-          if (res.status) res.status(200);
-          if (res.type) res.type('txt');
-          if (res.send) res.send(BLOCK_PAGE); else if (res.end) res.end(BLOCK_PAGE);
-          return;
-        }
-      }
+      // Split-render: inject skeleton for HTML pages (skip for allowlisted paths and whitelisted bots)
+      const isBot = await core.isTrustedBot(ua, ip);
 
-      // Split-render: replace HTML with skeleton
-      if (autoInject) {
+      if (autoInject && splitRender && !isBot && !core.isAllowlisted(path)) {
         let injected = false;
-        const originalSend = res.send?.bind(res);
-        const originalEnd = res.end?.bind(res);
-        const doInject = async (body) => {
+        const originalSend = res.send?.bind(res) as ((body?: unknown) => unknown) | undefined;
+        const originalEnd = res.end?.bind(res) as ((chunk?: unknown, encoding?: string, cb?: () => void) => unknown) | undefined;
+
+        const doInject = async (body: unknown): Promise<unknown> => {
           if (injected) return body;
           if (typeof body === 'string') {
             const ct = res.getHeader ? res.getHeader('content-type') : undefined;
             if (!ct || String(ct).includes('text/html')) {
-              try { body = await injectGuardScripts(body, options.siteKey, baseUrl, undefined, restrictedAccess, signingSecret, req, _validationAllowedOrigins); } catch (e) { log('inject error:', e); }
+              try { body = await injectGuardScripts(body, options.siteKey, baseUrl, undefined, restrictedAccess, signingSecret, req as any, undefined, reqLocale); } catch (e) { core.log('inject error:', e); }
               injected = true;
             }
           }
           return body;
         };
-        if (originalSend) { res.send = function (body) { return doInject(body).then(b => originalSend(b)); }; }
-        if (originalEnd) { res.end = function (body) { return doInject(body).then(b => originalEnd(b)); }; }
+
+        if (originalSend) {
+          res.send = function (body: unknown) { return doInject(body).then(b => originalSend(b)); };
+        }
+        if (originalEnd) {
+          res.end = function (chunk?: unknown, encoding?: string, cb?: () => void) {
+            doInject(chunk).then(b => {
+              if (cb) originalEnd(b, encoding, cb);
+              else originalEnd(b, encoding);
+            });
+            return this;
+          };
+        }
       }
 
       next();
     } catch (err) {
-      log('Unhandled error:', err);
+      core.log('Unhandled error:', err);
       next();
     }
   };
 }
 
-/**
- * Shugoi Fastify plugin.
- */
-export function createShugoiPlugin(options) {
-  const allowlist = options.allowlist ?? ['/api', '/legal'];
-  const headlessPatterns = options.headlessPatterns ?? DEFAULT_HEADLESS_PATTERNS;
-  const botWhitelist = options.botWhitelist ?? DEFAULT_BOT_WHITELIST;
-  const baseUrl = options.baseUrl ?? 'https://shugoi.com/api/v1';
-  const debug = options.debug ?? false;
+export function createShugoiPlugin(options: ShugoiCoreOptions) {
+  const core = createCore(options);
   const restrictedAccess = options.restrictedAccess ?? false;
   const signingSecret = options.signingSecret || options.secret;
-  const siteSecret = options.secret;
-  let _validationValid = false;
-  let _validationFailed = false;
-  let _validationAllowedOrigins: string[] = [];
+  const baseUrl = options.baseUrl ?? 'https://shugoi.com/api/v1';
 
-  // Validate siteKey + secret at init
-  (async () => {
-    if (siteSecret && baseUrl) {
-      try {
-        const res = await fetch(baseUrl + '/validate-key', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ siteKey: options.siteKey, secret: siteSecret }),
-          signal: AbortSignal.timeout(5000)
-        });
-        if (res.ok) {
-          const data = await res.json();
-          if (data.valid) {
-            _validationValid = true;
-            _validationAllowedOrigins = data.allowedOrigins || [];
-            if (debug) console.log('[shugoi] key validation OK');
-          } else {
-            _validationFailed = true;
-            console.warn('[shugoi] KEY VALIDATION FAILED:', data.reason || 'unknown');
-          }
-        } else {
-          _validationFailed = true;
-          console.warn('[shugoi] KEY VALIDATION FAILED: HTTP', res.status);
-        }
-      } catch (e) {
-        _validationFailed = true;
-        console.warn('[shugoi] KEY VALIDATION FAILED: network error', e);
+  if (options.multiProcess) enableDiskStore(true);
+
+  return async function shugoiPlugin(fastify: any) {
+    // CSP onRequest hook
+    fastify.addHook('onRequest', async (request: any, reply: any) => {
+      if (core.cspEnabled && reply.getHeader) {
+        const existing = reply.getHeader('Content-Security-Policy');
+        reply.header('Content-Security-Policy', mergeCsp(
+          typeof existing === 'string' ? existing : undefined,
+          core.csp,
+        ));
+      } else if (core.cspEnabled) {
+        reply.header('Content-Security-Policy', core.csp);
       }
-    } else if (debug) {
-      console.log('[shugoi] no secret provided, skipping key validation');
-    }
-  })();
-  // Pre-fetch guard scripts so first request doesn't block
-  ensureGuardsReady(baseUrl, siteSecret, options.siteKey).catch(() => {});
-  const csp = buildCsp({ siteKey: options.siteKey, extraDirectives: options.extraDirectives || {} });
-
-  function log(...args) { if (debug) console.log('[shugoi]', ...args); }
-  async function getFlags() {
-    if (_cachedFlags && Date.now() - _flagsFetchedAt < 10000) return _cachedFlags;
-    try {
-      const res = await fetch(baseUrl + '/whitelist?key=' + encodeURIComponent(options.siteKey));
-      if (res.ok) { const d = await res.json(); _cachedFlags = d.detectionFlags || {}; _flagsFetchedAt = Date.now(); return _cachedFlags; }
-    } catch {}
-    return _cachedFlags || {};
-  }
-
-  return async function shugoiPlugin(fastify) {
-    fastify.addHook('onRequest', async (request, reply) => {
-      reply.header('Content-Security-Policy', csp);
     });
 
-    fastify.get('/__shugoi/render', async (request, reply) => {
+    // Render endpoint
+    fastify.get('/__shugoi/render', async (request: any, reply: any) => {
       const { renderResponseData } = await import('./render');
-      const data = renderResponseData(request.query.token || '');
+      const data = await renderResponseData(request.query.token || '', undefined, options.baseUrl);
       reply.send(data);
     });
 
-    fastify.head('/__shugoi/healthcheck', async (request, reply) => reply.send(''));
+    fastify.head('/__shugoi/healthcheck', async (request: any, reply: any) => reply.send(''));
 
-    fastify.addHook('preHandler', async (request, reply) => {
+    // PreHandler: evaluation pipeline
+    fastify.addHook('preHandler', async (request: any, reply: any) => {
       try {
         const path = request.url.split('?')[0];
         if (path.endsWith('/__shugoi/render') || path.endsWith('/__shugoi/healthcheck')) return;
-        if (allowlist.some(p => path === p || path.startsWith(p + '/'))) return;
-
-        // If secret configured, wait for validation & bail if it failed
-        if (siteSecret && !_validationValid && !_validationFailed) {
-          for (let i = 0; i < 40; i++) {
-            await new Promise(r => setTimeout(r, 50));
-            if (_validationValid || _validationFailed) break;
-          }
-        }
-        if (siteSecret && _validationFailed) {
-          log('secret validation failed — proceeding without origin check');
-        }
-
-        // Pre-load guard scripts to avoid timeout in onSend
-        await ensureGuardsReady(baseUrl, siteSecret, options.siteKey).catch(() => {});
-
-        const flags = await getFlags();
-
-        // Rate limit check (respects dashboard toggle)
-        if (flags.enableRateLimit !== false) {
-          try {
-            const ip = request.headers['x-forwarded-for']?.split(',')[0]?.trim() || request.ip || 'unknown';
-            const rlRes = await fetch(baseUrl + '/rate-limit-check', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ siteKey: options.siteKey, fingerprint: { browser: ip }, metadata: { ip, userAgent: request.headers['user-agent'] || '', middleware: true } }),
-              signal: AbortSignal.timeout(2000)
-            });
-            if (rlRes.ok) {
-              const rlData = await rlRes.json();
-              if (rlData.allowed === false) {
-                const remain = Math.max(0, Math.ceil((rlData.resetAt - Date.now()) / 1000));
-                const mins = Math.floor(remain / 60);
-                const secs = remain % 60;
-                const timeStr = mins > 0 ? mins + ' min' + (mins > 1 ? 's' : '') + (secs > 0 ? ' ' + secs + ' s' : '') : secs + ' seconde' + (secs > 1 ? 's' : '');
-                reply.code(429).type('text/html').send(shieldPage('Trop de requ\u00eates', "Vous avez effectu\u00e9 trop de requ\u00eates en peu de temps. Il reste " + timeStr + " avant de pouvoir r\u00e9essayer.", 'Rate Limit', request.headers?.host, remain));
-                return;
-              }
-            }
-          } catch (e) {}
-        }
+        if (core.isAllowlisted(path)) return;
 
         const ua = request.headers['user-agent'] ?? '';
-        if (flags.enableHeadlessCheck !== false && ua && !botWhitelist.some(p => p.test(ua)) && headlessPatterns.some(p => p.test(ua))) {
-          fetch(baseUrl + '/event', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ siteKey: options.siteKey, reason: 'headless' }), signal: AbortSignal.timeout(2000) }).catch(() => {});
-          reply.code(200).type('text/plain').send(BLOCK_PAGE);
+        const ip = request.headers['x-forwarded-for']?.split(',')[0]?.trim() || request.ip || 'unknown';
+
+        const decision = await core.evaluate({
+          path,
+          ua,
+          ip,
+          host: request.headers?.host,
+          acceptLanguage: request.headers['accept-language'],
+          secFetchDest: request.headers['sec-fetch-dest'],
+          secFetchMode: request.headers['sec-fetch-mode'],
+        });
+
+        if (decision) {
+          reply.code(decision.status).type(decision.contentType === 'text/html' ? 'text/html' : 'text/plain').send(decision.body);
           return;
         }
-        if (flags.enableHeadlessCheck !== false && /Mozilla/i.test(ua) && !botWhitelist.some(p => p.test(ua))) {
-          const sfd = request.headers['sec-fetch-dest'] ?? '';
-          const sfm = request.headers['sec-fetch-mode'] ?? '';
-          const al = request.headers['accept-language'] ?? '';
-          if (!al || (!sfd && !sfm)) {
-fetch(baseUrl + '/event', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ siteKey: options.siteKey, reason: 'headless' }), signal: AbortSignal.timeout(2000) }).catch(() => {});
-            reply.code(200).type('text/plain').send(BLOCK_PAGE);
-            return;
-          }
-        }
       } catch (err) {
-        log('preHandler error:', err);
+        core.log('preHandler error:', err);
       }
     });
 
-    fastify.addHook('onSend', async (request, reply, payload) => {
+    // onSend: split-render injection
+    fastify.addHook('onSend', async (request: any, reply: any, payload: any) => {
       if (typeof payload !== 'string') return payload;
       const path = request.url.split('?')[0];
       if (path.endsWith('/__shugoi/render') || path.endsWith('/__shugoi/healthcheck')) return payload;
       if (reply.statusCode !== 200) return payload;
       const ct = reply.getHeader('content-type');
       if (!ct || String(ct).includes('text/html')) {
-        return await injectGuardScripts(payload, options.siteKey, baseUrl, undefined, restrictedAccess, signingSecret, { url: path }, _validationAllowedOrigins);
+        const pluginLocale: Locale = resolveLocale(options.locale, typeof request.headers?.['accept-language'] === 'string' ? request.headers?.['accept-language'] : undefined);
+        return await injectGuardScripts(payload, options.siteKey, baseUrl, undefined, restrictedAccess, signingSecret, { url: path } as any, undefined, pluginLocale);
       }
       return payload;
     });
