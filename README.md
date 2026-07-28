@@ -49,6 +49,47 @@ export const proxy = createShugoiProxy({ siteKey: "sg_sk_live_xxx" });
 export const config = { matcher: SHUGOI_MATCHER };
 ```
 
+## PHP / Laravel
+
+A PHP port of the Shugoi middleware is available for Laravel applications. It's a full port of the Node.js middleware with the same security guarantees — browser fingerprinting, headless detection, rate limiting, CSP injection, and split-render.
+
+### Installation
+
+```bash
+composer require shugoi/shugoi-php
+```
+
+### Quick Start
+
+1. Publish the config:
+```bash
+php artisan vendor:publish --tag=shugoi-config
+```
+
+2. Set environment variables in `.env`:
+```env
+SHUGOI_SITE_KEY=sg_sk_live_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+SHUGOI_SECRET=your_site_secret
+SHUGOI_INTERNAL_URL=http://127.0.0.1:8080
+```
+
+3. Register the middleware in `bootstrap/app.php`:
+```php
+->withMiddleware(function (Middleware $middleware) {
+    $middleware->append(\Shugoi\Laravel\ShugoiMiddleware::class);
+    $middleware->excludeFrom(\Shugoi\Laravel\ShugoiMiddleware::class, ['__shugoi/*']);
+})
+```
+
+4. Verify your setup:
+```bash
+php artisan shugoi:setup
+```
+
+### Documentation
+
+See the [shugoi-php package](https://github.com/RoxasYTB/shugoi-php) for full documentation, configuration reference, Blade directives, Artisan commands, and non-Laravel PSR-15 usage.
+
 ### Vanilla Node.js
 
 ```ts
