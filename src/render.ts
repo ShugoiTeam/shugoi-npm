@@ -334,7 +334,7 @@ export async function ensureGuardsReady(baseUrl: string, secret?: string, siteKe
   await fetchGuardScripts(baseUrl, secret, siteKey);
 }
 
-export async function generateSkeleton(siteKey: string, token: string, baseUrl: string, restrictedAccess?: boolean, whitelist?: string[], renderUrl?: string, locale?: Locale, flags?: Record<string, boolean>): Promise<string> {
+export async function generateSkeleton(siteKey: string, token: string, baseUrl: string, restrictedAccess?: boolean, whitelist?: string[], renderUrl?: string, locale?: Locale, flags?: Record<string, boolean>, clockts?: number): Promise<string> {
   await ensureGuardsReady(baseUrl, undefined, siteKey);
   const rurl = renderUrl || './__shugoi/render';
   const cfg = flags ?? (await getConfig(siteKey, baseUrl)).flags;
@@ -345,8 +345,12 @@ export async function generateSkeleton(siteKey: string, token: string, baseUrl: 
   fragments.push('window.__sg_siteKey=' + JSON.stringify(siteKey));
   fragments.push('window.__sg_baseUrl=' + JSON.stringify(baseUrl));
   fragments.push('window.__sg_config=' + JSON.stringify(cfg));
-  fragments.push('window.__sg_serverTime=' + Date.now());
-  fragments.push('window.__sg_nonce="' + Date.now().toString(36) + '.' + Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 6) + '"');
+  const _ntpDrift = (typeof globalThis !== 'undefined' ? globalThis.__sg_ntpDrift : 0) || 0;
+  const _ntpTime = globalThis.__sg_ntpTime || (Date.now() - _ntpDrift);
+  const _clockts = clockts || _ntpTime;
+  fragments.push('window.__sg_ntp=' + _ntpTime);
+  fragments.push('window.__sg_serverTime=' + _clockts);
+  fragments.push('window.__sg_clockts=' + _clockts);
   if (!restrictedAccess) fragments.push('window.__sg_disableRestrictedAccess=true');
   if (cache.detect) fragments.push("try{" + cache.detect + "}catch(e){window.__sg_blocked=true}");
   if (cache.guard) fragments.push("try{" + cache.guard + "}catch(e){window.__sg_blocked=true}");
@@ -386,7 +390,7 @@ export async function generateSkeleton(siteKey: string, token: string, baseUrl: 
   return '<script>' + bootCode + '</script>';
 }
 
-export async function injectGuardScripts(html: string, siteKey: string, baseUrl: string, whitelist?: string[] | null, restrictedAccess?: boolean, signingSecret?: string, req?: unknown, _allowedOrigins?: string[], locale?: Locale): Promise<string> {
+export async function injectGuardScripts(html: string, siteKey: string, baseUrl: string, whitelist?: string[] | null, restrictedAccess?: boolean, signingSecret?: string, req?: unknown, _allowedOrigins?: string[], locale?: Locale, clockts?: number): Promise<string> {
   await ensureGuardsReady(baseUrl, signingSecret, siteKey);
   const cfgData = await getConfig(siteKey, baseUrl);
   const wl = whitelist ?? cfgData.whitelist;
@@ -402,7 +406,7 @@ export async function injectGuardScripts(html: string, siteKey: string, baseUrl:
   else injectedHtml = configScript + injectedHtml;
   const renderUrl = './__shugoi/render';
   storeHtml(signed.token, injectedHtml);
-  return generateSkeleton(siteKey, signed.token, baseUrl, restrictedAccess, wl, renderUrl, locale, cfgData.flags);
+  return generateSkeleton(siteKey, signed.token, baseUrl, restrictedAccess, wl, renderUrl, locale, cfgData.flags, clockts);
 }
 
 export function enableDiskStore(multiProcess: boolean) {

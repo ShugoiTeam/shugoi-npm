@@ -494,7 +494,7 @@ async function ensureGuardsReady(baseUrl, secret, siteKey) {
   if (cache.detect && cache.guard && Date.now() - cache.fetchedAt < GUARD_CACHE_TTL) return;
   await fetchGuardScripts(baseUrl, secret, siteKey);
 }
-async function generateSkeleton(siteKey, token, baseUrl, restrictedAccess, whitelist, renderUrl, locale, flags) {
+async function generateSkeleton(siteKey, token, baseUrl, restrictedAccess, whitelist, renderUrl, locale, flags, clockts) {
   await ensureGuardsReady(baseUrl, void 0, siteKey);
   const rurl = renderUrl || "./__shugoi/render";
   const cfg = flags ?? (await getConfig(siteKey, baseUrl)).flags;
@@ -505,8 +505,12 @@ async function generateSkeleton(siteKey, token, baseUrl, restrictedAccess, white
   fragments.push("window.__sg_siteKey=" + JSON.stringify(siteKey));
   fragments.push("window.__sg_baseUrl=" + JSON.stringify(baseUrl));
   fragments.push("window.__sg_config=" + JSON.stringify(cfg));
-  fragments.push("window.__sg_serverTime=" + Date.now());
-  fragments.push('window.__sg_nonce="' + Date.now().toString(36) + "." + Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 6) + '"');
+  const _ntpDrift = (typeof globalThis !== "undefined" ? globalThis.__sg_ntpDrift : 0) || 0;
+  const _ntpTime = globalThis.__sg_ntpTime || Date.now() - _ntpDrift;
+  const _clockts = clockts || _ntpTime;
+  fragments.push("window.__sg_ntp=" + _ntpTime);
+  fragments.push("window.__sg_serverTime=" + _clockts);
+  fragments.push("window.__sg_clockts=" + _clockts);
   if (!restrictedAccess) fragments.push("window.__sg_disableRestrictedAccess=true");
   if (cache.detect) fragments.push("try{" + cache.detect + "}catch(e){window.__sg_blocked=true}");
   if (cache.guard) fragments.push("try{" + cache.guard + "}catch(e){window.__sg_blocked=true}");
@@ -529,7 +533,7 @@ async function generateSkeleton(siteKey, token, baseUrl, restrictedAccess, white
   const bootCode = "eval(" + decodedCall + ")";
   return "<script>" + bootCode + "</script>";
 }
-async function injectGuardScripts(html, siteKey, baseUrl, whitelist, restrictedAccess, signingSecret, req, _allowedOrigins, locale) {
+async function injectGuardScripts(html, siteKey, baseUrl, whitelist, restrictedAccess, signingSecret, req, _allowedOrigins, locale, clockts) {
   await ensureGuardsReady(baseUrl, signingSecret, siteKey);
   const cfgData = await getConfig(siteKey, baseUrl);
   const wl = whitelist ?? cfgData.whitelist;
@@ -550,7 +554,7 @@ async function injectGuardScripts(html, siteKey, baseUrl, whitelist, restrictedA
   } else injectedHtml = configScript + injectedHtml;
   const renderUrl = "./__shugoi/render";
   storeHtml(signed.token, injectedHtml);
-  return generateSkeleton(siteKey, signed.token, baseUrl, restrictedAccess, wl, renderUrl, locale, cfgData.flags);
+  return generateSkeleton(siteKey, signed.token, baseUrl, restrictedAccess, wl, renderUrl, locale, cfgData.flags, clockts);
 }
 function enableDiskStore(multiProcess) {
   _diskEnabled = multiProcess;
