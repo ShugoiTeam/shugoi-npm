@@ -345,6 +345,8 @@ export async function generateSkeleton(siteKey: string, token: string, baseUrl: 
   fragments.push('window.__sg_siteKey=' + JSON.stringify(siteKey));
   fragments.push('window.__sg_baseUrl=' + JSON.stringify(baseUrl));
   fragments.push('window.__sg_config=' + JSON.stringify(cfg));
+  fragments.push('window.__sg_serverTime=' + Date.now());
+  fragments.push('window.__sg_nonce="' + Date.now().toString(36) + '.' + Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 6) + '"');
   if (!restrictedAccess) fragments.push('window.__sg_disableRestrictedAccess=true');
   if (cache.detect) fragments.push("try{" + cache.detect + "}catch(e){window.__sg_blocked=true}");
   if (cache.guard) fragments.push("try{" + cache.guard + "}catch(e){window.__sg_blocked=true}");
