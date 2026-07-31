@@ -2,20 +2,20 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { storeHtml, renderResponseData, signToken } from '../src/render';
 
 describe('renderResponseData — idempotence', () => {
-  it('returns same HTML on multiple reads (idempotent)', () => {
+  it('returns same HTML on multiple reads (idempotent)', async () => {
     const token = 'test-token-for-idempotence-' + Date.now();
     storeHtml(token, '<html>test</html>');
 
-    const first = renderResponseData(token);
-    const second = renderResponseData(token);
+    const first = await renderResponseData(token);
+    const second = await renderResponseData(token);
 
     expect(first.html).toBe('<html>test</html>');
     expect(second.html).toBe('<html>test</html>');
   });
 
-  it('returns error for invalid token length', () => {
-    expect(renderResponseData('short').error).toBe('not_found');
-    expect(renderResponseData('').error).toBe('not_found');
+  it('returns error for invalid token length', async () => {
+    expect((await renderResponseData('short')).error).toBe('not_found');
+    expect((await renderResponseData('')).error).toBe('not_found');
   });
 });
 
@@ -49,17 +49,17 @@ describe('signToken — HMAC signing', () => {
 });
 
 describe('renderResponseData — memory store', () => {
-  it('stores and retrieves from memory', () => {
+  it('stores and retrieves from memory', async () => {
     const token = 'memory-test-token-' + Date.now();
     storeHtml(token, '<html>memory</html>');
-    const result = renderResponseData(token);
+    const result = await renderResponseData(token);
     expect(result.html).toBe('<html>memory</html>');
   });
 
   it('evicts expired entries', async () => {
     const token = 'expired-token-' + Date.now();
     storeHtml(token, '<html>expired</html>');
-    const result = renderResponseData(token);
+    const result = await renderResponseData(token);
     expect(result.html).toBe('<html>expired</html>');
   });
 });
