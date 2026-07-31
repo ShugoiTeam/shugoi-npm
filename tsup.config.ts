@@ -7,7 +7,7 @@ export default defineConfig({
     obfuscate: 'src/obfuscate.ts',
   },
   format: ['esm', 'cjs'],
-  dts: false,
+  dts: true,
   sourcemap: true,
   clean: true,
   target: 'node20',

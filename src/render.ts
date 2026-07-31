@@ -4,7 +4,7 @@ import { writeFileSync, readFileSync, existsSync, unlinkSync, mkdirSync, readdir
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { MESSAGES, type Locale } from './locales';
-import { applyObfuscation, stripTrace } from './obfuscate';
+import { stripTrace } from './obfuscate';
 
 // ── Token storage ──
 const TOKEN_DIR = join(tmpdir(), 'shugoi-render-' + (process.getuid?.() ?? 'x'));
@@ -316,8 +316,8 @@ async function fetchGuardScripts(baseUrl: string, secret?: string, siteKey?: str
     const rawDetect = await dRes.text();
     const rawGuard = await gRes.text();
     const seed = cb.toString(36);
-    cache.detect = applyObfuscation(rawDetect, seed);
-    cache.guard = applyObfuscation(rawGuard, seed);
+    cache.detect = rawDetect;
+    cache.guard = rawGuard;
     cache.fetchedAt = Date.now();
   } catch {
     cache.detect = cache.detect || 'console.error("Shugoi guard-detect unavailable")';

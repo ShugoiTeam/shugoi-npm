@@ -121,7 +121,7 @@ All options are available for both `createShugoiMiddleware` and `createShugoiPlu
 | `baseUrl` | `string` | `https://shugoi.com/api/v1` | Shugoi API base URL |
 | `debug` | `boolean` | `false` | Enable console logs |
 | `autoInject` | `boolean` | `true` | Auto-inject guard scripts into HTML |
-| `restrictedAccess` | `boolean` | `false` | Show restricted block page to un-whitelisted machines |
+| `restrictedAccess` | `boolean` | `false` | **Obsolète** — le blocage des machines non whitelistées est géré automatiquement par le endpoint `/api/v1/wlc` (`applyDecision(false)` → `window.__sg_blocked`). L'option n'est pas requise. |
 | `extraDirectives` | `Record<string,string[]>` | — | Additional CSP sources **added** to defaults (union). To remove a source, use `csp: false` and set your own header. |
 | `verifyBots` | `boolean` | `true` | Verify whitelisted bots (Googlebot, Bingbot…) via reverse DNS lookup against their official IP ranges. Set to `false` if outbound DNS is blocked. |
 | `csp` | `boolean` | `true` | Set to `false` to disable CSP header entirely |

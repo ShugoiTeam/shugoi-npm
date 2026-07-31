@@ -1,11 +1,16 @@
 {
   "name": "shugoi",
-  "version": "0.3.0",
+  "version": "0.3.2",
   "description": "Shugoi anti-abuse protection — one-line integration for Node.js",
   "author": "Yohan SANNIER <support@shugoi.com>",
-  "repository": { "type": "git", "url": "git+https://github.com/RoxasYTB/shugoi-npm.git" },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/RoxasYTB/shugoi-npm.git"
+  },
   "homepage": "https://shugoi.com",
-  "bugs": { "url": "https://github.com/RoxasYTB/shugoi-npm/issues" },
+  "bugs": {
+    "url": "https://github.com/RoxasYTB/shugoi-npm/issues"
+  },
   "sideEffects": false,
   "type": "module",
   "main": "./dist/index.cjs",
