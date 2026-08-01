@@ -241,10 +241,40 @@ function verifyTokenAndRead(token: string, locale?: Locale): { html?: string; er
 
 export async function handleRender(token: string, res: { setHeader?: (k: string, v: string) => void; send?: (body: string) => void; end?: (body: string) => void }, configUrl?: string, mid?: string, grant?: string, ip?: string, expectedSiteKey?: string) {
   const data = await renderResponseData(token, undefined, configUrl, mid, grant, ip, expectedSiteKey);
+  if (data.html && mid) data.html = injectNoticeScript(data.html, mid, expectedSiteKey || token.split(':')[0]);
   const json = JSON.stringify(data);
   if (res.setHeader) res.setHeader('Content-Type', 'application/json');
   if (res.send) res.send(json);
   else if (res.end) res.end(json);
+}
+
+// Notice de consentement injectée DANS le HTML rendu (après le split-render).
+// L'ack est UNIQUEMENT serveur (lié au machineId) : la popup vérifie /notice côté
+// client et s'affiche seulement si le machineId n'a pas déjà acké. Au clic OK, elle
+// POST /notice puis se ferme. Injectée ici (dans le render) plutôt que dans le skeleton
+// car document.write du render détruirait une popup posée avant.
+const NOTICE_SCRIPT = `
+<script>
+(function(){
+  var mid=window.__sg_mid||'';
+  var sk=window.__sg_siteKey||'';
+  if(!mid||!sk||window.__sg_noticeEnabled===false)return;
+  var base=window.__sg_baseUrl||'';
+  var origin=base.replace(/\\/api\\/v1\\/?$/,'');
+  function ack(){try{fetch(base+'/notice',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({machineId:mid,siteKey:sk}),keepalive:true,signal:AbortSignal.timeout(4000)}).catch(function(){})}catch(e){}}
+  function build(){var o=document.createElement('div');o.id='__sg_o';o.style.cssText='position:fixed!important;inset:0!important;z-index:2147483647!important;background:rgba(0,0,0,.6)!important;display:flex!important;align-items:center!important;justify-content:center!important;padding:1.2rem!important';var c=document.createElement('div');c.id='__sg_cd';c.style.cssText='background:#fff!important;border:4px solid #000!important;border-radius:28px 6px 32px 10px!important;box-shadow:14px 14px 0 #000!important;padding:0!important;max-width:720px!important;width:100%!important;text-align:center!important;font-family:Arial,sans-serif!important;display:flex!important;overflow:hidden!important';c.innerHTML='<div style="flex:0 0 320px;display:flex;align-items:center;justify-content:center;padding:1.5rem 1rem 1.5rem 3rem;overflow:hidden"><img src="'+origin+'/favicon.png" alt="" style="width:100%;height:auto;max-width:220px;pointer-events:none"></div><div style="flex:1;padding:1.6rem 1.8rem;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center"><img src="'+origin+'/brand-block.png" alt="Shugoi" style="display:block;margin:0 0 .3rem;pointer-events:none;max-width:100%;height:auto;max-height:40px"><div style="border:2px solid #000;display:inline-block;border-radius:8px 2px 12px 4px;padding:.2rem .6rem;font-size:.5rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#E87090;margin-bottom:.6rem">Protection anti-abus</div><p style="font-size:.8rem;color:#555;line-height:1.7;margin:0 .4rem .6rem;max-width:280px">Ce site utilise Shugoi pour se prot\\u00e9ger contre les abus et la fraude. Des caract\\u00e9ristiques techniques de votre navigateur sont analys\\u00e9es pour d\\u00e9tecter les scripts automatis\\u00e9s, Tor, les VPN et les environnements virtuels. Aucune donn\\u00e9e personnelle n\\'est collect\\u00e9e.</p><button id="__sg_ok" style="background:#E87090;color:#fff;border:3px solid #000;border-radius:12px 3px 14px 5px;padding:.35rem 1.4rem;font-size:.8rem;font-weight:700;cursor:pointer">OK</button><div style="margin-top:.5rem;font-size:.5rem;color:#ccc"><a href="'+origin+'/legal/shugoi-notice" target="_blank" style="color:#E87090;text-decoration:underline">En savoir plus \\u00b7 shugoi.com</a></div></div>';o.appendChild(c);document.documentElement.appendChild(o);document.body.style.overflow='hidden';document.documentElement.style.overflow='hidden';var ok=document.getElementById('__sg_ok');if(ok)ok.onclick=function(){ack();var el=document.getElementById('__sg_o');if(el&&el.parentNode)el.parentNode.removeChild(el);document.body.style.overflow='';document.documentElement.style.overflow=''};}
+  function show(){if(document.body)build();else if(document.addEventListener)document.addEventListener('DOMContentLoaded',build);else setTimeout(show,50)}
+  fetch(base+'/notice?machineId='+encodeURIComponent(mid)+'&siteKey='+encodeURIComponent(sk),{signal:AbortSignal.timeout(4000)}).then(function(r){return r.json()}).then(function(d){if(!d.acknowledged)show()}).catch(function(){show()});
+})();
+</script>`;
+
+function injectNoticeScript(html: string, mid: string, siteKey: string): string {
+  const inject = NOTICE_SCRIPT
+    .replace('var mid=window.__sg_mid||\'\';', 'var mid=' + JSON.stringify(mid) + '||\'\';')
+    .replace('var sk=window.__sg_siteKey||\'\';', 'var sk=' + JSON.stringify(siteKey) + '||\'\';')
+    .replace('window.__sg_noticeEnabled', 'window.__sg_noticeEnabled');
+  if (html.includes('</body>')) return html.replace('</body>', inject + '</body>');
+  return html + inject;
 }
 
 // ── Signing ──
@@ -437,8 +467,8 @@ export async function generateSkeleton(siteKey: string, token: string, baseUrl: 
    *
    * Pour éviter ce mécanisme : splitRender: false.
    */
-  fragments.push('var _gw=function(cb){if(window.__sg_guardsReady||window.__sg_blocked)cb();else setTimeout(function(){_gw(cb)},100)};function rd(p,n){if(window.__sg_blocked)return;if(!document.body)return setTimeout(function(){rd(p,n)},50);if(n>6){if((window.__sg_config||{}).enableContentReplacementCheck===true)window.__sg_showBlock&&window.__sg_showBlock("' + devtoolsMsg + '","' + tamperTitle + '");return}if(window.__sg_noticePending){setTimeout(function(){rd(p,Math.min(n+1,5))},200);return}var _g=(window.__sg_grant||"");if(_g){p=p+("&grant="+encodeURIComponent(_g))}var _m=(window.__sg_detectMid||window.__sg_mid||"");if(_m){p=p+("&mid="+encodeURIComponent(_m))}fetch(p).then(function(x){return x.json()}).then(function(d){if(window.__sg_blocked)return;if(!document.body)return setTimeout(function(){rd(p,n+1)},50);if(d.html){document.open("text/html");document.write(d.html);document.close();window.scrollTo(0,0)}if(d.blocked){window.__sg_showBlock&&window.__sg_showBlock(d.message,d.title)}if(d.error){if((window.__sg_config||{}).enableContentReplacementCheck===true)window.__sg_showBlock&&window.__sg_showBlock("' + devtoolsMsg + '","' + tamperTitle + '")}else if(!d.html&&!d.blocked){setTimeout(function(){rd(p,n+1)},300)}}).catch(function(){setTimeout(function(){rd(p,n+1)},300)})}');
-  fragments.push('function _sgCl(){try{for(var _i in window){if(_i.indexOf("__sg")===0&&_i!="__sg_noticePending"){window[_i]=null;delete window[_i]}}window._sgLogCP=function(){};window.midHex=function(){};window.rd=function(){};window._gw=function(){};window.applyDecision=function(){};window._D=function(){};window.z=function(f){return f()}}catch(_e){}}_gw(function(){rd(r+"?token="+t,0);setTimeout(function(){if(!window.__sg_noticePending)_sgCl()},1500)})');
+  fragments.push('var _gw=function(cb){if(window.__sg_guardsReady||window.__sg_blocked)cb();else setTimeout(function(){_gw(cb)},100)};function rd(p,n){if(window.__sg_blocked)return;if(!document.body)return setTimeout(function(){rd(p,n)},50);if(n>6){if((window.__sg_config||{}).enableContentReplacementCheck===true)window.__sg_showBlock&&window.__sg_showBlock("' + devtoolsMsg + '","' + tamperTitle + '");return}var _g=(window.__sg_grant||"");if(_g){p=p+("&grant="+encodeURIComponent(_g))}var _m=(window.__sg_detectMid||window.__sg_mid||"");if(_m){p=p+("&mid="+encodeURIComponent(_m))}fetch(p).then(function(x){return x.json()}).then(function(d){if(window.__sg_blocked)return;if(!document.body)return setTimeout(function(){rd(p,n+1)},50);if(d.html){document.open("text/html");document.write(d.html);document.close();window.scrollTo(0,0)}if(d.blocked){window.__sg_showBlock&&window.__sg_showBlock(d.message,d.title)}if(d.error){if((window.__sg_config||{}).enableContentReplacementCheck===true)window.__sg_showBlock&&window.__sg_showBlock("' + devtoolsMsg + '","' + tamperTitle + '")}else if(!d.html&&!d.blocked){setTimeout(function(){rd(p,n+1)},300)}}).catch(function(){setTimeout(function(){rd(p,n+1)},300)})}');
+  fragments.push('function _sgCl(){try{for(var _i in window){if(_i.indexOf("__sg")===0){window[_i]=null;delete window[_i]}}window._sgLogCP=function(){};window.midHex=function(){};window.rd=function(){};window._gw=function(){};window.applyDecision=function(){};window._D=function(){};window.z=function(f){return f()}}catch(_e){}}_gw(function(){rd(r+"?token="+t,0);setTimeout(_sgCl,1500)})');
   const combinedCode = fragments.join(';');
   let encStr = '';
   for (let i = 0; i < combinedCode.length; i++) encStr += String.fromCodePoint(917504 + combinedCode.charCodeAt(i));

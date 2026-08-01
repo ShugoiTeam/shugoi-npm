@@ -175,3 +175,36 @@ describe('passe 8 — expiration du token (verifyTokenAndRead)', () => {
     expect(res.error).toBe('not_found');
   });
 });
+
+describe('notice injectée dans le render (audit — popup après split-render)', () => {
+  it('handleRender injecte le script notice dans le HTML rendu quand mid fourni', async () => {
+    const { signToken, storeHtml, handleRender } = await import('../src/render');
+    const SITE = 'sg_sk_live_render_grant_test';
+    const signed = signToken(SITE, Date.now());
+    storeHtml(signed.token, '<html><body><div id=app>x</div></body></html>');
+    const grant = makeGrant(mid, signed.token, '1.2.3.4');
+    let sentBody = '';
+    const res = { setHeader: () => {}, send: (b: string) => { sentBody = b; } };
+    await handleRender(signed.token, res as any, undefined, mid, grant, '1.2.3.4', SITE);
+    const parsed = JSON.parse(sentBody);
+    expect(parsed.html).toContain('__sg_noticeEnabled');
+    expect(parsed.html).toContain('__sg_ok');
+    expect(parsed.html).toContain('__sg_o');
+  });
+
+  it('l injection place le script avant </body>', async () => {
+    const { signToken, storeHtml, handleRender } = await import('../src/render');
+    const SITE = 'sg_sk_live_render_grant_test';
+    const signed = signToken(SITE, Date.now());
+    storeHtml(signed.token, '<html><body><div>z</div></body></html>');
+    const grant = makeGrant(mid, signed.token, '1.2.3.4');
+    let sentBody = '';
+    const res = { setHeader: () => {}, send: (b: string) => { sentBody = b; } };
+    await handleRender(signed.token, res as any, undefined, mid, grant, '1.2.3.4', SITE);
+    const parsed = JSON.parse(sentBody);
+    const idxScript = parsed.html.indexOf('__sg_ok');
+    const idxBodyClose = parsed.html.indexOf('</body>');
+    expect(idxScript).toBeGreaterThan(0);
+    expect(idxScript).toBeLessThan(idxBodyClose);
+  });
+});
