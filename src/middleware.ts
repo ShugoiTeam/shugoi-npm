@@ -43,7 +43,9 @@ export function createShugoiMiddleware(options: ShugoiCoreOptions) {
         const ip = (typeof req.headers?.['x-forwarded-for'] === 'string'
           ? req.headers['x-forwarded-for'].split(',')[0]?.trim()
           : undefined) || (typeof req.ip === 'string' ? req.ip : 'unknown');
-        return handleRender(q.token || '', res, internalUrl, q.mid || '', q.grant || '', ip);
+        // CRITIQUE 1 (§7bis) : le render vérifie que le token appartient à CE site
+        // (options.siteKey) — un grant émis par un autre site (pyxelze) est refusé ici.
+        return handleRender(q.token || '', res, internalUrl, q.mid || '', q.grant || '', ip, options.siteKey);
       }
 
       // CSP: merge with existing header
@@ -174,7 +176,7 @@ export function createShugoiPlugin(options: ShugoiCoreOptions) {
       const ip = (typeof request.headers?.['x-forwarded-for'] === 'string'
         ? request.headers['x-forwarded-for'].split(',')[0]?.trim()
         : undefined) || (typeof request.ip === 'string' ? request.ip : 'unknown');
-      const data = await renderResponseData(request.query.token || '', undefined, options.baseUrl, request.query.mid || '', request.query.grant || '', ip);
+      const data = await renderResponseData(request.query.token || '', undefined, options.baseUrl, request.query.mid || '', request.query.grant || '', ip, options.siteKey);
       reply.send(data);
     });
 

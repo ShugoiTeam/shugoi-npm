@@ -118,8 +118,16 @@ export function verifyRenderGrant(mid: string | undefined, grant: string | undef
   catch { return false; }
 }
 
-export async function renderResponseData(token: string, locale?: Locale, configUrl?: string, mid?: string, grant?: string, ip?: string): Promise<{ html?: string; error?: string; blocked?: boolean; reason?: string; message?: string; title?: string }> {
+export async function renderResponseData(token: string, locale?: Locale, configUrl?: string, mid?: string, grant?: string, ip?: string, expectedSiteKey?: string): Promise<{ html?: string; error?: string; blocked?: boolean; reason?: string; message?: string; title?: string }> {
   if (!token || token.length < 16 || token.length > 300) return { error: 'not_found' };
+
+  // CRITIQUE 1 (§7bis) : le token a la forme `siteKey:timestamp:nonce:sig`. Le render
+  // d'un site ne doit servir que les tokens de SON siteKey — sinon un grant émis par un
+  // autre site (whitelist désactivée) serait accepté ici (secret global partagé).
+  if (expectedSiteKey) {
+    const tokSiteKey = token.split(':')[0];
+    if (tokSiteKey !== expectedSiteKey) return { error: 'not_found' };
+  }
 
   // Anti-bypass "token-only" : sans grant valide, pas de HTML.
   if (!verifyRenderGrant(mid, grant, token, ip)) return { error: 'not_found' };
@@ -216,8 +224,8 @@ function verifyTokenAndRead(token: string, locale?: Locale): { html?: string; er
   return { error: 'not_found' };
 }
 
-export async function handleRender(token: string, res: { setHeader?: (k: string, v: string) => void; send?: (body: string) => void; end?: (body: string) => void }, configUrl?: string, mid?: string, grant?: string, ip?: string) {
-  const data = await renderResponseData(token, undefined, configUrl, mid, grant, ip);
+export async function handleRender(token: string, res: { setHeader?: (k: string, v: string) => void; send?: (body: string) => void; end?: (body: string) => void }, configUrl?: string, mid?: string, grant?: string, ip?: string, expectedSiteKey?: string) {
+  const data = await renderResponseData(token, undefined, configUrl, mid, grant, ip, expectedSiteKey);
   const json = JSON.stringify(data);
   if (res.setHeader) res.setHeader('Content-Type', 'application/json');
   if (res.send) res.send(json);

@@ -129,3 +129,25 @@ describe('CH-05 pas d\'oracle token (réponses uniformes)', () => {
     expect(r3.error).toBe('not_found');
   });
 });
+
+describe('§7bis CRITIQUE 1 — grant cross-site (siteKey lié)', () => {
+  it('refuse un token dont le siteKey diffère du site (grant pyxelze sur shugoi.com)', async () => {
+    const { signToken, storeHtml, renderResponseData } = await import('../src/render');
+    // Token émis pour le site "pyxelze"...
+    const token = signToken('sg_sk_live_pyxelze', Date.now()).token;
+    storeHtml(token, '<html>x</html>');
+    const grant = makeGrant(mid, token, '1.2.3.4');
+    // ...mais le render attend le siteKey "shugoi.com" → refus (expectedSiteKey)
+    const res = await renderResponseData(token, undefined, undefined, mid, grant, '1.2.3.4', 'sg_sk_live_shugoi');
+    expect(res.error).toBe('not_found');
+  });
+
+  it('accepte un token du bon siteKey (expectedSiteKey match)', async () => {
+    const { signToken, storeHtml, renderResponseData } = await import('../src/render');
+    const signed = signToken('sg_sk_live_shugoi', Date.now());
+    storeHtml(signed.token, '<html>ok</html>');
+    const grant = makeGrant(mid, signed.token, '1.2.3.4');
+    const res = await renderResponseData(signed.token, undefined, undefined, mid, grant, '1.2.3.4', 'sg_sk_live_shugoi');
+    expect(res.html).toBe('<html>ok</html>');
+  });
+});
