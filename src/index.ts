@@ -1,5 +1,5 @@
 export { ShugoiError } from './errors';
-export { signToken, storeHtml, generateSkeleton, injectGuardScripts, renderResponseData, handleRender, fetchWhitelistForSiteKey, __clearConfigCache } from './render';
+export { signToken, storeHtml, generateSkeleton, injectGuardScripts, renderResponseData, handleRender, verifyRenderGrant, fetchWhitelistForSiteKey, __clearConfigCache } from './render';
 export { createShugoiMiddleware, createShugoiPlugin, BLOCK_PAGE, DEFAULT_HEADLESS_PATTERNS, DEFAULT_BOT_WHITELIST } from './middleware';
 export { buildCsp, mergeCsp } from './csp';
 export { checkLicense } from './check-license';

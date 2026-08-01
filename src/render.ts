@@ -92,23 +92,27 @@ function readFromMemory(token: string): string | null {
   return entry.html;
 }
 
+// ── Render-grant : preuve anti-bypass "token-only" ──
+// Le grant est émis par le wlc (/api/v1/wlc) quand le mid est autorisé (whitelisté OU
+// whitelist désactivée). Le guard l'obtient APRÈS avoir exécuté le fingerprint et
+// l'ajoute à l'URL render. Un bot curl qui extrait le token du challenge sans exécuter
+// le JS n'a pas de mid/grant cohérents → render refuse. Signé avec le même secret que
+// le token (SHUGOKI_SIGNING_SECRET) → vérifiable localement, sans état partagé.
+// Factorisé pour être partagé par les adapters Express / Next / Fastify (parité NP-01).
+export function verifyRenderGrant(mid: string | undefined, grant: string | undefined): boolean {
+  const gSecret = process.env.SHUGOKI_SIGNING_SECRET || process.env.SHUGOKI_SECRET;
+  if (!gSecret) return true; // fail-safe : pas de secret configuré → pas de vérification
+  if (!grant || !mid || !/^[a-f0-9]{64}$/.test(mid)) return false;
+  const exp = crypto.createHmac('sha256', gSecret).update('render-grant:' + mid).digest('hex');
+  try { return crypto.timingSafeEqual(Buffer.from(grant, 'hex'), Buffer.from(exp, 'hex')); }
+  catch { return false; }
+}
+
 export async function renderResponseData(token: string, locale?: Locale, configUrl?: string, mid?: string, grant?: string): Promise<{ html?: string; error?: string; blocked?: boolean; reason?: string; message?: string; title?: string }> {
   if (!token || token.length < 16 || token.length > 300) return { error: 'not_found' };
 
   // Anti-bypass "token-only" : sans grant valide, pas de HTML.
-  // Le grant est émis par le wlc (/api/v1/wlc) quand le mid est autorisé (whitelisté
-  // OU whitelist désactivée). Le guard l'obtient APRÈS avoir exécuté le fingerprint et
-  // l'ajoute à l'URL render. Un bot curl qui extrait le token du challenge sans exécuter
-  // le JS n'a pas de mid/grant cohérents → render refuse. Signé avec le même secret que
-  // le token (SHUGOKI_SIGNING_SECRET) → vérifiable localement, sans état partagé.
-  const gSecret = process.env.SHUGOKI_SIGNING_SECRET || process.env.SHUGOKI_SECRET;
-  if (gSecret) {
-    if (!grant || !mid || !/^[a-f0-9]{64}$/.test(mid)) return { error: 'not_found' };
-    const exp = crypto.createHmac('sha256', gSecret).update('render-grant:' + mid).digest('hex');
-    let ok = false;
-    try { ok = crypto.timingSafeEqual(Buffer.from(grant, 'hex'), Buffer.from(exp, 'hex')); } catch { ok = false; }
-    if (!ok) return { error: 'not_found' };
-  }
+  if (!verifyRenderGrant(mid, grant)) return { error: 'not_found' };
 
   // Vérifier le flag en direct depuis l'API interne (pas de cache)
   const contentReplaceOn = await fetchContentReplaceFlag(token, configUrl || 'http://127.0.0.1:3098');

@@ -59,7 +59,8 @@ __export(render_exports, {
   injectGuardScripts: () => injectGuardScripts,
   renderResponseData: () => renderResponseData,
   signToken: () => signToken,
-  storeHtml: () => storeHtml
+  storeHtml: () => storeHtml,
+  verifyRenderGrant: () => verifyRenderGrant
 });
 import crypto, { createHash } from "crypto";
 import { writeFileSync, readFileSync, existsSync, unlinkSync, mkdirSync, readdirSync, chmodSync, statSync } from "fs";
@@ -131,20 +132,20 @@ function readFromMemory(token) {
   }
   return entry.html;
 }
+function verifyRenderGrant(mid, grant) {
+  const gSecret = process.env.SHUGOKI_SIGNING_SECRET || process.env.SHUGOKI_SECRET;
+  if (!gSecret) return true;
+  if (!grant || !mid || !/^[a-f0-9]{64}$/.test(mid)) return false;
+  const exp = crypto.createHmac("sha256", gSecret).update("render-grant:" + mid).digest("hex");
+  try {
+    return crypto.timingSafeEqual(Buffer.from(grant, "hex"), Buffer.from(exp, "hex"));
+  } catch {
+    return false;
+  }
+}
 async function renderResponseData(token, locale, configUrl, mid, grant) {
   if (!token || token.length < 16 || token.length > 300) return { error: "not_found" };
-  const gSecret = process.env.SHUGOKI_SIGNING_SECRET || process.env.SHUGOKI_SECRET;
-  if (gSecret) {
-    if (!grant || !mid || !/^[a-f0-9]{64}$/.test(mid)) return { error: "not_found" };
-    const exp = crypto.createHmac("sha256", gSecret).update("render-grant:" + mid).digest("hex");
-    let ok = false;
-    try {
-      ok = crypto.timingSafeEqual(Buffer.from(grant, "hex"), Buffer.from(exp, "hex"));
-    } catch {
-      ok = false;
-    }
-    if (!ok) return { error: "not_found" };
-  }
+  if (!verifyRenderGrant(mid, grant)) return { error: "not_found" };
   const contentReplaceOn = await fetchContentReplaceFlag(token, configUrl || "http://127.0.0.1:3098");
   const memHtml = readFromMemory(token);
   if (memHtml) {
@@ -1047,6 +1048,7 @@ export {
   scriptTags,
   signToken,
   storeHtml,
-  validateSiteKey
+  validateSiteKey,
+  verifyRenderGrant
 };
 //# sourceMappingURL=index.js.map

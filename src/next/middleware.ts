@@ -4,6 +4,7 @@ import { readFileSync, existsSync, writeFileSync, mkdirSync, readdirSync, unlink
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import crypto from "node:crypto";
+import { verifyRenderGrant } from "../render";
 
 // ── Config ──
 const TOKEN_DIR = join(tmpdir(), "shugoi-render");
@@ -115,8 +116,10 @@ function generateBootcode(siteKey: string, config: string, detectCode: string, g
   return '<script>eval([...\'' + enc + '\'].map(function(x){return String.fromCodePoint(x.codePointAt(0)-917504)}).join(\'\'))</script>';
 }
 
-function renderResponseData(token: string): { html?: string; blocked?: boolean; error?: string } {
+export function renderResponseData(token: string, mid?: string, grant?: string): { html?: string; blocked?: boolean; error?: string } {
   if (!token || token.length < 16 || token.length > 300) return { error: "not_found" };
+  // Parité avec l'adapter Express (NP-01) : sans grant valide, pas de HTML.
+  if (!verifyRenderGrant(mid, grant)) return { error: "not_found" };
   const suffix = token.slice(-16);
   try {
     for (const f of readdirSync(TOKEN_DIR)) {
@@ -144,7 +147,9 @@ export function createShugoiNextMiddleware(options: ShugoiNextOptions) {
 
     if (path.endsWith("/__shugoi/render")) {
       const token = request.nextUrl.searchParams.get("token") || "";
-      return NextResponse.json(renderResponseData(token));
+      const mid = request.nextUrl.searchParams.get("mid") || "";
+      const grant = request.nextUrl.searchParams.get("grant") || "";
+      return NextResponse.json(renderResponseData(token, mid, grant));
     }
 
     if (path.startsWith("/_next/") || path.startsWith("/api/")) return NextResponse.next();

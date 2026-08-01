@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { withShugoi } from '../src/next/with-shugoi';
 import { createShugoiProxy, SHUGOI_MATCHER } from '../src/next/index';
+import { renderResponseData as nextRenderResponseData } from '../src/next/middleware';
 
 describe('withShugoi', () => {
   it('adds a headers function to config', () => {
@@ -87,5 +88,28 @@ describe('createShugoiProxy', () => {
     expect(SHUGOI_MATCHER).toContain('_next/static');
     expect(SHUGOI_MATCHER).toContain('_next/image');
     expect(SHUGOI_MATCHER).toContain('favicon.ico');
+  });
+});
+
+describe('renderResponseData (adapter Next) — parité render-grant NP-01', () => {
+  const SECRET = 'sg_test_next_grant';
+
+  beforeEach(() => {
+    vi.stubEnv('SHUGOKI_SIGNING_SECRET', SECRET);
+    vi.stubEnv('SHUGOKI_SECRET', '');
+  });
+
+  it('refuse le render sans grant (bypass token-only)', () => {
+    const res = nextRenderResponseData('some-token-1234567890');
+    expect(res.error).toBe('not_found');
+  });
+
+  it('refuse un grant forgé (mid différent du secret)', () => {
+    const crypto = require('node:crypto');
+    const fakeMid = 'b'.repeat(64);
+    const forgedGrant = crypto.createHmac('sha256', SECRET).update('render-grant:' + fakeMid).digest('hex');
+    const res = nextRenderResponseData('some-token-1234567890', fakeMid, forgedGrant);
+    // Le grant est invalide → jamais de HTML (error ou blocked, mais jamais html)
+    expect(res.html).toBeUndefined();
   });
 });
