@@ -317,11 +317,13 @@ describe('307 challenge minimal (anti-curl/view-source)', () => {
     expect(src.indexOf('<pre>')).toBe(-1);
   });
 
-  it('le cookie __sg_ok est signé HMAC et validé (navigations rapides)', () => {
+  it('le cookie __sg_ok est signé HMAC (posé après PoW valide)', () => {
     const { readFileSync } = require('node:fs');
     const src = readFileSync(require('node:path').join(process.cwd(), 'src', 'core.ts'), 'utf-8');
     expect(src).toContain('sg_ok:');
     expect(src).toContain('isSgOkValid');
     expect(src).toContain('timingSafeEqual');
+    // Le cookie ne bypass PAS le challenge (le view-source doit toujours voir le tableau)
+    expect(src).toContain('if (!validProof) {');
   });
 });

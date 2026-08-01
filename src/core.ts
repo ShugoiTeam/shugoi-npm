@@ -274,16 +274,15 @@ step();
     // ═══ Pre-flight PoW challenge (anti-curl/view-source) ═══
     // Un 307 dont le corps est UNIQUEMENT le tableau ASCII : curl le voit en clair,
     // le navigateur suit la redirection vers /__sg_challenge (le JS qui résout le PoW).
-    // Après un PoW validé, un cookie __sg_ok (signé) évite le challenge aux navigations
-    // suivantes → chargement rapide pour les navigateurs réels.
+    // Le challenge s'applique à TOUTE page sans sg_proof valide — même un navigateur avec
+    // cookie : le view-source (qui n'exécute pas le JS) voit donc toujours le tableau.
     const isPage = !ctx.path.includes('/__shugoi/') && !ctx.path.startsWith('/api/')
       && !/\.[a-zA-Z0-9]{1,5}$/.test(ctx.path.split('?')[0])
 
     if (isPage && powSecret && ctx.ua && /Mozilla/i.test(ctx.ua)) {
       const proof = ctx.sgProof || ''
       const validProof = !!proof && isPowValid(proof)
-      const alreadyOk = !!ctx.sgOk && isSgOkValid(ctx.sgOk)
-      if (!validProof && !alreadyOk) {
+      if (!validProof) {
         // 307 vers le challenge : body = tableau ASCII SEUL (curl le voit tel quel).
         // Le navigateur suit la redirection → /__sg_challenge?ts=&salt=&diff=&path=
         const tsNow = Math.floor(Date.now() / 1000)
@@ -293,7 +292,7 @@ step();
         log('pow challenge (307):', ctx.ua.slice(0, 40))
         return { block: true, status: 307, contentType: 'text/plain', body: BLOCK_PAGE, headers: { Location: chalUrl } }
       }
-      // sgProof ou cookie valide → on laisse passer (le middleware posera le cookie).
+      // sgProof valide → on laisse passer (le middleware posera le cookie).
     }
 
     const flags = await fetchConfigForSiteKey(options.siteKey, baseUrl)
