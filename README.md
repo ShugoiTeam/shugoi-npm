@@ -200,6 +200,31 @@ If your `baseUrl` points to a self-hosted API, its origin is automatically added
 
 ---
 
+## CORS / CORP (cross-origin resources)
+
+The Shugoi **guard runs in your visitors' browsers** and fetches resources (guard script, `/wlc` whitelist check, fonts, block-page images) from `baseUrl`. This is a **cross-origin** request from your site to the API server.
+
+For these requests to succeed, the **API server** must respond with:
+
+- `Access-Control-Allow-Origin: *` (or your site's origin)
+- `Cross-Origin-Resource-Policy: cross-origin` — **not** `same-site`, otherwise the browser blocks the response with `ERR_BLOCKED_BY_RESPONSE.NotSameSite` and every visitor is shown the restricted block page.
+
+**When using the hosted `https://shugoi.com/api/v1` endpoint, this is already configured.** If you self-host the API, add these headers on the routes that serve the guard (`/guard-detect`, `/guard`) and the whitelist check (`/wlc`, `/whitelist-check`).
+
+Example (Express):
+
+```js
+app.use('/api/v1', (req, res, next) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+  next();
+});
+```
+
+> ⚠️ Do **not** set a global `Cross-Origin-Resource-Policy: same-site` on the API server: it will break the cross-origin guard fetch and block every visitor.
+
+---
+
 ## Rate Limiting: Two Distinct Layers
 
 | Layer | Discriminant | Role | Threshold |
