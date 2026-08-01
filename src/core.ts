@@ -188,9 +188,10 @@ export function createCore(options: ShugoiCoreOptions): ShugoiCore {
     // le 1er hit est un mini-JS challenge qui résout SHA256(salt:nonce) puis reload
     // avec ?sg_proof. Seul un navigateur qui EXÉCUTE le JS peut passer. Le view-source
     // (qui n'exécute pas le JS) voit la page de blocage, pas le contenu.
-    // Skip : /__shugoi/*, /api/*, assets statiques, pages avec ?sg_proof valide.
+    // Skip : /__shugoi/*, /api/*, assets avec extension, pages avec ?sg_proof valide.
+    // NB : la racine "/" et les chemins finissant par "/" sont AUSSI des pages (challengeés).
     const isPage = !ctx.path.includes('/__shugoi/') && !ctx.path.startsWith('/api/')
-      && !/\.[a-zA-Z0-9]{1,5}$/.test(ctx.path.split('?')[0]) && !ctx.path.endsWith('/')
+      && !/\.[a-zA-Z0-9]{1,5}$/.test(ctx.path.split('?')[0])
     const POW_DIFF = 14; // ~16k itérations ≈ 5-15ms
     const powSecret = process.env.SHUGOKI_SIGNING_SECRET || process.env.SHUGOKI_SECRET
     if (isPage && powSecret && ctx.ua && /Mozilla/i.test(ctx.ua)) {
