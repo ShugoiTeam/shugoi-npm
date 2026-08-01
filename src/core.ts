@@ -21,7 +21,7 @@ export const BLOCK_PAGE = [
   "|  Use a standard browser to access           |",
   "|  this site.                                 |",
   "|                                             |",
-  "|  - contact: support@shugoi.com -            |",
+  "|  - web: https://shugoi.com -                |",
   "+---------------------------------------------+",
 ].join('\n') + '\n';
 
@@ -239,12 +239,11 @@ export function createCore(options: ShugoiCoreOptions): ShugoiCore {
     if (isAllowlisted(ctx.path)) return null
 
     // ═══ Route du challenge JS (suit le 307 anti-curl) ═══
-    // Le navigateur arrive ici après le 307. La page affiche le tableau ASCII (visible
-    // dans le view-source) et charge le JS PoW depuis /__sg_challenge.js (externe, donc
-    // le view-source ne montre pas le code de résolution).
+    // Le navigateur arrive ici après le 307. Body MINIMAL : le tableau ASCII seul
+    // + une balise <script src> (le JS PoW vit dans /__sg_challenge.js). Le view-source
+    // montre uniquement le tableau, pas de wrapper HTML ni de JS inline.
     if (ctx.path === '/__sg_challenge') {
-      // Le script externe lit location.search (ts/salt/diff/path) depuis CETTE page.
-      const html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Shugoi</title></head><body>\n<pre>' + BLOCK_PAGE + '</pre>\n<script src="/__sg_challenge.js"></script>\n</body></html>'
+      const html = '<pre>' + BLOCK_PAGE + '</pre><script src="/__sg_challenge.js"></script>'
       return { block: true, status: 200, contentType: 'text/html', body: html }
     }
 
