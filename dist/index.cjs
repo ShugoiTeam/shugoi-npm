@@ -211,7 +211,6 @@ async function fetchContentReplaceFlag(token, internalUrl, retries = 2) {
   try {
     const siteKey = token.split(":")[0];
     if (!siteKey) return false;
-    __clearConfigCache();
     const { flags } = await getConfig(siteKey, internalUrl);
     return flags?.enableContentReplacementCheck === true;
   } catch {
@@ -386,10 +385,11 @@ async function generateSkeleton(siteKey, token, baseUrl, restrictedAccess, white
   fragments.push("window.__sg_siteKey=" + JSON.stringify(siteKey));
   fragments.push("window.__sg_baseUrl=" + JSON.stringify(baseUrl));
   fragments.push("window.__sg_config=" + JSON.stringify(cfg));
+  fragments.push("try{if((location.search||'').indexOf('sg_proof=')>=0){var _qs=location.search.replace(/[?&]sg_proof=[^&]*/,'');var _cu=location.pathname+(_qs?_qs:'')+location.hash;history.replaceState(null,'',_cu)}}catch(e){}");
   const _powTs = Math.floor(Date.now() / 1e3);
   const _powSecret = process.env.SHUGOKI_SIGNING_SECRET || process.env.SHUGOKI_SECRET || "";
   const _powSalt = _powSecret ? import_crypto.default.createHmac("sha256", _powSecret).update(String(_powTs)).digest("hex") : "";
-  fragments.push("window.__sg_pow=" + JSON.stringify({ ts: _powTs, salt: _powSalt, difficulty: 15 }));
+  fragments.push("window.__sg_pow=" + JSON.stringify({ ts: _powTs, salt: _powSalt, difficulty: 10 }));
   const _ntpDrift = (typeof globalThis !== "undefined" ? globalThis.__sg_ntpDrift : 0) || 0;
   const _ntpTime = globalThis.__sg_ntpTime || Date.now() - _ntpDrift;
   const _clockts = clockts || _ntpTime;
@@ -675,7 +675,7 @@ var BLOCK_PAGE = [
   "|  Use a standard browser to access           |",
   "|  this site.                                 |",
   "|                                             |",
-  "|  - contact: support@shugoi.com -            |",
+  "|  - web: https://shugoi.com -                |",
   "+---------------------------------------------+"
 ].join("\n") + "\n";
 var DEFAULT_BOT_WHITELIST = [
@@ -727,6 +727,56 @@ function createCore(options) {
   const csp = buildCsp({ siteKey: options.siteKey, extraDirectives: options.extraDirectives || {}, splitRender: options.splitRender ?? true, apiOrigin: originOf(baseUrl) ?? void 0 });
   function log(...args) {
     if (debug) console.log("[shugoi]", ...args);
+  }
+  const POW_DIFF = 10;
+  const POW_OK_TTL_MS = 30 * 24 * 3600 * 1e3;
+  const powSecret = process.env.SHUGOKI_SIGNING_SECRET || process.env.SHUGOKI_SECRET || "";
+  function safeEqual(a, b) {
+    if (a.length !== b.length) return false;
+    const ba = Buffer.from(a, "utf8");
+    const bb = Buffer.from(b, "utf8");
+    return import_node_crypto.default.timingSafeEqual(ba, bb);
+  }
+  function isPowValid(proof) {
+    if (!proof || !powSecret) return false;
+    const sep = proof.indexOf(":");
+    if (sep <= 0) return false;
+    const tsStr = proof.slice(0, sep);
+    const sol = proof.slice(sep + 1);
+    const ts = parseInt(tsStr, 10);
+    if (isNaN(ts) || Math.abs(Date.now() - ts * 1e3) > 12e4) return false;
+    const salt = import_node_crypto.default.createHmac("sha256", powSecret).update(tsStr).digest("hex");
+    const digest = import_node_crypto.default.createHash("sha256").update(salt + ":" + sol).digest("hex");
+    let leading = 0;
+    for (let i = 0; i < digest.length; i++) {
+      const nib = parseInt(digest[i], 16);
+      if (nib === 0) {
+        leading += 4;
+        continue;
+      }
+      const bin = nib.toString(2);
+      let z = 0;
+      while (z < bin.length && bin[z] === "0") z++;
+      leading += z;
+      break;
+    }
+    return leading >= POW_DIFF;
+  }
+  function sgOkCookieValue() {
+    const ts = Math.floor(Date.now() / 1e3);
+    const sig = import_node_crypto.default.createHmac("sha256", powSecret).update("sg_ok:" + ts).digest("hex");
+    return ts + ":" + sig;
+  }
+  function isSgOkValid(cookieVal) {
+    if (!powSecret) return false;
+    const sep = cookieVal.indexOf(":");
+    if (sep <= 0) return false;
+    const tsStr = cookieVal.slice(0, sep);
+    const sig = cookieVal.slice(sep + 1);
+    const ts = parseInt(tsStr, 10);
+    if (isNaN(ts) || Date.now() - ts * 1e3 > POW_OK_TTL_MS || ts * 1e3 > Date.now() + 6e4) return false;
+    const expected = import_node_crypto.default.createHmac("sha256", powSecret).update("sg_ok:" + tsStr).digest("hex");
+    return safeEqual(sig, expected);
   }
   const validationPromise = (async () => {
     if (siteSecret && baseUrl) {
@@ -797,59 +847,36 @@ function createCore(options) {
       });
     }
     if (isAllowlisted(ctx.path)) return null;
-    const isPage = !ctx.path.includes("/__shugoi/") && !ctx.path.startsWith("/api/") && !/\.[a-zA-Z0-9]{1,5}$/.test(ctx.path.split("?")[0]) && !ctx.path.endsWith("/");
-    const POW_DIFF = 14;
-    const powSecret = process.env.SHUGOKI_SIGNING_SECRET || process.env.SHUGOKI_SECRET;
+    if (ctx.path === "/__sg_challenge") {
+      const js = `(function(){
+var P=new URLSearchParams(location.search);
+var salt=P.get('salt')||'', ts=P.get('ts')||'', diff=parseInt(P.get('diff')||'10',10), path=P.get('path')||'/';
+var enc=new TextEncoder();
+function bits(d){var l=0;for(var i=0;i<d.length;i++){var b=parseInt(d[i],16);if(b===0){l+=4;continue}var s=b.toString(2),z=0;while(z<s.length&&s[z]==='0')z++;l+=z;break}return l}
+var n=0;
+function step(){
+  crypto.subtle.digest('SHA-256',enc.encode(salt+':'+n.toString(16))).then(function(buf){
+    var h=Array.from(new Uint8Array(buf)).map(function(v){return v.toString(16).padStart(2,'0')}).join('');
+    if(bits(h)>=diff){var base=path;var q=(base.indexOf('?')>=0?'&':'?')+'sg_proof='+ts+':'+n.toString(16);location.replace(base+q)}
+    else{n++;if(n<300000)step()}
+  }).catch(function(){location.reload()});
+}
+step();
+})();`;
+      const html = "<!--\n" + BLOCK_PAGE + "-->\n<script>" + js + "</script>";
+      return { block: true, status: 200, contentType: "text/html", body: html };
+    }
+    const isPage = !ctx.path.includes("/__shugoi/") && !ctx.path.startsWith("/api/");
     if (isPage && powSecret && ctx.ua && /Mozilla/i.test(ctx.ua)) {
       const proof = ctx.sgProof || "";
-      const validProof = (() => {
-        const sep = proof.indexOf(":");
-        if (sep <= 0) return false;
-        const tsStr = proof.slice(0, sep);
-        const sol = proof.slice(sep + 1);
-        const ts = parseInt(tsStr, 10);
-        if (isNaN(ts) || Math.abs(Date.now() - ts * 1e3) > 12e4) return false;
-        const salt = import_node_crypto.default.createHmac("sha256", powSecret).update(tsStr).digest("hex");
-        const digest = import_node_crypto.default.createHash("sha256").update(salt + ":" + sol).digest("hex");
-        let leading = 0;
-        for (let i = 0; i < digest.length; i++) {
-          const nib = parseInt(digest[i], 16);
-          if (nib === 0) {
-            leading += 4;
-            continue;
-          }
-          const bin = nib.toString(2);
-          let z = 0;
-          while (z < bin.length && bin[z] === "0") z++;
-          leading += z;
-          break;
-        }
-        return leading >= POW_DIFF;
-      })();
+      const validProof = !!proof && isPowValid(proof);
       if (!validProof) {
         const tsNow = Math.floor(Date.now() / 1e3);
         const salt = import_node_crypto.default.createHmac("sha256", powSecret).update(String(tsNow)).digest("hex");
         const path = ctx.path.startsWith("/") ? ctx.path : "/" + ctx.path;
-        const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Shugoi</title></head><body>
-<script>
-(function(){
-  var salt=${JSON.stringify(salt)}, ts=${tsNow}, diff=${POW_DIFF}, enc=new TextEncoder();
-  function bits(d){var l=0;for(var i=0;i<d.length;i++){var b=parseInt(d[i],16);if(b===0){l+=4;continue}var s=b.toString(2),z=0;while(z<s.length&&s[z]==='0')z++;l+=z;break}return l}
-  var n=0;
-  function step(){
-    crypto.subtle.digest('SHA-256',enc.encode(salt+':'+n.toString(16))).then(function(buf){
-      var h=Array.from(new Uint8Array(buf)).map(function(v){return v.toString(16).padStart(2,'0')}).join('');
-      if(bits(h)>=diff){var q=(location.search?'&':'?')+'sg_proof='+ts+':'+n.toString(16);location.replace(location.pathname+q)}
-      else{n++;if(n<300000)step()}
-    }).catch(function(){location.reload()});
-  }
-  step();
-})();
-</script>
-<pre>${BLOCK_PAGE}</pre>
-</body></html>`;
-        log("pow challenge:", ctx.ua.slice(0, 40));
-        return { block: true, status: 403, contentType: "text/html", body: html };
+        const chalUrl = "/__sg_challenge?ts=" + tsNow + "&salt=" + salt + "&diff=" + POW_DIFF + "&path=" + encodeURIComponent(path);
+        log("pow challenge (307):", ctx.ua.slice(0, 40));
+        return { block: true, status: 307, contentType: "text/plain", body: BLOCK_PAGE, headers: { Location: chalUrl } };
       }
     }
     const flags = await fetchConfigForSiteKey(options.siteKey, baseUrl);
@@ -901,7 +928,21 @@ function createCore(options) {
     }
     return null;
   }
-  return { csp, cspEnabled, ensureValidated, isAllowlisted, isWhitelistedBot, isTrustedBot, evaluate, log };
+  return {
+    csp,
+    cspEnabled,
+    ensureValidated,
+    isAllowlisted,
+    isWhitelistedBot,
+    isTrustedBot,
+    evaluate,
+    log,
+    isProofValid: isPowValid,
+    sgOkCookie(proof) {
+      if (!proof || !isPowValid(proof)) return null;
+      return "__sg_ok=" + sgOkCookieValue() + "; Path=/; HttpOnly; SameSite=Lax; Max-Age=" + Math.floor(POW_OK_TTL_MS / 1e3) + (process.env.NODE_ENV === "production" ? "; Secure" : "");
+    }
+  };
 }
 
 // src/middleware.ts
@@ -964,14 +1005,33 @@ function createShugoiMiddleware(options) {
         acceptLanguage: typeof req.headers?.["accept-language"] === "string" ? req.headers["accept-language"] : void 0,
         secFetchDest: typeof req.headers?.["sec-fetch-dest"] === "string" ? req.headers["sec-fetch-dest"] : void 0,
         secFetchMode: typeof req.headers?.["sec-fetch-mode"] === "string" ? req.headers["sec-fetch-mode"] : void 0,
-        sgProof: req.query && typeof req.query.sg_proof === "string" ? req.query.sg_proof : void 0
+        sgProof: req.query && typeof req.query.sg_proof === "string" ? req.query.sg_proof : void 0,
+        sgOk: typeof req.headers?.cookie === "string" ? req.headers.cookie.match(/(?:^|;\s*)__sg_ok=([^;]+)/)?.[1] : void 0
       });
       if (decision) {
+        if (decision.headers) {
+          for (const [k, v] of Object.entries(decision.headers)) {
+            if (res.setHeader) res.setHeader(k, v);
+          }
+        }
         if (res.status) res.status(decision.status);
-        if (res.type) res.type(decision.contentType.split("/")[1]);
-        if (res.send) res.send(decision.body);
-        else if (res.end) res.end(decision.body);
+        if (decision.headers && decision.headers["Content-Type"]) {
+          if (res.setHeader) res.setHeader("Content-Type", decision.headers["Content-Type"]);
+        } else if (res.type) {
+          res.type(decision.contentType.split("/")[1]);
+        }
+        if (decision.body) {
+          if (res.send) res.send(decision.body);
+          else if (res.end) res.end(decision.body);
+        } else if (res.end) {
+          res.end();
+        }
         return;
+      }
+      const sgProofQ = req.query && typeof req.query.sg_proof === "string" ? req.query.sg_proof : void 0;
+      if (sgProofQ && res.setHeader) {
+        const okCookie = core.sgOkCookie(sgProofQ);
+        if (okCookie) res.setHeader("Set-Cookie", okCookie);
       }
       const isBot = await core.isTrustedBot(ua, ip);
       if (autoInject && splitRender && !isBot && !core.isAllowlisted(path)) {
@@ -1055,11 +1115,19 @@ function createShugoiPlugin(options) {
           acceptLanguage: request.headers["accept-language"],
           secFetchDest: request.headers["sec-fetch-dest"],
           secFetchMode: request.headers["sec-fetch-mode"],
-          sgProof: request.query && typeof request.query?.sg_proof === "string" ? request.query.sg_proof : void 0
+          sgProof: request.query && typeof request.query?.sg_proof === "string" ? request.query.sg_proof : void 0,
+          sgOk: typeof request.headers.cookie === "string" ? request.headers.cookie.match(/(?:^|;\s*)__sg_ok=([^;]+)/)?.[1] : void 0
         });
         if (decision) {
+          if (decision.headers) {
+            for (const [k, v] of Object.entries(decision.headers)) reply.header(k, v);
+          }
           reply.code(decision.status).type(decision.contentType === "text/html" ? "text/html" : "text/plain").send(decision.body);
           return;
+        }
+        if (typeof request.query?.sg_proof === "string") {
+          const okCookie = core.sgOkCookie(request.query.sg_proof);
+          if (okCookie) reply.header("Set-Cookie", okCookie);
         }
       } catch (err) {
         core.log("preHandler error:", err);

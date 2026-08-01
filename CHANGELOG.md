@@ -4,6 +4,35 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.3.5] - 2026-08-02
+
+### Security (audit anti-bypass curl/view-source)
+- **307 + tableau ASCII seul** : toute page HTML sans `sg_proof` valide reçoit un 307 dont
+  le corps est UNIQUEMENT le tableau `BLOCKED BY SHUGOI` (text/plain). curl (même avec
+  headers navigateur parfaits) ne voit plus aucun HTML/JS. Le view-source non plus.
+- **Challenge JS inline** : le navigateur suit le 307 vers `/__sg_challenge` — page au
+  body minimal (tableau dans un commentaire HTML, invisible à l'écran → pas de flash)
+  avec le JS PoW INLINE (économie d'un aller-retour réseau). Le tableau reste visible
+  dans le view-source.
+- **Plus d'exclusion d'extension dans `isPage`** : `/index.js`, `/app.js`, `/__shugoi.js`
+  (catch-all SPA qui sert `index.html`) sont désormais challengés au lieu de servir le
+  fallback skeleton sans PoW.
+- **Le cookie `__sg_ok` ne bypass plus le challenge** : le view-source de `/` renvoie
+  toujours le tableau, même avec un cookie valide présent.
+- **Email retiré du tableau** : plus de réécriture Cloudflare (email-protection) dans le
+  tableau de blocage.
+
+### Performance (chargement 2-5s → ~1s)
+- **PoW pre-flight diff 14 → 10** (~16k itérations → ~1k, ~50ms au lieu de ~0.6s+).
+- **PoW wlc diff 15 → 10** : le double PoW (pre-flight + wlc) était le goulot
+  (~32k itérations crypto.subtle ≈ 1-3s dans un vrai navigateur).
+- **Timeout codecs guard 2s → 300ms** : le machineId n'attend plus 2s si les codecs
+  mediaCapabilities ne répondent pas.
+- **`__clearConfigCache()` supprimé du render** : le flag `contentReplace` est lu via le
+  cache config (TTL 30s), plus de fetch réseau (~300-400ms) à chaque render.
+- **`sg_proof` conservé au challenge** : le query existant (`?sg_probe_debug=1`) est
+  préservé dans l'URL de redirection et dans le nettoyage `history.replaceState`.
+
 ## [0.3.4] - 2026-08-01
 
 ### Security
