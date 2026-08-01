@@ -817,7 +817,7 @@ function createShugoiMiddleware(options) {
       if (autoInject && options.siteKey) {
         try {
           const { skipPaths } = await getConfig(options.siteKey, internalUrl);
-          if (skipPaths?.some((p) => path === p || path.startsWith(p + "/"))) {
+          if (skipPaths?.some((p) => path === p)) {
             try {
               const { renderPage } = await import("../../../server/lib/ssr.js");
               const html = await renderPage(path);
