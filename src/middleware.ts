@@ -40,7 +40,10 @@ export function createShugoiMiddleware(options: ShugoiCoreOptions) {
       if (path.endsWith('/__shugoi/render')) {
         const { handleRender } = await import('./render');
         const q = (req.query && (req.query as Record<string, string>)) || {};
-        return handleRender(q.token || '', res, internalUrl, q.mid || '', q.grant || '');
+        const ip = (typeof req.headers?.['x-forwarded-for'] === 'string'
+          ? req.headers['x-forwarded-for'].split(',')[0]?.trim()
+          : undefined) || (typeof req.ip === 'string' ? req.ip : 'unknown');
+        return handleRender(q.token || '', res, internalUrl, q.mid || '', q.grant || '', ip);
       }
 
       // CSP: merge with existing header
@@ -168,7 +171,10 @@ export function createShugoiPlugin(options: ShugoiCoreOptions) {
     // Render endpoint
     fastify.get('/__shugoi/render', async (request: any, reply: any) => {
       const { renderResponseData } = await import('./render');
-      const data = await renderResponseData(request.query.token || '', undefined, options.baseUrl, request.query.mid || '', request.query.grant || '');
+      const ip = (typeof request.headers?.['x-forwarded-for'] === 'string'
+        ? request.headers['x-forwarded-for'].split(',')[0]?.trim()
+        : undefined) || (typeof request.ip === 'string' ? request.ip : 'unknown');
+      const data = await renderResponseData(request.query.token || '', undefined, options.baseUrl, request.query.mid || '', request.query.grant || '', ip);
       reply.send(data);
     });
 

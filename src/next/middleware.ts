@@ -116,10 +116,10 @@ function generateBootcode(siteKey: string, config: string, detectCode: string, g
   return '<script>eval([...\'' + enc + '\'].map(function(x){return String.fromCodePoint(x.codePointAt(0)-917504)}).join(\'\'))</script>';
 }
 
-export function renderResponseData(token: string, mid?: string, grant?: string): { html?: string; blocked?: boolean; error?: string } {
+export function renderResponseData(token: string, mid?: string, grant?: string, ip?: string): { html?: string; blocked?: boolean; error?: string } {
   if (!token || token.length < 16 || token.length > 300) return { error: "not_found" };
   // Parité avec l'adapter Express (NP-01) : sans grant valide, pas de HTML.
-  if (!verifyRenderGrant(mid, grant)) return { error: "not_found" };
+  if (!verifyRenderGrant(mid, grant, token, ip)) return { error: "not_found" };
   const suffix = token.slice(-16);
   try {
     for (const f of readdirSync(TOKEN_DIR)) {
@@ -149,7 +149,9 @@ export function createShugoiNextMiddleware(options: ShugoiNextOptions) {
       const token = request.nextUrl.searchParams.get("token") || "";
       const mid = request.nextUrl.searchParams.get("mid") || "";
       const grant = request.nextUrl.searchParams.get("grant") || "";
-      return NextResponse.json(renderResponseData(token, mid, grant));
+      const xff = request.headers.get("x-forwarded-for") || "";
+      const ip = xff.split(",")[0]?.trim() || "unknown";
+      return NextResponse.json(renderResponseData(token, mid, grant, ip));
     }
 
     if (path.startsWith("/_next/") || path.startsWith("/api/")) return NextResponse.next();

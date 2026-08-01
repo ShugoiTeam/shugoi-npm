@@ -98,21 +98,31 @@ function readFromMemory(token: string): string | null {
 // l'ajoute à l'URL render. Un bot curl qui extrait le token du challenge sans exécuter
 // le JS n'a pas de mid/grant cohérents → render refuse. Signé avec le même secret que
 // le token (SHUGOKI_SIGNING_SECRET) → vérifiable localement, sans état partagé.
-// Factorisé pour être partagé par les adapters Express / Next / Fastify (parité NP-01).
-export function verifyRenderGrant(mid: string | undefined, grant: string | undefined): boolean {
+// Format : base36(timestamp) + ":" + HMAC(secret, "render-grant:mid:token:ip:timestamp").
+// Lié au token + IP + TTL (CH-01/02/03). Factorisé pour les adapters Express/Next/Fastify.
+const GRANT_TTL_MS = 120_000;
+
+export function verifyRenderGrant(mid: string | undefined, grant: string | undefined, token?: string, ip?: string): boolean {
   const gSecret = process.env.SHUGOKI_SIGNING_SECRET || process.env.SHUGOKI_SECRET;
   if (!gSecret) return true; // fail-safe : pas de secret configuré → pas de vérification
   if (!grant || !mid || !/^[a-f0-9]{64}$/.test(mid)) return false;
-  const exp = crypto.createHmac('sha256', gSecret).update('render-grant:' + mid).digest('hex');
-  try { return crypto.timingSafeEqual(Buffer.from(grant, 'hex'), Buffer.from(exp, 'hex')); }
+  const sep = grant.indexOf(':');
+  if (sep < 0) return false;
+  const ts = grant.slice(0, sep);
+  const sig = grant.slice(sep + 1);
+  const tsSec = parseInt(ts, 36);
+  if (isNaN(tsSec) || Date.now() - tsSec * 1000 > GRANT_TTL_MS) return false;
+  const payload = 'render-grant:' + [mid, token || '', ip || '', ts].join(':');
+  const exp = crypto.createHmac('sha256', gSecret).update(payload).digest('hex');
+  try { return crypto.timingSafeEqual(Buffer.from(sig, 'hex'), Buffer.from(exp, 'hex')); }
   catch { return false; }
 }
 
-export async function renderResponseData(token: string, locale?: Locale, configUrl?: string, mid?: string, grant?: string): Promise<{ html?: string; error?: string; blocked?: boolean; reason?: string; message?: string; title?: string }> {
+export async function renderResponseData(token: string, locale?: Locale, configUrl?: string, mid?: string, grant?: string, ip?: string): Promise<{ html?: string; error?: string; blocked?: boolean; reason?: string; message?: string; title?: string }> {
   if (!token || token.length < 16 || token.length > 300) return { error: 'not_found' };
 
   // Anti-bypass "token-only" : sans grant valide, pas de HTML.
-  if (!verifyRenderGrant(mid, grant)) return { error: 'not_found' };
+  if (!verifyRenderGrant(mid, grant, token, ip)) return { error: 'not_found' };
 
   // Vérifier le flag en direct depuis l'API interne (pas de cache)
   const contentReplaceOn = await fetchContentReplaceFlag(token, configUrl || 'http://127.0.0.1:3098');
@@ -205,8 +215,8 @@ function verifyTokenAndRead(token: string, locale?: Locale): { html?: string; er
   return { error: 'not_found' };
 }
 
-export async function handleRender(token: string, res: { setHeader?: (k: string, v: string) => void; send?: (body: string) => void; end?: (body: string) => void }, configUrl?: string, mid?: string, grant?: string) {
-  const data = await renderResponseData(token, undefined, configUrl, mid, grant);
+export async function handleRender(token: string, res: { setHeader?: (k: string, v: string) => void; send?: (body: string) => void; end?: (body: string) => void }, configUrl?: string, mid?: string, grant?: string, ip?: string) {
+  const data = await renderResponseData(token, undefined, configUrl, mid, grant, ip);
   const json = JSON.stringify(data);
   if (res.setHeader) res.setHeader('Content-Type', 'application/json');
   if (res.send) res.send(json);
@@ -380,6 +390,7 @@ export async function generateSkeleton(siteKey: string, token: string, baseUrl: 
   const fbTitle = jsStr(msgs.blockedTitle);
   fragments.push('window.__sg_showBlock=function(msg,title,badge){var h="<head><meta charset=UTF-8><meta name=viewport content=width=device-width,initial-scale=1><style>@font-face{font-family:\\x27Alex Brush\\x27;src:url(https://shugoi.com/alex-brush.woff2?v=2) format(\\x27woff2\\x27);font-display:swap}*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}html,body{height:100%;background:#fcf9f5}body{font-family:system-ui,-apple-system,\\\\x27Segoe UI\\\\x27,Roboto,sans-serif;display:flex;align-items:center;justify-content:center;padding:1.2rem}#c{max-width:460px;width:100%;background:#fff;border:4px solid #000;border-radius:28px 6px 32px 10px;box-shadow:12px 12px 0 #000;padding:3rem 2.4rem 2.8rem;text-align:center}#c .l{width:80px;height:80px;pointer-events:none;transform:rotate(-2.5deg);margin:0 auto .6rem;display:block}#c .b{display:block;margin:0 auto .2rem;pointer-events:none;max-width:100%;height:auto}#c .bdg{display:inline-block;border:2px solid #000;border-radius:10px 2px 14px 4px;padding:.3rem .9rem;font-size:.6rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#E87090;margin-bottom:1.4rem}#c h2{font-family:\\x27Alex Brush\\x27,Georgia,\\\\x27Times New Roman\\\\x27,serif;font-size:2.2rem;color:#E87090;font-weight:400;margin:0 auto .6rem}#c p.desc{font-size:.9rem;color:#555;line-height:1.8;max-width:380px;margin:0 auto}#c p.ft{font-size:.55rem;color:#E87090;margin-top:1.8rem}</style></head><body><div id=c><img src=https://shugoi.com/favicon-block.png class=l><img src=https://shugoi.com/brand-block.png class=b><div class=bdg>"+(badge||"' + fbBadge + '")+"</div><h2>"+(title||"' + fbTitle + '")+"</h2><p class=desc>"+(msg||"")+"</p><p class=ft>"+location.hostname+" \\u00b7 Shugoi</p></div></body>";document.documentElement.innerHTML=h}');
   fragments.push('var t="' + token + '"');
+  fragments.push('window.__sg_token="' + token + '"');
   fragments.push('var k="' + siteKey + '"');
   fragments.push('var b="' + baseUrl + '"');
   fragments.push('var r="' + rurl + '"');

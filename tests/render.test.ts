@@ -3,9 +3,12 @@ import { createHmac } from 'node:crypto';
 import { storeHtml, renderResponseData, signToken } from '../src/render';
 
 const GRANT_MID = 'a'.repeat(64);
-function validGrant(): string {
+function validGrant(token?: string, ip?: string): string {
   const secret = process.env.SHUGOKI_SIGNING_SECRET || process.env.SHUGOKI_SECRET || '';
-  return createHmac('sha256', secret).update('render-grant:' + GRANT_MID).digest('hex');
+  const ts = Math.floor(Date.now() / 1000).toString(36);
+  const payload = 'render-grant:' + [GRANT_MID, token || '', ip || '', ts].join(':');
+  const sig = createHmac('sha256', secret).update(payload).digest('hex');
+  return ts + ':' + sig;
 }
 
 describe('renderResponseData — idempotence', () => {
@@ -17,8 +20,8 @@ describe('renderResponseData — idempotence', () => {
     const token = 'test-token-for-idempotence-' + Date.now();
     storeHtml(token, '<html>test</html>');
 
-    const first = await renderResponseData(token, undefined, undefined, GRANT_MID, validGrant());
-    const second = await renderResponseData(token, undefined, undefined, GRANT_MID, validGrant());
+    const first = await renderResponseData(token, undefined, undefined, GRANT_MID, validGrant(token));
+    const second = await renderResponseData(token, undefined, undefined, GRANT_MID, validGrant(token));
 
     expect(first.html).toBe('<html>test</html>');
     expect(second.html).toBe('<html>test</html>');
@@ -67,14 +70,14 @@ describe('renderResponseData — memory store', () => {
   it('stores and retrieves from memory', async () => {
     const token = 'memory-test-token-' + Date.now();
     storeHtml(token, '<html>memory</html>');
-    const result = await renderResponseData(token, undefined, undefined, GRANT_MID, validGrant());
+    const result = await renderResponseData(token, undefined, undefined, GRANT_MID, validGrant(token));
     expect(result.html).toBe('<html>memory</html>');
   });
 
   it('evicts expired entries', async () => {
     const token = 'expired-token-' + Date.now();
     storeHtml(token, '<html>expired</html>');
-    const result = await renderResponseData(token, undefined, undefined, GRANT_MID, validGrant());
+    const result = await renderResponseData(token, undefined, undefined, GRANT_MID, validGrant(token));
     expect(result.html).toBe('<html>expired</html>');
   });
 });
