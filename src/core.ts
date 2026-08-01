@@ -183,6 +183,28 @@ export function createCore(options: ShugoiCoreOptions): ShugoiCore {
 
     if (isAllowlisted(ctx.path)) return null
 
+    // Route du challenge JS externe (servi sans challenge pour éviter une boucle).
+    // Le navigateur charge ce script depuis le 403 challenge, résout le PoW et
+    // redirige vers le chemin original avec ?sg_proof.
+    if (ctx.path === '/__sg_challenge.js') {
+      const js = `(function(){
+var P=new URLSearchParams(location.search);
+var salt=P.get('salt')||'', ts=P.get('ts')||'', diff=parseInt(P.get('diff')||'14',10), path=P.get('path')||'/';
+var enc=new TextEncoder();
+function bits(d){var l=0;for(var i=0;i<d.length;i++){var b=parseInt(d[i],16);if(b===0){l+=4;continue}var s=b.toString(2),z=0;while(z<s.length&&s[z]==='0')z++;l+=z;break}return l}
+var n=0;
+function step(){
+  crypto.subtle.digest('SHA-256',enc.encode(salt+':'+n.toString(16))).then(function(buf){
+    var h=Array.from(new Uint8Array(buf)).map(function(v){return v.toString(16).padStart(2,'0')}).join('');
+    if(bits(h)>=diff){var base=path+(location.search?location.search.replace(/[?&]sg_proof=[^&]*/,''):'');var q=(base.indexOf('?')>=0?'&':'?')+'sg_proof='+ts+':'+n.toString(16);location.replace(base+q)}
+    else{n++;if(n<300000)step()}
+  }).catch(function(){location.reload()});
+}
+step();
+})();`;
+      return { block: true, status: 200, contentType: 'application/javascript', body: js }
+    }
+
     // ═══ Pre-flight PoW challenge (anti-curl/view-source) ═══
     // Même un curl avec headers navigateur parfaits reçoit 403 BLOCKED BY SHUGOI :
     // le 1er hit est un mini-JS challenge qui résout SHA256(salt:nonce) puis reload
@@ -216,28 +238,14 @@ export function createCore(options: ShugoiCoreOptions): ShugoiCore {
         return leading >= POW_DIFF
       })()
       if (!validProof) {
-        // Mini-challenge JS : résout le PoW puis reload avec la preuve
+        // Challenge PoW : le 403 renvoie SEULEMENT le tableau ASCII + un <script src>
+        // externe (le JS vit dans /__sg_challenge.js, curl ne le charge pas). Le navigateur
+        // charge le script, résout le PoW et redirige avec ?sg_proof.
         const tsNow = Math.floor(Date.now() / 1000)
         const salt = crypto.createHmac('sha256', powSecret).update(String(tsNow)).digest('hex')
         const path = (ctx.path.startsWith('/') ? ctx.path : '/' + ctx.path)
-        const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Shugoi</title></head><body>
-<script>
-(function(){
-  var salt=${JSON.stringify(salt)}, ts=${tsNow}, diff=${POW_DIFF}, enc=new TextEncoder();
-  function bits(d){var l=0;for(var i=0;i<d.length;i++){var b=parseInt(d[i],16);if(b===0){l+=4;continue}var s=b.toString(2),z=0;while(z<s.length&&s[z]==='0')z++;l+=z;break}return l}
-  var n=0;
-  function step(){
-    crypto.subtle.digest('SHA-256',enc.encode(salt+':'+n.toString(16))).then(function(buf){
-      var h=Array.from(new Uint8Array(buf)).map(function(v){return v.toString(16).padStart(2,'0')}).join('');
-      if(bits(h)>=diff){var base=location.pathname+location.search;base=base.replace(/[?&]sg_proof=[^&]*/,'');var q=(base.indexOf('?')>=0?'&':'?')+'sg_proof='+ts+':'+n.toString(16);location.replace(base+q)}
-      else{n++;if(n<300000)step()}
-    }).catch(function(){location.reload()});
-  }
-  step();
-})();
-</script>
-<pre>${BLOCK_PAGE}</pre>
-</body></html>`
+        const chalUrl = '/__sg_challenge.js?ts=' + tsNow + '&salt=' + salt + '&diff=' + POW_DIFF + '&path=' + encodeURIComponent(path)
+        const html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Shugoi</title></head><body>\n<pre>' + BLOCK_PAGE + '</pre>\n<script src="' + chalUrl + '"></script>\n</body></html>'
         log('pow challenge:', ctx.ua.slice(0, 40))
         return { block: true, status: 403, contentType: 'text/html', body: html }
       }
