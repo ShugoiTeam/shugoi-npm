@@ -404,8 +404,12 @@ export async function generateSkeleton(siteKey: string, token: string, baseUrl: 
   fragments.push('window.__sg_serverTime=' + _clockts);
   fragments.push('window.__sg_clockts=' + _clockts);
   if (!restrictedAccess) fragments.push('window.__sg_disableRestrictedAccess=true');
+  // Fusion des guards (audit) : la notice de consentement est désormais intégrée dans
+  // guard-detect. Le guard séparé (cache.guard) n'est PLUS injecté — les 2 scripts
+  // définissaient chacun window._SG_ST → collision de table → le guard échouait
+  // (_SG_ST is not defined) et la popup ne s'affichait jamais.
   if (cache.detect) fragments.push("try{" + cache.detect + "}catch(e){window.__sg_blocked=true}");
-  if (cache.guard) fragments.push("try{" + cache.guard + "}catch(e){window.__sg_blocked=true}");
+  // guard.src.js est conservé (R.export, fingerprint) mais non injecté pour éviter la collision.
   // Locale-aware __sg_showBlock (interpolated at skeleton generation time)
   const jsStr = (s: string) => JSON.stringify(s).slice(1, -1).replace(/</g, '\\x3c');
   const devtoolsMsg = jsStr(msgs.devtoolsBody);
