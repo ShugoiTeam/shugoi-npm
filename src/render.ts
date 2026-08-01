@@ -102,7 +102,7 @@ function readFromMemory(token: string): string | null {
 // Lié au token + IP + TTL (CH-01/02/03). Factorisé pour les adapters Express/Next/Fastify.
 const GRANT_TTL_MS = 120_000;
 
-export function verifyRenderGrant(mid: string | undefined, grant: string | undefined, token?: string, ip?: string): boolean {
+export function verifyRenderGrant(mid: string | undefined, grant: string | undefined, token?: string, ip?: string, expectedSiteKey?: string): boolean {
   const gSecret = process.env.SHUGOKI_SIGNING_SECRET || process.env.SHUGOKI_SECRET;
   if (!gSecret) return true; // fail-safe : pas de secret configuré → pas de vérification
   if (!grant || !mid || !/^[a-f0-9]{64}$/.test(mid)) return false;
@@ -112,7 +112,11 @@ export function verifyRenderGrant(mid: string | undefined, grant: string | undef
   const sig = grant.slice(sep + 1);
   const tsSec = parseInt(ts, 36);
   if (isNaN(tsSec) || Date.now() - tsSec * 1000 > GRANT_TTL_MS) return false;
-  const payload = 'render-grant:' + [mid, token || '', ip || '', ts].join(':');
+  // CRITIQUE 1 (§7bis) : le grant est signé AVEC le siteKey du wlc émetteur. Le render
+  // vérifie que ce siteKey == le sien — un grant émis par un autre site (whitelist off)
+  // pour un token d'ici est refusé même si le token est authentique.
+  if (!expectedSiteKey) return false;
+  const payload = 'render-grant:' + [expectedSiteKey, mid, token || '', ip || '', ts].join(':');
   const exp = crypto.createHmac('sha256', gSecret).update(payload).digest('hex');
   try { return crypto.timingSafeEqual(Buffer.from(sig, 'hex'), Buffer.from(exp, 'hex')); }
   catch { return false; }
@@ -129,8 +133,8 @@ export async function renderResponseData(token: string, locale?: Locale, configU
     if (tokSiteKey !== expectedSiteKey) return { error: 'not_found' };
   }
 
-  // Anti-bypass "token-only" : sans grant valide, pas de HTML.
-  if (!verifyRenderGrant(mid, grant, token, ip)) return { error: 'not_found' };
+  // Anti-bypass "token-only" : sans grant valide (lié au siteKey), pas de HTML.
+  if (!verifyRenderGrant(mid, grant, token, ip, expectedSiteKey)) return { error: 'not_found' };
 
   // Vérifier le flag en direct depuis l'API interne (pas de cache)
   const contentReplaceOn = await fetchContentReplaceFlag(token, configUrl || 'http://127.0.0.1:3098');

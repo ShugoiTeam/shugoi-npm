@@ -7,9 +7,10 @@ const SITE_KEY = 'sg_sk_live_render_grant_test';
 
 const mid = 'a'.repeat(64);
 
-function makeGrant(m: string, token: string, ip: string, tsMs?: number): string {
+function makeGrant(m: string, token: string, ip: string, siteKey?: string, tsMs?: number): string {
+  const sk = siteKey ?? SITE_KEY;
   const t = Math.floor((tsMs ?? Date.now()) / 1000).toString(36);
-  const payload = 'render-grant:' + [m, token, ip, t].join(':');
+  const payload = 'render-grant:' + [sk, m, token, ip, t].join(':');
   const sig = createHmac('sha256', SECRET).update(payload).digest('hex');
   return t + ':' + sig;
 }
@@ -41,7 +42,7 @@ describe('renderResponseData anti-bypass token-only', () => {
     const html = '<html><body>secret-content</body></html>';
     storeHtml(signed.token, html);
     const grant = makeGrant(mid, signed.token, '1.2.3.4');
-    const res = await renderResponseData(signed.token, undefined, undefined, mid, grant, '1.2.3.4');
+    const res = await renderResponseData(signed.token, undefined, undefined, mid, grant, '1.2.3.4', SITE_KEY);
     expect(res.html).toBe(html);
   });
 });
@@ -52,7 +53,7 @@ describe('CH-01 rejeu cross-IP', () => {
     storeHtml(signed.token, '<html>x</html>');
     const grant = makeGrant(mid, signed.token, '1.2.3.4');
     // Rejoué depuis une IP différente
-    expect((await renderResponseData(signed.token, undefined, undefined, mid, grant, '5.6.7.8')).error).toBe('not_found');
+    expect((await renderResponseData(signed.token, undefined, undefined, mid, grant, '5.6.7.8', SITE_KEY)).error).toBe('not_found');
   });
 });
 
@@ -63,7 +64,7 @@ describe('CH-02 rejeu cross-token', () => {
     storeHtml(tokenB, '<html>y</html>');
     const grantForA = makeGrant(mid, tokenA, '1.2.3.4');
     // Rejoué sur token B avec un grant fait pour A
-    expect((await renderResponseData(tokenB, undefined, undefined, mid, grantForA, '1.2.3.4')).error).toBe('not_found');
+    expect((await renderResponseData(tokenB, undefined, undefined, mid, grantForA, '1.2.3.4', SITE_KEY)).error).toBe('not_found');
   });
 });
 
@@ -72,13 +73,13 @@ describe('CH-03 expiration du grant', () => {
     const signed = signToken(SITE_KEY, Date.now());
     storeHtml(signed.token, '<html>z</html>');
     const old = Date.now() - 180_000;
-    const expiredGrant = makeGrant(mid, signed.token, '1.2.3.4', old);
-    expect((await renderResponseData(signed.token, undefined, undefined, mid, expiredGrant, '1.2.3.4')).error).toBe('not_found');
+    const expiredGrant = makeGrant(mid, signed.token, '1.2.3.4', SITE_KEY, old);
+    expect((await renderResponseData(signed.token, undefined, undefined, mid, expiredGrant, '1.2.3.4', SITE_KEY)).error).toBe('not_found');
   });
 
   it('verifyRenderGrant accepte un grant frais et refuse un grant expiré', () => {
-    expect(verifyRenderGrant(mid, makeGrant(mid, 't', '1.2.3.4'), 't', '1.2.3.4')).toBe(true);
-    expect(verifyRenderGrant(mid, makeGrant(mid, 't', '1.2.3.4', Date.now() - 180_000), 't', '1.2.3.4')).toBe(false);
+    expect(verifyRenderGrant(mid, makeGrant(mid, 't', '1.2.3.4'), 't', '1.2.3.4', SITE_KEY)).toBe(true);
+    expect(verifyRenderGrant(mid, makeGrant(mid, 't', '1.2.3.4', SITE_KEY, Date.now() - 180_000), 't', '1.2.3.4', SITE_KEY)).toBe(false);
   });
 });
 
@@ -95,9 +96,9 @@ describe('CH-07 multi-lecture du token (contentReplaceOn)', () => {
     const signed = signToken(SITE_KEY, Date.now());
     storeHtml(signed.token, '<html>once</html>', true);
     const grant = makeGrant(mid, signed.token, '1.2.3.4');
-    const first = await renderResponseData(signed.token, undefined, undefined, mid, grant, '1.2.3.4');
+    const first = await renderResponseData(signed.token, undefined, undefined, mid, grant, '1.2.3.4', SITE_KEY);
     expect(first.html).toBe('<html>once</html>');
-    const second = await renderResponseData(signed.token, undefined, undefined, mid, grant, '1.2.3.4');
+    const second = await renderResponseData(signed.token, undefined, undefined, mid, grant, '1.2.3.4', SITE_KEY);
     expect(second.error).toBe('not_found');
   });
 
@@ -109,8 +110,8 @@ describe('CH-07 multi-lecture du token (contentReplaceOn)', () => {
     const signed = signToken(SITE_KEY, Date.now());
     storeHtml(signed.token, '<html>public</html>', false);
     const grant = makeGrant(mid, signed.token, '1.2.3.4');
-    const a = await renderResponseData(signed.token, undefined, undefined, mid, grant, '1.2.3.4');
-    const b = await renderResponseData(signed.token, undefined, undefined, mid, grant, '1.2.3.4');
+    const a = await renderResponseData(signed.token, undefined, undefined, mid, grant, '1.2.3.4', SITE_KEY);
+    const b = await renderResponseData(signed.token, undefined, undefined, mid, grant, '1.2.3.4', SITE_KEY);
     expect(a.html).toBe('<html>public</html>');
     expect(b.html).toBe('<html>public</html>');
   });
@@ -131,22 +132,31 @@ describe('CH-05 pas d\'oracle token (réponses uniformes)', () => {
 });
 
 describe('§7bis CRITIQUE 1 — grant cross-site (siteKey lié)', () => {
-  it('refuse un token dont le siteKey diffère du site (grant pyxelze sur shugoi.com)', async () => {
+  it('refuse un grant émis par un autre site (siteKey du grant != site)', async () => {
     const { signToken, storeHtml, renderResponseData } = await import('../src/render');
-    // Token émis pour le site "pyxelze"...
-    const token = signToken('sg_sk_live_pyxelze', Date.now()).token;
+    // Token du site "shugoi"...
+    const token = signToken('sg_sk_live_shugoi', Date.now()).token;
     storeHtml(token, '<html>x</html>');
-    const grant = makeGrant(mid, token, '1.2.3.4');
-    // ...mais le render attend le siteKey "shugoi.com" → refus (expectedSiteKey)
+    // ...mais grant signé avec le siteKey "pyxelze" (whitelist off) → refus
+    const grant = makeGrant(mid, token, '1.2.3.4', 'sg_sk_live_pyxelze');
     const res = await renderResponseData(token, undefined, undefined, mid, grant, '1.2.3.4', 'sg_sk_live_shugoi');
     expect(res.error).toBe('not_found');
   });
 
-  it('accepte un token du bon siteKey (expectedSiteKey match)', async () => {
+  it('refuse un token dont le siteKey diffère du site (token pyxelze sur shugoi)', async () => {
+    const { signToken, storeHtml, renderResponseData } = await import('../src/render');
+    const token = signToken('sg_sk_live_pyxelze', Date.now()).token;
+    storeHtml(token, '<html>x</html>');
+    const grant = makeGrant(mid, token, '1.2.3.4', 'sg_sk_live_pyxelze');
+    const res = await renderResponseData(token, undefined, undefined, mid, grant, '1.2.3.4', 'sg_sk_live_shugoi');
+    expect(res.error).toBe('not_found');
+  });
+
+  it('accepte un grant + token du bon siteKey', async () => {
     const { signToken, storeHtml, renderResponseData } = await import('../src/render');
     const signed = signToken('sg_sk_live_shugoi', Date.now());
     storeHtml(signed.token, '<html>ok</html>');
-    const grant = makeGrant(mid, signed.token, '1.2.3.4');
+    const grant = makeGrant(mid, signed.token, '1.2.3.4', 'sg_sk_live_shugoi');
     const res = await renderResponseData(signed.token, undefined, undefined, mid, grant, '1.2.3.4', 'sg_sk_live_shugoi');
     expect(res.html).toBe('<html>ok</html>');
   });

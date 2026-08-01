@@ -120,8 +120,8 @@ export function renderResponseData(token: string, mid?: string, grant?: string, 
   if (!token || token.length < 16 || token.length > 300) return { error: "not_found" };
   // CRITIQUE 1 (§7bis) : le token appartient à ce site uniquement (anti cross-site grant).
   if (expectedSiteKey && token.split(':')[0] !== expectedSiteKey) return { error: "not_found" };
-  // Parité avec l'adapter Express (NP-01) : sans grant valide, pas de HTML.
-  if (!verifyRenderGrant(mid, grant, token, ip)) return { error: "not_found" };
+  // Parité avec l'adapter Express (NP-01) : sans grant valide (lié au siteKey), pas de HTML.
+  if (!verifyRenderGrant(mid, grant, token, ip, expectedSiteKey)) return { error: "not_found" };
   const suffix = token.slice(-16);
   try {
     for (const f of readdirSync(TOKEN_DIR)) {
