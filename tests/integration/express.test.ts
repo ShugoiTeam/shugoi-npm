@@ -65,11 +65,12 @@ describe('Express integration', () => {
     expect(body).toContain('BLOCKED BY SHUGOI');
   });
 
-  it('blocks Mozilla UA without Sec-Fetch headers', async () => {
+  it('passe au challenge un Mozilla UA sans Sec-Fetch (audit Tor : pas de 403 brut)', async () => {
     const { body } = await httpGet(`http://127.0.0.1:${port}/`, {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
     });
-    expect(body).toContain('BLOCKED BY SHUGOI');
+    // Plus de 403 BLOCKED BY SHUGOI : le guard client gère la détection (Tor → card)
+    expect(body).not.toContain('BLOCKED BY SHUGOI');
   });
 
   it('returns skeleton for browser User-Agent with Sec-Fetch headers', async () => {

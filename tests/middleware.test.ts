@@ -58,7 +58,7 @@ describe('createShugoiMiddleware', () => {
     expect(next).not.toHaveBeenCalled();
   });
 
-  it('blocks Mozilla UA without Sec-Fetch headers', async () => {
+  it('passe au challenge un Mozilla UA sans Sec-Fetch (audit Tor : pas de 403 brut)', async () => {
     mockGuardFetch();
     const mw = createShugoiMiddleware(validOptions);
     const { req, res } = mockReqRes({
@@ -66,7 +66,8 @@ describe('createShugoiMiddleware', () => {
     });
     const next = vi.fn();
     await mw(req, res, next);
-    expect(res._body).toContain('BLOCKED BY SHUGOI');
+    // Plus de 403 BLOCKED BY SHUGOI : le guard client gère la détection (Tor → card)
+    expect(res._body).not.toContain('BLOCKED BY SHUGOI');
   });
 
   it('allows Sec-Fetch UA and replaces HTML with skeleton', async () => {

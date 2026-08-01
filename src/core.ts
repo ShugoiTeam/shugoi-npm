@@ -226,15 +226,16 @@ export function createCore(options: ShugoiCoreOptions): ShugoiCore {
       return { block: true, status: blockStatus, contentType: 'text/plain', body: BLOCK_PAGE }
     }
 
-    // Sec-Fetch + Accept-Language check for fake browsers
+    // Sec-Fetch + Accept-Language check for fake browsers.
+    // NE BLOQUE PLUS en 403 brut (audit Tor) : un navigateur légitime sans Sec-Fetch
+    // (ex. Tor Browser) recevait un 403 texte au lieu de la page de blocage dédiée.
+    // On laisse le guard CLIENT gérer la détection (Tor → card "Tor détecté", etc.).
     if (headlessEnabled && /Mozilla/i.test(ctx.ua) && !(await isTrustedBot(ctx.ua, ctx.ip))) {
       const sfd = ctx.secFetchDest ?? ''
       const sfm = ctx.secFetchMode ?? ''
       const al = ctx.acceptLanguage ?? ''
       if (!al || (!sfd && !sfm)) {
-        log('fake browser block:', ctx.ua.slice(0, 40))
-        fetch(baseUrl + '/event', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ siteKey: options.siteKey, reason: 'headless' }), signal: AbortSignal.timeout(2000) }).catch(() => {})
-        return { block: true, status: blockStatus, contentType: 'text/plain', body: BLOCK_PAGE }
+        log('fake browser (Sec-Fetch absent) → challenge client, pas de 403:', ctx.ua.slice(0, 40))
       }
     }
 
