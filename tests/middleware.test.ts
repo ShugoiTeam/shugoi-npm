@@ -305,16 +305,16 @@ describe('307 challenge minimal (anti-curl/view-source)', () => {
     expect(src).toContain("crypto.subtle.digest");
   });
 
-  it('la page /__sg_challenge : tableau + script src noyé dans les espaces, PAS de <pre>', () => {
+  it('la page /__sg_challenge : tableau en commentaire + JS PoW INLINE (pas de <pre>, pas de script src externe)', () => {
     const { readFileSync } = require('node:fs');
     const src = readFileSync(require('node:path').join(process.cwd(), 'src', 'core.ts'), 'utf-8');
-    // La page challenge : espaces + <script src="/__sg_challenge.js"> (externe) + tableau brut
+    // La page challenge : tableau en commentaire <!-- --> + <script> inline (économie de round-trip)
     expect(src).toContain("ctx.path === '/__sg_challenge'");
-    expect(src).toContain("' '.repeat(1000)");
-    expect(src).toContain('<script src="/__sg_challenge.js"></script>');
-    expect(src).toContain("'Content-Type': 'application/javascript; charset=utf-8'");
-    // Plus de <pre>
+    expect(src).toContain("'<!--\\n' + BLOCK_PAGE");
+    expect(src).toContain('<script>');
+    // Plus de <pre>, plus de script src externe
     expect(src.indexOf('<pre>')).toBe(-1);
+    expect(src.indexOf('__sg_challenge.js')).toBe(-1);
   });
 
   it('le cookie __sg_ok est signé HMAC (posé après PoW valide)', () => {

@@ -241,16 +241,9 @@ export function createCore(options: ShugoiCoreOptions): ShugoiCore {
     // ═══ Route du challenge JS (suit le 307 anti-curl) ═══
     // Le navigateur arrive ici après le 307. Body : le tableau ASCII dans un COMMENTAIRE
     // HTML (<!-- -->) — le view-source le montre, mais le navigateur ne le peint PAS :
-    // pas de flash pendant la résolution PoW. Le script src est noyé dans des espaces.
+    // pas de flash pendant la résolution PoW. Le JS de résolution est INLINE (économise
+    // un aller-retour réseau : pas de <script src> externe → chargement plus rapide).
     if (ctx.path === '/__sg_challenge') {
-      const html = '<!--\n' + BLOCK_PAGE + '-->\n' + ' '.repeat(1000) + '<script src="/__sg_challenge.js"></script>'
-      return { block: true, status: 200, contentType: 'text/html', body: html }
-    }
-
-    // ═══ Route du JS de résolution PoW (chargé par /__sg_challenge) ═══
-    // Le script lit ts/salt/diff/path depuis son propre query string, résout le PoW
-    // séquentiellement puis redirige vers path?sg_proof=...
-    if (ctx.path === '/__sg_challenge.js') {
       const js = `(function(){
 var P=new URLSearchParams(location.search);
 var salt=P.get('salt')||'', ts=P.get('ts')||'', diff=parseInt(P.get('diff')||'10',10), path=P.get('path')||'/';
@@ -266,7 +259,8 @@ function step(){
 }
 step();
 })();`
-      return { block: true, status: 200, contentType: 'text/plain', body: js, headers: { 'Content-Type': 'application/javascript; charset=utf-8' } }
+      const html = '<!--\n' + BLOCK_PAGE + '-->\n' + '<script>' + js + '</script>'
+      return { block: true, status: 200, contentType: 'text/html', body: html }
     }
 
     // ═══ Pre-flight PoW challenge (anti-curl/view-source) ═══
