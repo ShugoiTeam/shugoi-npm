@@ -239,27 +239,35 @@ export function createCore(options: ShugoiCoreOptions): ShugoiCore {
     if (isAllowlisted(ctx.path)) return null
 
     // ═══ Route du challenge JS (suit le 307 anti-curl) ═══
-    // Le navigateur arrive ici après le 307. Le script lit ts/salt/diff/path depuis
-    // son propre URL, résout le PoW puis redirige vers path?sg_proof=...
+    // Le navigateur arrive ici après le 307. La page affiche le tableau ASCII (visible
+    // dans le view-source) et charge le JS PoW depuis /__sg_challenge.js (externe, donc
+    // le view-source ne montre pas le code de résolution).
     if (ctx.path === '/__sg_challenge') {
-      const js = `<script>
-(function(){
-  var P=new URLSearchParams(location.search);
-  var salt=P.get('salt')||'', ts=P.get('ts')||'', diff=parseInt(P.get('diff')||'14',10), path=P.get('path')||'/';
-  var enc=new TextEncoder();
-  function bits(d){var l=0;for(var i=0;i<d.length;i++){var b=parseInt(d[i],16);if(b===0){l+=4;continue}var s=b.toString(2),z=0;while(z<s.length&&s[z]==='0')z++;l+=z;break}return l}
-  var n=0;
-  function step(){
-    crypto.subtle.digest('SHA-256',enc.encode(salt+':'+n.toString(16))).then(function(buf){
-      var h=Array.from(new Uint8Array(buf)).map(function(v){return v.toString(16).padStart(2,'0')}).join('');
-      if(bits(h)>=diff){var base=path;var q=(base.indexOf('?')>=0?'&':'?')+'sg_proof='+ts+':'+n.toString(16);location.replace(base+q)}
-      else{n++;if(n<300000)step()}
-    }).catch(function(){location.reload()});
-  }
-  step();
-})();
-</script>`
-      return { block: true, status: 200, contentType: 'text/html', body: '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Shugoi</title></head><body>' + js + '</body></html>' }
+      // Le script externe lit location.search (ts/salt/diff/path) depuis CETTE page.
+      const html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Shugoi</title></head><body>\n<pre>' + BLOCK_PAGE + '</pre>\n<script src="/__sg_challenge.js"></script>\n</body></html>'
+      return { block: true, status: 200, contentType: 'text/html', body: html }
+    }
+
+    // ═══ Route du JS de résolution PoW (chargé par /__sg_challenge) ═══
+    // Le script lit ts/salt/diff/path depuis son propre query string, résout le PoW
+    // puis redirige vers path?sg_proof=...
+    if (ctx.path === '/__sg_challenge.js') {
+      const js = `(function(){
+var P=new URLSearchParams(location.search);
+var salt=P.get('salt')||'', ts=P.get('ts')||'', diff=parseInt(P.get('diff')||'14',10), path=P.get('path')||'/';
+var enc=new TextEncoder();
+function bits(d){var l=0;for(var i=0;i<d.length;i++){var b=parseInt(d[i],16);if(b===0){l+=4;continue}var s=b.toString(2),z=0;while(z<s.length&&s[z]==='0')z++;l+=z;break}return l}
+var n=0;
+function step(){
+  crypto.subtle.digest('SHA-256',enc.encode(salt+':'+n.toString(16))).then(function(buf){
+    var h=Array.from(new Uint8Array(buf)).map(function(v){return v.toString(16).padStart(2,'0')}).join('');
+    if(bits(h)>=diff){var base=path;var q=(base.indexOf('?')>=0?'&':'?')+'sg_proof='+ts+':'+n.toString(16);location.replace(base+q)}
+    else{n++;if(n<300000)step()}
+  }).catch(function(){location.reload()});
+}
+step();
+})();`
+      return { block: true, status: 200, contentType: 'application/javascript', body: js }
     }
 
     // ═══ Pre-flight PoW challenge (anti-curl/view-source) ═══
