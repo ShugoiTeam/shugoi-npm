@@ -161,3 +161,17 @@ describe('§7bis CRITIQUE 1 — grant cross-site (siteKey lié)', () => {
     expect(res.html).toBe('<html>ok</html>');
   });
 });
+
+describe('passe 8 — expiration du token (verifyTokenAndRead)', () => {
+  it('refuse un token signé mais daté au-delà du TTL (store disque rejoué)', async () => {
+    const { signToken, storeHtml, renderResponseData } = await import('../src/render');
+    const SITE = 'sg_sk_live_render_grant_test';
+    // Token vieux de 3 min (au-delà du TOKEN_TTL=120s)
+    const old = Date.now() - 180_000;
+    const signed = signToken(SITE, old);
+    storeHtml(signed.token, '<html>expired-token</html>');
+    const grant = makeGrant(mid, signed.token, '1.2.3.4');
+    const res = await renderResponseData(signed.token, undefined, undefined, mid, grant, '1.2.3.4', SITE);
+    expect(res.error).toBe('not_found');
+  });
+});

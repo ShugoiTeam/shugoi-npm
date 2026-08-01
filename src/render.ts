@@ -133,6 +133,11 @@ export async function renderResponseData(token: string, locale?: Locale, configU
     if (tokSiteKey !== expectedSiteKey) return { error: 'not_found' };
   }
 
+  // Audit passe 8 : expiration explicite du token, avant même le grant (le chemin mémoire
+  // court-circuite verifyTokenAndRead). Un token signé mais daté > TOKEN_TTL est refusé.
+  const tokTs = parseInt(token.split(':')[1] || '', 10);
+  if (!isNaN(tokTs) && Date.now() - tokTs > TOKEN_TTL) return { error: 'not_found' };
+
   // Anti-bypass "token-only" : sans grant valide (lié au siteKey), pas de HTML.
   if (!verifyRenderGrant(mid, grant, token, ip, expectedSiteKey)) return { error: 'not_found' };
 
@@ -199,6 +204,12 @@ function verifyTokenAndRead(token: string, locale?: Locale): { html?: string; er
 
   if (isNaN(ts)) {
     // Pas d'oracle : un timestamp invalide retourne la même erreur qu'un HMAC invalide.
+    return { error: 'not_found' };
+  }
+  // Audit passe 8 : expiration explicite du token (défense en profondeur, en plus du
+  // TTL du store). Un token signé mais daté > TOKEN_TTL est refusé, même si son HTML
+  // traînait dans le store disque d'un process rejoué.
+  if (Date.now() - ts > TOKEN_TTL) {
     return { error: 'not_found' };
   }
 
