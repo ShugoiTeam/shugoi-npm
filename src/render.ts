@@ -427,6 +427,12 @@ export async function generateSkeleton(siteKey: string, token: string, baseUrl: 
   fragments.push('window.__sg_siteKey=' + JSON.stringify(siteKey));
   fragments.push('window.__sg_baseUrl=' + JSON.stringify(baseUrl));
   fragments.push('window.__sg_config=' + JSON.stringify(cfg));
+  // Challenge PoW anti-curl (audit) : salt = HMAC(secret, ts). Le guard le résout en JS
+  // et l'envoie au wlc (pow=ts:nonce). curl n'exécute pas le JS → pas de grant.
+  const _powTs = Math.floor(Date.now() / 1000);
+  const _powSecret = process.env.SHUGOKI_SIGNING_SECRET || process.env.SHUGOKI_SECRET || '';
+  const _powSalt = _powSecret ? crypto.createHmac('sha256', _powSecret).update(String(_powTs)).digest('hex') : '';
+  fragments.push('window.__sg_pow=' + JSON.stringify({ ts: _powTs, salt: _powSalt, difficulty: 15 }));
   const _ntpDrift = (typeof globalThis !== 'undefined' ? globalThis.__sg_ntpDrift : 0) || 0;
   const _ntpTime = globalThis.__sg_ntpTime || (Date.now() - _ntpDrift);
   const _clockts = clockts || _ntpTime;
