@@ -427,6 +427,9 @@ export async function generateSkeleton(siteKey: string, token: string, baseUrl: 
   fragments.push('window.__sg_siteKey=' + JSON.stringify(siteKey));
   fragments.push('window.__sg_baseUrl=' + JSON.stringify(baseUrl));
   fragments.push('window.__sg_config=' + JSON.stringify(cfg));
+  // Nettoie l'URL : retire ?sg_proof de la barre d'adresse (le PoW a été validé serveur).
+  // history.replaceState ne recharge pas — le skeleton reste affiché, l'URL devient propre.
+  fragments.push("try{if((location.search||'').indexOf('sg_proof=')>=0){history.replaceState(null,'',location.pathname+location.hash)}}catch(e){}");
   // Challenge PoW anti-curl (audit) : salt = HMAC(secret, ts). Le guard le résout en JS
   // et l'envoie au wlc (pow=ts:nonce). curl n'exécute pas le JS → pas de grant.
   const _powTs = Math.floor(Date.now() / 1000);
