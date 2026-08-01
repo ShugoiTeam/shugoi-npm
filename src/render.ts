@@ -184,7 +184,9 @@ async function fetchContentReplaceFlag(token: string, internalUrl: string, retri
   try {
     const siteKey = token.split(':')[0];
     if (!siteKey) return false;
-    __clearConfigCache();
+    // Le flag est lu via getConfig (cache mémoire + stale-refresh en arrière-plan).
+    // Pas de __clearConfigCache() ici : purger le cache à CHAQUE render forçait un
+    // fetch réseau (~300-400ms) vers l'API interne à chaque requête → render lent.
     const { flags } = await getConfig(siteKey, internalUrl);
     return flags?.enableContentReplacementCheck === true;
   } catch {

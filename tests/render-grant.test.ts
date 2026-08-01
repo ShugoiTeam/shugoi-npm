@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { createHmac } from 'node:crypto';
-import { signToken, storeHtml, renderResponseData, verifyRenderGrant } from '../src/render';
+import { signToken, storeHtml, renderResponseData, verifyRenderGrant, __clearConfigCache } from '../src/render';
 
 const SECRET = 'sg_test_module_render_grant';
 const SITE_KEY = 'sg_sk_live_render_grant_test';
@@ -93,6 +93,7 @@ describe('CH-07 multi-lecture du token (contentReplaceOn)', () => {
   afterEach(() => { vi.unstubAllGlobals(); });
 
   it('refuse la 2e lecture d\'un token marqué contentReplaceOn', async () => {
+    __clearConfigCache();
     const signed = signToken(SITE_KEY, Date.now());
     storeHtml(signed.token, '<html>once</html>', true);
     const grant = makeGrant(mid, signed.token, '1.2.3.4');
@@ -107,6 +108,8 @@ describe('CH-07 multi-lecture du token (contentReplaceOn)', () => {
       ok: true,
       json: async () => ({ whitelistedMachines: [], detectionFlags: { enableContentReplacementCheck: false } }),
     }));
+    // config fraîche : le cache a peut-être déjà la valeur true du test précédent
+    __clearConfigCache();
     const signed = signToken(SITE_KEY, Date.now());
     storeHtml(signed.token, '<html>public</html>', false);
     const grant = makeGrant(mid, signed.token, '1.2.3.4');
