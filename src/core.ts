@@ -268,8 +268,11 @@ step();
     // le navigateur suit la redirection vers /__sg_challenge (le JS qui résout le PoW).
     // Le challenge s'applique à TOUTE page sans sg_proof valide — même un navigateur avec
     // cookie : le view-source (qui n'exécute pas le JS) voit donc toujours le tableau.
+    // Aucune exclusion d'extension : le catch-all SPA renvoie index.html pour TOUT chemin
+    // (y compris /index.js, /app.js, /__shugoi.js) → ils doivent être challengés aussi,
+    // sinon un curl les obtient sans PoW (fallback skeleton). Les vrais assets statiques
+    // (/assets/*, /robots.txt...) sont allowlisted et ne passent pas par ici.
     const isPage = !ctx.path.includes('/__shugoi/') && !ctx.path.startsWith('/api/')
-      && !/\.[a-zA-Z0-9]{1,5}$/.test(ctx.path.split('?')[0])
 
     if (isPage && powSecret && ctx.ua && /Mozilla/i.test(ctx.ua)) {
       const proof = ctx.sgProof || ''

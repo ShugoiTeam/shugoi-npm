@@ -327,3 +327,16 @@ describe('307 challenge minimal (anti-curl/view-source)', () => {
     expect(src).toContain('if (!validProof) {');
   });
 });
+
+describe('challenge couvre les extensions (audit anti-bypass)', () => {
+  it('isPage ne doit PLUS exclure les extensions (catch-all SPA sert index.html pour tout)', () => {
+    const { readFileSync } = require('node:fs');
+    const src = readFileSync(require('node:path').join(process.cwd(), 'src', 'core.ts'), 'utf-8');
+    // plus de regex d'exclusion d'extension dans isPage
+    const line = src.split('\n').find(l => l.includes('const isPage'));
+    expect(line).toBeTruthy();
+    expect(line).not.toMatch(/\\\.\[a-zA-Z0-9\]/);
+    // challenge pour /index.js, /app.js, /__shugoi.js
+    expect(src).toContain('index.js, /app.js');
+  });
+});
