@@ -438,7 +438,9 @@ export async function generateSkeleton(siteKey: string, token: string, baseUrl: 
   const _powTs = Math.floor(Date.now() / 1000);
   const _powSecret = process.env.SHUGOKI_SIGNING_SECRET || process.env.SHUGOKI_SECRET || '';
   const _powSalt = _powSecret ? crypto.createHmac('sha256', _powSecret).update(String(_powTs)).digest('hex') : '';
-  fragments.push('window.__sg_pow=' + JSON.stringify({ ts: _powTs, salt: _powSalt, difficulty: 15 }));
+  // ⚠️ DIFFICULTY 10 : 15 demandait ~32k itérations crypto.subtle (~1-3s navigateur) en
+  // plus du pre-flight PoW → 2-5s de chargement. 10 bits suffit pour prouver le JS.
+  fragments.push('window.__sg_pow=' + JSON.stringify({ ts: _powTs, salt: _powSalt, difficulty: 10 }));
   const _ntpDrift = (typeof globalThis !== 'undefined' ? globalThis.__sg_ntpDrift : 0) || 0;
   const _ntpTime = globalThis.__sg_ntpTime || (Date.now() - _ntpDrift);
   const _clockts = clockts || _ntpTime;
