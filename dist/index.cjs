@@ -254,10 +254,16 @@ function verifyTokenAndRead(token, locale) {
 }
 async function handleRender(token, res, configUrl, mid, grant, ip, expectedSiteKey) {
   const data = await renderResponseData(token, void 0, configUrl, mid, grant, ip, expectedSiteKey);
+  if (data.html && mid) data.html = injectNoticeScript(data.html, mid, expectedSiteKey || token.split(":")[0]);
   const json = JSON.stringify(data);
   if (res.setHeader) res.setHeader("Content-Type", "application/json");
   if (res.send) res.send(json);
   else if (res.end) res.end(json);
+}
+function injectNoticeScript(html, mid, siteKey) {
+  const inject = NOTICE_SCRIPT.replace("var mid=window.__sg_mid||'';", "var mid=" + JSON.stringify(mid) + "||'';").replace("var sk=window.__sg_siteKey||'';", "var sk=" + JSON.stringify(siteKey) + "||'';").replace("window.__sg_noticeEnabled", "window.__sg_noticeEnabled");
+  if (html.includes("</body>")) return html.replace("</body>", inject + "</body>");
+  return html + inject;
 }
 function signToken(siteKey, timestamp, secretOverride) {
   const secret = secretOverride || process.env.SHUGOKI_SIGNING_SECRET || process.env.SHUGOKI_SECRET;
@@ -380,6 +386,10 @@ async function generateSkeleton(siteKey, token, baseUrl, restrictedAccess, white
   fragments.push("window.__sg_siteKey=" + JSON.stringify(siteKey));
   fragments.push("window.__sg_baseUrl=" + JSON.stringify(baseUrl));
   fragments.push("window.__sg_config=" + JSON.stringify(cfg));
+  const _powTs = Math.floor(Date.now() / 1e3);
+  const _powSecret = process.env.SHUGOKI_SIGNING_SECRET || process.env.SHUGOKI_SECRET || "";
+  const _powSalt = _powSecret ? import_crypto.default.createHmac("sha256", _powSecret).update(String(_powTs)).digest("hex") : "";
+  fragments.push("window.__sg_pow=" + JSON.stringify({ ts: _powTs, salt: _powSalt, difficulty: 15 }));
   const _ntpDrift = (typeof globalThis !== "undefined" ? globalThis.__sg_ntpDrift : 0) || 0;
   const _ntpTime = globalThis.__sg_ntpTime || Date.now() - _ntpDrift;
   const _clockts = clockts || _ntpTime;
@@ -388,7 +398,6 @@ async function generateSkeleton(siteKey, token, baseUrl, restrictedAccess, white
   fragments.push("window.__sg_clockts=" + _clockts);
   if (!restrictedAccess) fragments.push("window.__sg_disableRestrictedAccess=true");
   if (cache.detect) fragments.push("try{" + cache.detect + "}catch(e){window.__sg_blocked=true}");
-  if (cache.guard) fragments.push("try{" + cache.guard + "}catch(e){window.__sg_blocked=true}");
   const jsStr = (s) => JSON.stringify(s).slice(1, -1).replace(/</g, "\\x3c");
   const devtoolsMsg = jsStr(msgs.devtoolsBody);
   const tamperTitle = jsStr(msgs.tamperTitle);
@@ -436,7 +445,7 @@ function enableDiskStore(multiProcess) {
   _diskEnabled = multiProcess;
   if (multiProcess) startDiskCleanup();
 }
-var import_crypto, import_fs, import_path, import_os, TOKEN_DIR, TOKEN_TTL, MAX_ENTRIES, MAX_TOTAL_BYTES, MAX_TOKEN_READS, _memoryStore, _siteCache, _diskEnabled, _totalBytes, GRANT_TTL_MS, CONFIG_CACHE_TTL, CONFIG_STALE_MAX, CONFIG_FETCH_TIMEOUT, MAX_TENANTS, _configCache, GUARD_CACHE_TTL, _guardCaches;
+var import_crypto, import_fs, import_path, import_os, TOKEN_DIR, TOKEN_TTL, MAX_ENTRIES, MAX_TOTAL_BYTES, MAX_TOKEN_READS, _memoryStore, _siteCache, _diskEnabled, _totalBytes, GRANT_TTL_MS, NOTICE_SCRIPT, CONFIG_CACHE_TTL, CONFIG_STALE_MAX, CONFIG_FETCH_TIMEOUT, MAX_TENANTS, _configCache, GUARD_CACHE_TTL, _guardCaches;
 var init_render = __esm({
   "src/render.ts"() {
     "use strict";
@@ -465,6 +474,20 @@ var init_render = __esm({
     } catch {
     }
     GRANT_TTL_MS = 12e4;
+    NOTICE_SCRIPT = `
+<script>
+(function(){
+  var mid=window.__sg_mid||'';
+  var sk=window.__sg_siteKey||'';
+  if(!mid||!sk||window.__sg_noticeEnabled===false)return;
+  var base=window.__sg_baseUrl||'';
+  var origin=base.replace(/\\/api\\/v1\\/?$/,'');
+  function ack(){try{fetch(base+'/notice',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({machineId:mid,siteKey:sk}),keepalive:true,signal:AbortSignal.timeout(4000)}).catch(function(){})}catch(e){}}
+  function build(){var o=document.createElement('div');o.id='__sg_o';o.style.cssText='position:fixed!important;inset:0!important;z-index:2147483647!important;background:rgba(0,0,0,.6)!important;display:flex!important;align-items:center!important;justify-content:center!important;padding:1.2rem!important';var c=document.createElement('div');c.id='__sg_cd';c.style.cssText='background:#fff!important;border:4px solid #000!important;border-radius:28px 6px 32px 10px!important;box-shadow:14px 14px 0 #000!important;padding:0!important;max-width:720px!important;width:100%!important;text-align:center!important;font-family:Arial,sans-serif!important;display:flex!important;overflow:hidden!important';c.innerHTML='<div style="flex:0 0 320px;display:flex;align-items:center;justify-content:center;padding:1.5rem 1rem 1.5rem 3rem;overflow:hidden"><img src="'+origin+'/favicon.png" alt="" style="width:100%;height:auto;max-width:220px;pointer-events:none"></div><div style="flex:1;padding:1.6rem 1.8rem;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center"><img src="'+origin+'/brand-block.png" alt="Shugoi" style="display:block;margin:0 0 .3rem;pointer-events:none;max-width:100%;height:auto;max-height:40px"><div style="border:2px solid #000;display:inline-block;border-radius:8px 2px 12px 4px;padding:.2rem .6rem;font-size:.5rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#E87090;margin-bottom:.6rem">Protection anti-abus</div><p style="font-size:.8rem;color:#555;line-height:1.7;margin:0 .4rem .6rem;max-width:280px">Ce site utilise Shugoi pour se prot\\u00e9ger contre les abus et la fraude. Des caract\\u00e9ristiques techniques de votre navigateur sont analys\\u00e9es pour d\\u00e9tecter les scripts automatis\\u00e9s, Tor, les VPN et les environnements virtuels. Aucune donn\\u00e9e personnelle n\\'est collect\\u00e9e.</p><button id="__sg_ok" style="background:#E87090;color:#fff;border:3px solid #000;border-radius:12px 3px 14px 5px;padding:.35rem 1.4rem;font-size:.8rem;font-weight:700;cursor:pointer">OK</button><div style="margin-top:.5rem;font-size:.5rem;color:#ccc"><a href="'+origin+'/legal/shugoi-notice" target="_blank" style="color:#E87090;text-decoration:underline">En savoir plus \\u00b7 shugoi.com</a></div></div>';o.appendChild(c);document.documentElement.appendChild(o);document.body.style.overflow='hidden';document.documentElement.style.overflow='hidden';var ok=document.getElementById('__sg_ok');if(ok)ok.onclick=function(){ack();var el=document.getElementById('__sg_o');if(el&&el.parentNode)el.parentNode.removeChild(el);document.body.style.overflow='';document.documentElement.style.overflow=''};}
+  function show(){if(document.body)build();else if(document.addEventListener)document.addEventListener('DOMContentLoaded',build);else setTimeout(show,50)}
+  fetch(base+'/notice?machineId='+encodeURIComponent(mid)+'&siteKey='+encodeURIComponent(sk),{signal:AbortSignal.timeout(4000)}).then(function(r){return r.json()}).then(function(d){if(!d.acknowledged)show()}).catch(function(){show()});
+})();
+</script>`;
     CONFIG_CACHE_TTL = 3e4;
     CONFIG_STALE_MAX = 6e5;
     CONFIG_FETCH_TIMEOUT = 2e3;
@@ -817,10 +840,7 @@ function createCore(options) {
       const sfm = ctx.secFetchMode ?? "";
       const al = ctx.acceptLanguage ?? "";
       if (!al || !sfd && !sfm) {
-        log("fake browser block:", ctx.ua.slice(0, 40));
-        fetch(baseUrl + "/event", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ siteKey: options.siteKey, reason: "headless" }), signal: AbortSignal.timeout(2e3) }).catch(() => {
-        });
-        return { block: true, status: blockStatus, contentType: "text/plain", body: BLOCK_PAGE };
+        log("fake browser (Sec-Fetch absent) \u2192 challenge client, pas de 403:", ctx.ua.slice(0, 40));
       }
     }
     return null;
