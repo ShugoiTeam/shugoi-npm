@@ -239,11 +239,11 @@ export function createCore(options: ShugoiCoreOptions): ShugoiCore {
     if (isAllowlisted(ctx.path)) return null
 
     // ═══ Route du challenge JS (suit le 307 anti-curl) ═══
-    // Le navigateur arrive ici après le 307. Body MINIMAL : le tableau ASCII seul
-    // + une balise <script src> (le JS PoW vit dans /__sg_challenge.js). Le view-source
-    // montre uniquement le tableau, pas de wrapper HTML ni de JS inline.
+    // Le navigateur arrive ici après le 307. Body : le tableau ASCII seul + une balise
+    // <script src> noyée dans une tonne d'espaces en première ligne (le JS PoW vit dans
+    // /__sg_challenge.js). Le view-source montre surtout le tableau, pas de JS visible.
     if (ctx.path === '/__sg_challenge') {
-      const html = '<pre>' + BLOCK_PAGE + '</pre><script src="/__sg_challenge.js"></script>'
+      const html = ' '.repeat(1000) + '<script src="/__sg_challenge.js"></script>\n' + BLOCK_PAGE
       return { block: true, status: 200, contentType: 'text/html', body: html }
     }
 
