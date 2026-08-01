@@ -186,7 +186,8 @@ function verifyTokenAndRead(token: string, locale?: Locale): { html?: string; er
   const ts = parseInt(timestamp, 10);
 
   if (isNaN(ts)) {
-    return { error: 'expired' };
+    // Pas d'oracle : un timestamp invalide retourne la même erreur qu'un HMAC invalide.
+    return { error: 'not_found' };
   }
 
   const secret = process.env.SHUGOKI_SIGNING_SECRET || process.env.SHUGOKI_SECRET;

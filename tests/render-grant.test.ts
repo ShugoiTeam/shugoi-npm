@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { createHmac } from 'node:crypto';
 import { signToken, storeHtml, renderResponseData, verifyRenderGrant } from '../src/render';
 
@@ -79,5 +79,53 @@ describe('CH-03 expiration du grant', () => {
   it('verifyRenderGrant accepte un grant frais et refuse un grant expiré', () => {
     expect(verifyRenderGrant(mid, makeGrant(mid, 't', '1.2.3.4'), 't', '1.2.3.4')).toBe(true);
     expect(verifyRenderGrant(mid, makeGrant(mid, 't', '1.2.3.4', Date.now() - 180_000), 't', '1.2.3.4')).toBe(false);
+  });
+});
+
+describe('CH-07 multi-lecture du token (contentReplaceOn)', () => {
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ whitelistedMachines: [], detectionFlags: { enableContentReplacementCheck: true } }),
+    }));
+  });
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  it('refuse la 2e lecture d\'un token marqué contentReplaceOn', async () => {
+    const signed = signToken(SITE_KEY, Date.now());
+    storeHtml(signed.token, '<html>once</html>', true);
+    const grant = makeGrant(mid, signed.token, '1.2.3.4');
+    const first = await renderResponseData(signed.token, undefined, undefined, mid, grant, '1.2.3.4');
+    expect(first.html).toBe('<html>once</html>');
+    const second = await renderResponseData(signed.token, undefined, undefined, mid, grant, '1.2.3.4');
+    expect(second.error).toBe('not_found');
+  });
+
+  it('autorise plusieurs lectures si contentReplaceOn est off (exfiltration OK pour contenu public)', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ whitelistedMachines: [], detectionFlags: { enableContentReplacementCheck: false } }),
+    }));
+    const signed = signToken(SITE_KEY, Date.now());
+    storeHtml(signed.token, '<html>public</html>', false);
+    const grant = makeGrant(mid, signed.token, '1.2.3.4');
+    const a = await renderResponseData(signed.token, undefined, undefined, mid, grant, '1.2.3.4');
+    const b = await renderResponseData(signed.token, undefined, undefined, mid, grant, '1.2.3.4');
+    expect(a.html).toBe('<html>public</html>');
+    expect(b.html).toBe('<html>public</html>');
+  });
+});
+
+describe('CH-05 pas d\'oracle token (réponses uniformes)', () => {
+  it('token mal formé, HMAC invalide et timestamp invalide → même erreur not_found', async () => {
+    const malformed = 'short';
+    const badSig = 'sg_sk_x:1785598065755:c15bd94a76cbe040:' + '0'.repeat(64);
+    const badTs = 'sg_sk_x:notanumber:c15bd94a76cbe040:' + 'f'.repeat(64);
+    const r1 = await renderResponseData(malformed);
+    const r2 = await renderResponseData(badSig);
+    const r3 = await renderResponseData(badTs);
+    expect(r1.error).toBe('not_found');
+    expect(r2.error).toBe('not_found');
+    expect(r3.error).toBe('not_found');
   });
 });
