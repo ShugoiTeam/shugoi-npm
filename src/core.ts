@@ -3,6 +3,7 @@ import { ensureGuardsReady, fetchConfigForSiteKey } from './render'
 import { buildCsp, originOf } from './csp'
 import { resolveLocale, type Locale, MESSAGES } from './locales'
 import { verifyBotIp } from './verify-bot'
+import crypto from 'node:crypto'
 
 export const DEFAULT_HEADLESS_PATTERNS = [
   /^curl/i, /^wget/i, /^python/i, /^Go-http-client/i, /^Java\//,
@@ -47,6 +48,7 @@ export interface EvaluateCtx {
   acceptLanguage?: string;
   secFetchDest?: string;
   secFetchMode?: string;
+  sgProof?: string;
 }
 
 export interface BlockDecision {
@@ -180,6 +182,65 @@ export function createCore(options: ShugoiCoreOptions): ShugoiCore {
     }
 
     if (isAllowlisted(ctx.path)) return null
+
+    // ═══ Pre-flight PoW challenge (anti-curl/view-source) ═══
+    // Même un curl avec headers navigateur parfaits reçoit 403 BLOCKED BY SHUGOI :
+    // le 1er hit est un mini-JS challenge qui résout SHA256(salt:nonce) puis reload
+    // avec ?sg_proof. Seul un navigateur qui EXÉCUTE le JS peut passer. Le view-source
+    // (qui n'exécute pas le JS) voit la page de blocage, pas le contenu.
+    // Skip : /__shugoi/*, /api/*, assets statiques, pages avec ?sg_proof valide.
+    const isPage = !ctx.path.includes('/__shugoi/') && !ctx.path.startsWith('/api/')
+      && !/\.[a-zA-Z0-9]{1,5}$/.test(ctx.path.split('?')[0]) && !ctx.path.endsWith('/')
+    const POW_DIFF = 14; // ~16k itérations ≈ 5-15ms
+    const powSecret = process.env.SHUGOKI_SIGNING_SECRET || process.env.SHUGOKI_SECRET
+    if (isPage && powSecret && ctx.ua && /Mozilla/i.test(ctx.ua)) {
+      const proof = ctx.sgProof || ''
+      const validProof = (() => {
+        const sep = proof.indexOf(':')
+        if (sep <= 0) return false
+        const tsStr = proof.slice(0, sep)
+        const sol = proof.slice(sep + 1)
+        const ts = parseInt(tsStr, 10)
+        if (isNaN(ts) || Math.abs(Date.now() - ts * 1000) > 120000) return false
+        const salt = crypto.createHmac('sha256', powSecret).update(tsStr).digest('hex')
+        const digest = crypto.createHash('sha256').update(salt + ':' + sol).digest('hex')
+        let leading = 0
+        for (let i = 0; i < digest.length; i++) {
+          const nib = parseInt(digest[i], 16)
+          if (nib === 0) { leading += 4; continue }
+          const bin = nib.toString(2)
+          let z = 0; while (z < bin.length && bin[z] === '0') z++
+          leading += z; break
+        }
+        return leading >= POW_DIFF
+      })()
+      if (!validProof) {
+        // Mini-challenge JS : résout le PoW puis reload avec la preuve
+        const tsNow = Math.floor(Date.now() / 1000)
+        const salt = crypto.createHmac('sha256', powSecret).update(String(tsNow)).digest('hex')
+        const path = (ctx.path.startsWith('/') ? ctx.path : '/' + ctx.path)
+        const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Shugoi</title></head><body>
+<script>
+(function(){
+  var salt=${JSON.stringify(salt)}, ts=${tsNow}, diff=${POW_DIFF}, enc=new TextEncoder();
+  function bits(d){var l=0;for(var i=0;i<d.length;i++){var b=parseInt(d[i],16);if(b===0){l+=4;continue}var s=b.toString(2),z=0;while(z<s.length&&s[z]==='0')z++;l+=z;break}return l}
+  var n=0;
+  function step(){
+    crypto.subtle.digest('SHA-256',enc.encode(salt+':'+n.toString(16))).then(function(buf){
+      var h=Array.from(new Uint8Array(buf)).map(function(v){return v.toString(16).padStart(2,'0')}).join('');
+      if(bits(h)>=diff){var q=(location.search?'&':'?')+'sg_proof='+ts+':'+n.toString(16);location.replace(location.pathname+q)}
+      else{n++;if(n<300000)step()}
+    }).catch(function(){location.reload()});
+  }
+  step();
+})();
+</script>
+<pre>${BLOCK_PAGE}</pre>
+</body></html>`
+        log('pow challenge:', ctx.ua.slice(0, 40))
+        return { block: true, status: 403, contentType: 'text/html', body: html }
+      }
+    }
 
     const flags = await fetchConfigForSiteKey(options.siteKey, baseUrl)
 

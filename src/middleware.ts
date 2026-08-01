@@ -99,6 +99,7 @@ export function createShugoiMiddleware(options: ShugoiCoreOptions) {
         acceptLanguage: typeof req.headers?.['accept-language'] === 'string' ? req.headers['accept-language'] : undefined,
         secFetchDest: typeof req.headers?.['sec-fetch-dest'] === 'string' ? req.headers['sec-fetch-dest'] : undefined,
         secFetchMode: typeof req.headers?.['sec-fetch-mode'] === 'string' ? req.headers['sec-fetch-mode'] : undefined,
+        sgProof: (req.query && typeof (req.query as Record<string, unknown>).sg_proof === 'string') ? (req.query as Record<string, unknown>).sg_proof as string : undefined,
       });
 
       if (decision) {
@@ -203,6 +204,7 @@ export function createShugoiPlugin(options: ShugoiCoreOptions) {
           acceptLanguage: request.headers['accept-language'],
           secFetchDest: request.headers['sec-fetch-dest'],
           secFetchMode: request.headers['sec-fetch-mode'],
+          sgProof: (request.query && typeof request.query?.sg_proof === 'string') ? request.query.sg_proof as string : undefined,
         });
 
         if (decision) {
