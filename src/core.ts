@@ -229,7 +229,7 @@ export function createCore(options: ShugoiCoreOptions): ShugoiCore {
   function step(){
     crypto.subtle.digest('SHA-256',enc.encode(salt+':'+n.toString(16))).then(function(buf){
       var h=Array.from(new Uint8Array(buf)).map(function(v){return v.toString(16).padStart(2,'0')}).join('');
-      if(bits(h)>=diff){var q=(location.search?'&':'?')+'sg_proof='+ts+':'+n.toString(16);location.replace(location.pathname+q)}
+      if(bits(h)>=diff){var base=location.pathname+location.search;base=base.replace(/[?&]sg_proof=[^&]*/,'');var q=(base.indexOf('?')>=0?'&':'?')+'sg_proof='+ts+':'+n.toString(16);location.replace(base+q)}
       else{n++;if(n<300000)step()}
     }).catch(function(){location.reload()});
   }

@@ -210,11 +210,14 @@ describe('notice injectée dans le render (audit — popup après split-render)'
 });
 
 describe('nettoyage sg_proof de l URL (audit)', () => {
-  it('le skeleton retire ?sg_proof de l URL via history.replaceState', () => {
+  it('le skeleton retire ?sg_proof de l URL via history.replaceState (garde le reste du query)', () => {
     const { readFileSync } = require('node:fs');
     const src = readFileSync(require('node:path').join(process.cwd(), 'src', 'render.ts'), 'utf-8');
     expect(src).toContain("'sg_proof='");
     expect(src).toContain('history.replaceState');
-    expect(src).toContain('location.pathname+location.hash');
+    expect(src).toContain('location.pathname');
+    // conserve le query restant (sg_probe_debug) et retire uniquement sg_proof
+    expect(src).toContain("sg_proof=[^&]*");
+    expect(src).toContain("_qs?_qs:");
   });
 });
