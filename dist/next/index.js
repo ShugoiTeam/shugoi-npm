@@ -137,7 +137,7 @@ function storeHtml(token, html, contentReplaceOn) {
   _totalBytes += size;
 }
 var GRANT_TTL_MS = 12e4;
-function verifyRenderGrant(mid, grant, token, ip) {
+function verifyRenderGrant(mid, grant, token, ip, expectedSiteKey) {
   const gSecret = process.env.SHUGOKI_SIGNING_SECRET || process.env.SHUGOKI_SECRET;
   if (!gSecret) return true;
   if (!grant || !mid || !/^[a-f0-9]{64}$/.test(mid)) return false;
@@ -147,7 +147,8 @@ function verifyRenderGrant(mid, grant, token, ip) {
   const sig = grant.slice(sep + 1);
   const tsSec = parseInt(ts, 36);
   if (isNaN(tsSec) || Date.now() - tsSec * 1e3 > GRANT_TTL_MS) return false;
-  const payload = "render-grant:" + [mid, token || "", ip || "", ts].join(":");
+  if (!expectedSiteKey) return false;
+  const payload = "render-grant:" + [expectedSiteKey, mid, token || "", ip || "", ts].join(":");
   const exp = crypto.createHmac("sha256", gSecret).update(payload).digest("hex");
   try {
     return crypto.timingSafeEqual(Buffer.from(sig, "hex"), Buffer.from(exp, "hex"));
@@ -533,9 +534,10 @@ function generateBootcode(siteKey, config, detectCode, guardCode) {
   }
   return "<script>eval([...'" + enc + "'].map(function(x){return String.fromCodePoint(x.codePointAt(0)-917504)}).join(''))</script>";
 }
-function renderResponseData(token, mid, grant, ip) {
+function renderResponseData(token, mid, grant, ip, expectedSiteKey) {
   if (!token || token.length < 16 || token.length > 300) return { error: "not_found" };
-  if (!verifyRenderGrant(mid, grant, token, ip)) return { error: "not_found" };
+  if (expectedSiteKey && token.split(":")[0] !== expectedSiteKey) return { error: "not_found" };
+  if (!verifyRenderGrant(mid, grant, token, ip, expectedSiteKey)) return { error: "not_found" };
   const suffix = token.slice(-16);
   try {
     for (const f of readdirSync2(TOKEN_DIR2)) {
@@ -564,7 +566,7 @@ function createShugoiNextMiddleware(options) {
       const grant = request.nextUrl.searchParams.get("grant") || "";
       const xff = request.headers.get("x-forwarded-for") || "";
       const ip = xff.split(",")[0]?.trim() || "unknown";
-      return NextResponse2.json(renderResponseData(token, mid, grant, ip));
+      return NextResponse2.json(renderResponseData(token, mid, grant, ip, options.siteKey));
     }
     if (path.startsWith("/_next/") || path.startsWith("/api/")) return NextResponse2.next();
     if (allowlist?.some((p) => path === p || path.startsWith(p + "/"))) return NextResponse2.next();

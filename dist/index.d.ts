@@ -8,8 +8,8 @@ declare class ShugoiError extends Error {
 type Locale = 'fr' | 'en';
 
 declare function storeHtml(token: string, html: string, contentReplaceOn?: boolean): void;
-declare function verifyRenderGrant(mid: string | undefined, grant: string | undefined, token?: string, ip?: string): boolean;
-declare function renderResponseData(token: string, locale?: Locale, configUrl?: string, mid?: string, grant?: string, ip?: string): Promise<{
+declare function verifyRenderGrant(mid: string | undefined, grant: string | undefined, token?: string, ip?: string, expectedSiteKey?: string): boolean;
+declare function renderResponseData(token: string, locale?: Locale, configUrl?: string, mid?: string, grant?: string, ip?: string, expectedSiteKey?: string): Promise<{
     html?: string;
     error?: string;
     blocked?: boolean;
@@ -21,7 +21,7 @@ declare function handleRender(token: string, res: {
     setHeader?: (k: string, v: string) => void;
     send?: (body: string) => void;
     end?: (body: string) => void;
-}, configUrl?: string, mid?: string, grant?: string, ip?: string): Promise<void>;
+}, configUrl?: string, mid?: string, grant?: string, ip?: string, expectedSiteKey?: string): Promise<void>;
 declare function signToken(siteKey: string, timestamp: number, secretOverride?: string): {
     token: string;
 };

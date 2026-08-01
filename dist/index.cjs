@@ -150,7 +150,7 @@ function readFromMemory(token) {
   }
   return entry.html;
 }
-function verifyRenderGrant(mid, grant, token, ip) {
+function verifyRenderGrant(mid, grant, token, ip, expectedSiteKey) {
   const gSecret = process.env.SHUGOKI_SIGNING_SECRET || process.env.SHUGOKI_SECRET;
   if (!gSecret) return true;
   if (!grant || !mid || !/^[a-f0-9]{64}$/.test(mid)) return false;
@@ -160,7 +160,8 @@ function verifyRenderGrant(mid, grant, token, ip) {
   const sig = grant.slice(sep + 1);
   const tsSec = parseInt(ts, 36);
   if (isNaN(tsSec) || Date.now() - tsSec * 1e3 > GRANT_TTL_MS) return false;
-  const payload = "render-grant:" + [mid, token || "", ip || "", ts].join(":");
+  if (!expectedSiteKey) return false;
+  const payload = "render-grant:" + [expectedSiteKey, mid, token || "", ip || "", ts].join(":");
   const exp = import_crypto.default.createHmac("sha256", gSecret).update(payload).digest("hex");
   try {
     return import_crypto.default.timingSafeEqual(Buffer.from(sig, "hex"), Buffer.from(exp, "hex"));
@@ -168,9 +169,13 @@ function verifyRenderGrant(mid, grant, token, ip) {
     return false;
   }
 }
-async function renderResponseData(token, locale, configUrl, mid, grant, ip) {
+async function renderResponseData(token, locale, configUrl, mid, grant, ip, expectedSiteKey) {
   if (!token || token.length < 16 || token.length > 300) return { error: "not_found" };
-  if (!verifyRenderGrant(mid, grant, token, ip)) return { error: "not_found" };
+  if (expectedSiteKey) {
+    const tokSiteKey = token.split(":")[0];
+    if (tokSiteKey !== expectedSiteKey) return { error: "not_found" };
+  }
+  if (!verifyRenderGrant(mid, grant, token, ip, expectedSiteKey)) return { error: "not_found" };
   const contentReplaceOn = await fetchContentReplaceFlag(token, configUrl || "http://127.0.0.1:3098");
   const memHtml = readFromMemory(token);
   if (memHtml) {
@@ -242,8 +247,8 @@ function verifyTokenAndRead(token, locale) {
   }
   return { error: "not_found" };
 }
-async function handleRender(token, res, configUrl, mid, grant, ip) {
-  const data = await renderResponseData(token, void 0, configUrl, mid, grant, ip);
+async function handleRender(token, res, configUrl, mid, grant, ip, expectedSiteKey) {
+  const data = await renderResponseData(token, void 0, configUrl, mid, grant, ip, expectedSiteKey);
   const json = JSON.stringify(data);
   if (res.setHeader) res.setHeader("Content-Type", "application/json");
   if (res.send) res.send(json);
@@ -836,7 +841,7 @@ function createShugoiMiddleware(options) {
         const { handleRender: handleRender2 } = await Promise.resolve().then(() => (init_render(), render_exports));
         const q = req.query && req.query || {};
         const ip2 = (typeof req.headers?.["x-forwarded-for"] === "string" ? req.headers["x-forwarded-for"].split(",")[0]?.trim() : void 0) || (typeof req.ip === "string" ? req.ip : "unknown");
-        return handleRender2(q.token || "", res, internalUrl, q.mid || "", q.grant || "", ip2);
+        return handleRender2(q.token || "", res, internalUrl, q.mid || "", q.grant || "", ip2, options.siteKey);
       }
       if (core.cspEnabled && res.setHeader) {
         if (res.getHeader) {
@@ -949,7 +954,7 @@ function createShugoiPlugin(options) {
     fastify.get("/__shugoi/render", async (request, reply) => {
       const { renderResponseData: renderResponseData3 } = await Promise.resolve().then(() => (init_render(), render_exports));
       const ip = (typeof request.headers?.["x-forwarded-for"] === "string" ? request.headers["x-forwarded-for"].split(",")[0]?.trim() : void 0) || (typeof request.ip === "string" ? request.ip : "unknown");
-      const data = await renderResponseData3(request.query.token || "", void 0, options.baseUrl, request.query.mid || "", request.query.grant || "", ip);
+      const data = await renderResponseData3(request.query.token || "", void 0, options.baseUrl, request.query.mid || "", request.query.grant || "", ip, options.siteKey);
       reply.send(data);
     });
     fastify.head("/__shugoi/healthcheck", async (request, reply) => reply.send(""));
