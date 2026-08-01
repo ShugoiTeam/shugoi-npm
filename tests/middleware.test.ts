@@ -273,3 +273,13 @@ describe('createShugoiMiddleware', () => {
     expect(callbackCalled).toBe(true);
   });
 });
+
+describe('skipPath matching (audit passe 8 §3.1)', () => {
+  it('le middleware fait un MATCH EXACT (pas de prefix-match /docs/anything)', () => {
+    const { readFileSync } = require('node:fs');
+    const src = readFileSync(require('node:path').join(process.cwd(), 'src', 'middleware.ts'), 'utf-8');
+    // Le skipPath `/docs` ne couvre plus `/docs/anything`
+    expect(src).toMatch(/path === p/);
+    expect(src).not.toMatch(/path\.startsWith\(p \+ '\/'\)/);
+  });
+});

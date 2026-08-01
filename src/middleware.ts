@@ -68,11 +68,14 @@ export function createShugoiMiddleware(options: ShugoiCoreOptions) {
         : undefined) || (typeof req.ip === 'string' ? req.ip : 'unknown');
       const reqLocale: Locale = resolveLocale(options.locale, typeof req.headers?.['accept-language'] === 'string' ? req.headers?.['accept-language'] : undefined);
 
-      // SkipPaths check BEFORE detection — ces routes contournent toute protection
+      // SkipPaths check BEFORE detection — ces routes contournent toute protection.
+      // Audit passe 8 (§3.1) : MATCH EXACT uniquement (plus de prefix-match). Un skipPath
+      // `/docs` ne couvre PAS `/docs/anything` — sinon un skipPath large (`/api`, `/`)
+      // exposerait toutes les sous-routes sans guard. L'utilisateur liste chaque chemin.
       if (autoInject && options.siteKey) {
         try {
           const { skipPaths } = await getConfig(options.siteKey, internalUrl);
-          if (skipPaths?.some((p: string) => path === p || path.startsWith(p + '/'))) {
+          if (skipPaths?.some((p: string) => path === p)) {
             try {
               // @ts-ignore
               const { renderPage } = await import('../../../server/lib/ssr.js');
