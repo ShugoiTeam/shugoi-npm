@@ -112,7 +112,7 @@ export function createCore(options: ShugoiCoreOptions): ShugoiCore {
   function log(...args: unknown[]) { if (debug) console.log('[shugoi]', ...args) }
 
   // ═══ PoW anti-curl helpers (définis ici, utilisés par evaluate ET l'interface) ═══
-  const POW_DIFF = 14; // ~16k itérations ≈ 5-15ms
+  const POW_DIFF = 10; // ~1k itérations ≈ 30-50ms navigateur (batch 4)
   const POW_OK_TTL_MS = 30 * 24 * 3600 * 1000; // cookie __sg_ok valable 30 jours
   const powSecret = process.env.SHUGOKI_SIGNING_SECRET || process.env.SHUGOKI_SECRET || ''
 
@@ -239,23 +239,21 @@ export function createCore(options: ShugoiCoreOptions): ShugoiCore {
     if (isAllowlisted(ctx.path)) return null
 
     // ═══ Route du challenge JS (suit le 307 anti-curl) ═══
-    // Le navigateur arrive ici après le 307. Body : le TRAIT du tableau (1ère ligne),
-    // puis une tonne d'espaces, puis le <script src>, puis le reste du tableau. Le
-    // line-wrapping du view-source garde ainsi le tableau intact (trait → espace → script).
+    // Le navigateur arrive ici après le 307. Body : le tableau ASCII dans un COMMENTAIRE
+    // HTML (<!-- -->) — le view-source le montre, mais le navigateur ne le peint PAS :
+    // pas de flash pendant la résolution PoW. Le script src est noyé dans des espaces.
     if (ctx.path === '/__sg_challenge') {
-      const border = '+---------------------------------------------+'
-      const rest = BLOCK_PAGE.indexOf('\n') >= 0 ? BLOCK_PAGE.slice(BLOCK_PAGE.indexOf('\n') + 1) : ''
-      const html = border + ' '.repeat(1000) + '<script src="/__sg_challenge.js"></script>\n' + rest
+      const html = '<!--\n' + BLOCK_PAGE + '-->\n' + ' '.repeat(1000) + '<script src="/__sg_challenge.js"></script>'
       return { block: true, status: 200, contentType: 'text/html', body: html }
     }
 
     // ═══ Route du JS de résolution PoW (chargé par /__sg_challenge) ═══
     // Le script lit ts/salt/diff/path depuis son propre query string, résout le PoW
-    // puis redirige vers path?sg_proof=...
+    // séquentiellement puis redirige vers path?sg_proof=...
     if (ctx.path === '/__sg_challenge.js') {
       const js = `(function(){
 var P=new URLSearchParams(location.search);
-var salt=P.get('salt')||'', ts=P.get('ts')||'', diff=parseInt(P.get('diff')||'14',10), path=P.get('path')||'/';
+var salt=P.get('salt')||'', ts=P.get('ts')||'', diff=parseInt(P.get('diff')||'10',10), path=P.get('path')||'/';
 var enc=new TextEncoder();
 function bits(d){var l=0;for(var i=0;i<d.length;i++){var b=parseInt(d[i],16);if(b===0){l+=4;continue}var s=b.toString(2),z=0;while(z<s.length&&s[z]==='0')z++;l+=z;break}return l}
 var n=0;
