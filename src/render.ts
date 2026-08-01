@@ -92,10 +92,24 @@ function readFromMemory(token: string): string | null {
   return entry.html;
 }
 
-export async function renderResponseData(token: string, locale?: Locale, configUrl?: string): Promise<{ html?: string; error?: string; blocked?: boolean; reason?: string; message?: string; title?: string }> {
+export async function renderResponseData(token: string, locale?: Locale, configUrl?: string, mid?: string, grant?: string): Promise<{ html?: string; error?: string; blocked?: boolean; reason?: string; message?: string; title?: string }> {
   if (!token || token.length < 16 || token.length > 300) return { error: 'not_found' };
 
-  // Vérifier le flag en direct depuis l'API interne (pas de cache)
+  // Anti-bypass "token-only" : sans grant valide, pas de HTML.
+  // Le grant est émis par le wlc (/api/v1/wlc) quand le mid est autorisé (whitelisté
+  // OU whitelist désactivée). Le guard l'obtient APRÈS avoir exécuté le fingerprint et
+  // l'ajoute à l'URL render. Un bot curl qui extrait le token du challenge sans exécuter
+  // le JS n'a pas de mid/grant cohérents → render refuse. Signé avec le même secret que
+  // le token (SHUGOKI_SIGNING_SECRET) → vérifiable localement, sans état partagé.
+  const gSecret = process.env.SHUGOKI_SIGNING_SECRET || process.env.SHUGOKI_SECRET;
+  if (gSecret) {
+    if (!grant || !mid || !/^[a-f0-9]{64}$/.test(mid)) return { error: 'not_found' };
+    const exp = crypto.createHmac('sha256', gSecret).update('render-grant:' + mid).digest('hex');
+    let ok = false;
+    try { ok = crypto.timingSafeEqual(Buffer.from(grant, 'hex'), Buffer.from(exp, 'hex')); } catch { ok = false; }
+    if (!ok) return { error: 'not_found' };
+  }
+
   // Vérifier le flag en direct depuis l'API interne (pas de cache)
   const contentReplaceOn = await fetchContentReplaceFlag(token, configUrl || 'http://127.0.0.1:3098');
 
@@ -187,8 +201,8 @@ function verifyTokenAndRead(token: string, locale?: Locale): { html?: string; er
   return { error: 'not_found' };
 }
 
-export async function handleRender(token: string, res: { setHeader?: (k: string, v: string) => void; send?: (body: string) => void; end?: (body: string) => void }, configUrl?: string) {
-  const data = await renderResponseData(token, undefined, configUrl);
+export async function handleRender(token: string, res: { setHeader?: (k: string, v: string) => void; send?: (body: string) => void; end?: (body: string) => void }, configUrl?: string, mid?: string, grant?: string) {
+  const data = await renderResponseData(token, undefined, configUrl, mid, grant);
   const json = JSON.stringify(data);
   if (res.setHeader) res.setHeader('Content-Type', 'application/json');
   if (res.send) res.send(json);
@@ -380,7 +394,7 @@ export async function generateSkeleton(siteKey: string, token: string, baseUrl: 
    *
    * Pour éviter ce mécanisme : splitRender: false.
    */
-  fragments.push('var _gw=function(cb){if(window.__sg_guardsReady||window.__sg_blocked)cb();else setTimeout(function(){_gw(cb)},100)};function rd(p,n){if(window.__sg_blocked)return;if(!document.body)return setTimeout(function(){rd(p,n)},50);if(n>6){if((window.__sg_config||{}).enableContentReplacementCheck===true)window.__sg_showBlock&&window.__sg_showBlock("' + devtoolsMsg + '","' + tamperTitle + '");return}fetch(p).then(function(x){return x.json()}).then(function(d){if(window.__sg_blocked)return;if(!document.body)return setTimeout(function(){rd(p,n+1)},50);if(d.html){document.open("text/html");document.write(d.html);document.close();window.scrollTo(0,0)}if(d.blocked){window.__sg_showBlock&&window.__sg_showBlock(d.message,d.title)}if(d.error){if((window.__sg_config||{}).enableContentReplacementCheck===true)window.__sg_showBlock&&window.__sg_showBlock("' + devtoolsMsg + '","' + tamperTitle + '")}else if(!d.html&&!d.blocked){setTimeout(function(){rd(p,n+1)},300)}}).catch(function(){setTimeout(function(){rd(p,n+1)},300)})}');
+  fragments.push('var _gw=function(cb){if(window.__sg_guardsReady||window.__sg_blocked)cb();else setTimeout(function(){_gw(cb)},100)};function rd(p,n){if(window.__sg_blocked)return;if(!document.body)return setTimeout(function(){rd(p,n)},50);if(n>6){if((window.__sg_config||{}).enableContentReplacementCheck===true)window.__sg_showBlock&&window.__sg_showBlock("' + devtoolsMsg + '","' + tamperTitle + '");return}var _g=(window.__sg_grant||"");if(_g){p=p+("&grant="+encodeURIComponent(_g))}var _m=(window.__sg_detectMid||window.__sg_mid||"");if(_m){p=p+("&mid="+encodeURIComponent(_m))}fetch(p).then(function(x){return x.json()}).then(function(d){if(window.__sg_blocked)return;if(!document.body)return setTimeout(function(){rd(p,n+1)},50);if(d.html){document.open("text/html");document.write(d.html);document.close();window.scrollTo(0,0)}if(d.blocked){window.__sg_showBlock&&window.__sg_showBlock(d.message,d.title)}if(d.error){if((window.__sg_config||{}).enableContentReplacementCheck===true)window.__sg_showBlock&&window.__sg_showBlock("' + devtoolsMsg + '","' + tamperTitle + '")}else if(!d.html&&!d.blocked){setTimeout(function(){rd(p,n+1)},300)}}).catch(function(){setTimeout(function(){rd(p,n+1)},300)})}');
   fragments.push('function _sgCl(){try{for(var _i in window){if(_i.indexOf("__sg")===0){window[_i]=null;delete window[_i]}}window._sgLogCP=function(){};window.midHex=function(){};window.rd=function(){};window._gw=function(){};window.applyDecision=function(){};window._D=function(){};window.z=function(f){return f()}}catch(_e){}}_gw(function(){rd(r+"?token="+t,0);setTimeout(_sgCl,1500)})');
   const combinedCode = fragments.join(';');
   let encStr = '';

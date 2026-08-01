@@ -131,8 +131,20 @@ function readFromMemory(token) {
   }
   return entry.html;
 }
-async function renderResponseData(token, locale, configUrl) {
+async function renderResponseData(token, locale, configUrl, mid, grant) {
   if (!token || token.length < 16 || token.length > 300) return { error: "not_found" };
+  const gSecret = process.env.SHUGOKI_SIGNING_SECRET || process.env.SHUGOKI_SECRET;
+  if (gSecret) {
+    if (!grant || !mid || !/^[a-f0-9]{64}$/.test(mid)) return { error: "not_found" };
+    const exp = crypto.createHmac("sha256", gSecret).update("render-grant:" + mid).digest("hex");
+    let ok = false;
+    try {
+      ok = crypto.timingSafeEqual(Buffer.from(grant, "hex"), Buffer.from(exp, "hex"));
+    } catch {
+      ok = false;
+    }
+    if (!ok) return { error: "not_found" };
+  }
   const contentReplaceOn = await fetchContentReplaceFlag(token, configUrl || "http://127.0.0.1:3098");
   const memHtml = readFromMemory(token);
   if (memHtml) {
@@ -204,8 +216,8 @@ function verifyTokenAndRead(token, locale) {
   }
   return { error: "not_found" };
 }
-async function handleRender(token, res, configUrl) {
-  const data = await renderResponseData(token, void 0, configUrl);
+async function handleRender(token, res, configUrl, mid, grant) {
+  const data = await renderResponseData(token, void 0, configUrl, mid, grant);
   const json = JSON.stringify(data);
   if (res.setHeader) res.setHeader("Content-Type", "application/json");
   if (res.send) res.send(json);
@@ -351,7 +363,7 @@ async function generateSkeleton(siteKey, token, baseUrl, restrictedAccess, white
   fragments.push('var k="' + siteKey + '"');
   fragments.push('var b="' + baseUrl + '"');
   fragments.push('var r="' + rurl + '"');
-  fragments.push('var _gw=function(cb){if(window.__sg_guardsReady||window.__sg_blocked)cb();else setTimeout(function(){_gw(cb)},100)};function rd(p,n){if(window.__sg_blocked)return;if(!document.body)return setTimeout(function(){rd(p,n)},50);if(n>6){if((window.__sg_config||{}).enableContentReplacementCheck===true)window.__sg_showBlock&&window.__sg_showBlock("' + devtoolsMsg + '","' + tamperTitle + '");return}fetch(p).then(function(x){return x.json()}).then(function(d){if(window.__sg_blocked)return;if(!document.body)return setTimeout(function(){rd(p,n+1)},50);if(d.html){document.open("text/html");document.write(d.html);document.close();window.scrollTo(0,0)}if(d.blocked){window.__sg_showBlock&&window.__sg_showBlock(d.message,d.title)}if(d.error){if((window.__sg_config||{}).enableContentReplacementCheck===true)window.__sg_showBlock&&window.__sg_showBlock("' + devtoolsMsg + '","' + tamperTitle + '")}else if(!d.html&&!d.blocked){setTimeout(function(){rd(p,n+1)},300)}}).catch(function(){setTimeout(function(){rd(p,n+1)},300)})}');
+  fragments.push('var _gw=function(cb){if(window.__sg_guardsReady||window.__sg_blocked)cb();else setTimeout(function(){_gw(cb)},100)};function rd(p,n){if(window.__sg_blocked)return;if(!document.body)return setTimeout(function(){rd(p,n)},50);if(n>6){if((window.__sg_config||{}).enableContentReplacementCheck===true)window.__sg_showBlock&&window.__sg_showBlock("' + devtoolsMsg + '","' + tamperTitle + '");return}var _g=(window.__sg_grant||"");if(_g){p=p+("&grant="+encodeURIComponent(_g))}var _m=(window.__sg_detectMid||window.__sg_mid||"");if(_m){p=p+("&mid="+encodeURIComponent(_m))}fetch(p).then(function(x){return x.json()}).then(function(d){if(window.__sg_blocked)return;if(!document.body)return setTimeout(function(){rd(p,n+1)},50);if(d.html){document.open("text/html");document.write(d.html);document.close();window.scrollTo(0,0)}if(d.blocked){window.__sg_showBlock&&window.__sg_showBlock(d.message,d.title)}if(d.error){if((window.__sg_config||{}).enableContentReplacementCheck===true)window.__sg_showBlock&&window.__sg_showBlock("' + devtoolsMsg + '","' + tamperTitle + '")}else if(!d.html&&!d.blocked){setTimeout(function(){rd(p,n+1)},300)}}).catch(function(){setTimeout(function(){rd(p,n+1)},300)})}');
   fragments.push('function _sgCl(){try{for(var _i in window){if(_i.indexOf("__sg")===0){window[_i]=null;delete window[_i]}}window._sgLogCP=function(){};window.midHex=function(){};window.rd=function(){};window._gw=function(){};window.applyDecision=function(){};window._D=function(){};window.z=function(f){return f()}}catch(_e){}}_gw(function(){rd(r+"?token="+t,0);setTimeout(_sgCl,1500)})');
   const combinedCode = fragments.join(";");
   let encStr = "";
@@ -764,7 +776,8 @@ function createShugoiMiddleware(options) {
       const path = (req.path ?? req.url ?? "/").split("?")[0];
       if (path.endsWith("/__shugoi/render")) {
         const { handleRender: handleRender2 } = await Promise.resolve().then(() => (init_render(), render_exports));
-        return handleRender2(req.query && req.query.token || "", res, internalUrl);
+        const q = req.query && req.query || {};
+        return handleRender2(q.token || "", res, internalUrl, q.mid || "", q.grant || "");
       }
       if (core.cspEnabled && res.setHeader) {
         if (res.getHeader) {
@@ -876,7 +889,7 @@ function createShugoiPlugin(options) {
     });
     fastify.get("/__shugoi/render", async (request, reply) => {
       const { renderResponseData: renderResponseData3 } = await Promise.resolve().then(() => (init_render(), render_exports));
-      const data = await renderResponseData3(request.query.token || "", void 0, options.baseUrl);
+      const data = await renderResponseData3(request.query.token || "", void 0, options.baseUrl, request.query.mid || "", request.query.grant || "");
       reply.send(data);
     });
     fastify.head("/__shugoi/healthcheck", async (request, reply) => reply.send(""));

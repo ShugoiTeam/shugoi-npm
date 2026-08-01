@@ -1,13 +1,24 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { createHmac } from 'node:crypto';
 import { storeHtml, renderResponseData, signToken } from '../src/render';
 
+const GRANT_MID = 'a'.repeat(64);
+function validGrant(): string {
+  const secret = process.env.SHUGOKI_SIGNING_SECRET || process.env.SHUGOKI_SECRET || '';
+  return createHmac('sha256', secret).update('render-grant:' + GRANT_MID).digest('hex');
+}
+
 describe('renderResponseData — idempotence', () => {
+  beforeEach(() => {
+    vi.stubEnv('SHUGOKI_SIGNING_SECRET', 'test-secret-32bytes-long!');
+  });
+
   it('returns same HTML on multiple reads (idempotent)', async () => {
     const token = 'test-token-for-idempotence-' + Date.now();
     storeHtml(token, '<html>test</html>');
 
-    const first = await renderResponseData(token);
-    const second = await renderResponseData(token);
+    const first = await renderResponseData(token, undefined, undefined, GRANT_MID, validGrant());
+    const second = await renderResponseData(token, undefined, undefined, GRANT_MID, validGrant());
 
     expect(first.html).toBe('<html>test</html>');
     expect(second.html).toBe('<html>test</html>');
@@ -49,17 +60,21 @@ describe('signToken — HMAC signing', () => {
 });
 
 describe('renderResponseData — memory store', () => {
+  beforeEach(() => {
+    vi.stubEnv('SHUGOKI_SIGNING_SECRET', 'test-secret-32bytes-long!');
+  });
+
   it('stores and retrieves from memory', async () => {
     const token = 'memory-test-token-' + Date.now();
     storeHtml(token, '<html>memory</html>');
-    const result = await renderResponseData(token);
+    const result = await renderResponseData(token, undefined, undefined, GRANT_MID, validGrant());
     expect(result.html).toBe('<html>memory</html>');
   });
 
   it('evicts expired entries', async () => {
     const token = 'expired-token-' + Date.now();
     storeHtml(token, '<html>expired</html>');
-    const result = await renderResponseData(token);
+    const result = await renderResponseData(token, undefined, undefined, GRANT_MID, validGrant());
     expect(result.html).toBe('<html>expired</html>');
   });
 });

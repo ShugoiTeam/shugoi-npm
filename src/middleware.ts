@@ -39,7 +39,8 @@ export function createShugoiMiddleware(options: ShugoiCoreOptions) {
       // Render endpoint — handled by middleware adapter
       if (path.endsWith('/__shugoi/render')) {
         const { handleRender } = await import('./render');
-        return handleRender((req.query && (req.query as Record<string, string>).token) || '', res, internalUrl);
+        const q = (req.query && (req.query as Record<string, string>)) || {};
+        return handleRender(q.token || '', res, internalUrl, q.mid || '', q.grant || '');
       }
 
       // CSP: merge with existing header
@@ -167,7 +168,7 @@ export function createShugoiPlugin(options: ShugoiCoreOptions) {
     // Render endpoint
     fastify.get('/__shugoi/render', async (request: any, reply: any) => {
       const { renderResponseData } = await import('./render');
-      const data = await renderResponseData(request.query.token || '', undefined, options.baseUrl);
+      const data = await renderResponseData(request.query.token || '', undefined, options.baseUrl, request.query.mid || '', request.query.grant || '');
       reply.send(data);
     });
 
