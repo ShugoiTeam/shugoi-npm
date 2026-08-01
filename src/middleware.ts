@@ -100,14 +100,32 @@ export function createShugoiMiddleware(options: ShugoiCoreOptions) {
         secFetchDest: typeof req.headers?.['sec-fetch-dest'] === 'string' ? req.headers['sec-fetch-dest'] : undefined,
         secFetchMode: typeof req.headers?.['sec-fetch-mode'] === 'string' ? req.headers['sec-fetch-mode'] : undefined,
         sgProof: (req.query && typeof (req.query as Record<string, unknown>).sg_proof === 'string') ? (req.query as Record<string, unknown>).sg_proof as string : undefined,
+        sgOk: (typeof req.headers?.cookie === 'string' ? req.headers.cookie.match(/(?:^|;\s*)__sg_ok=([^;]+)/)?.[1] : undefined),
       });
 
       if (decision) {
+        if (decision.headers) {
+          for (const [k, v] of Object.entries(decision.headers)) {
+            if (res.setHeader) res.setHeader(k, v);
+          }
+        }
         if (res.status) res.status(decision.status);
         if (res.type) res.type(decision.contentType.split('/')[1]);
-        if (res.send) res.send(decision.body);
-        else if (res.end) res.end(decision.body);
+        if (decision.body) {
+          if (res.send) res.send(decision.body);
+          else if (res.end) res.end(decision.body);
+        } else if (res.end) {
+          res.end();
+        }
         return;
+      }
+
+      // PoW validé → pose le cookie __sg_ok sur la réponse du skeleton (navigations
+      // suivantes sans challenge, donc chargement rapide).
+      const sgProofQ = (req.query && typeof (req.query as Record<string, unknown>).sg_proof === 'string') ? (req.query as Record<string, unknown>).sg_proof as string : undefined;
+      if (sgProofQ && res.setHeader) {
+        const okCookie = core.sgOkCookie(sgProofQ);
+        if (okCookie) res.setHeader('Set-Cookie', okCookie);
       }
 
       // Split-render: inject skeleton for HTML pages (skip for allowlisted paths and whitelisted bots)
@@ -205,11 +223,20 @@ export function createShugoiPlugin(options: ShugoiCoreOptions) {
           secFetchDest: request.headers['sec-fetch-dest'],
           secFetchMode: request.headers['sec-fetch-mode'],
           sgProof: (request.query && typeof request.query?.sg_proof === 'string') ? request.query.sg_proof as string : undefined,
+          sgOk: (typeof request.headers.cookie === 'string' ? request.headers.cookie.match(/(?:^|;\s*)__sg_ok=([^;]+)/)?.[1] : undefined),
         });
 
         if (decision) {
+          if (decision.headers) {
+            for (const [k, v] of Object.entries(decision.headers)) reply.header(k, v);
+          }
           reply.code(decision.status).type(decision.contentType === 'text/html' ? 'text/html' : 'text/plain').send(decision.body);
           return;
+        }
+
+        if (typeof request.query?.sg_proof === 'string') {
+          const okCookie = core.sgOkCookie(request.query.sg_proof as string);
+          if (okCookie) reply.header('Set-Cookie', okCookie);
         }
       } catch (err) {
         core.log('preHandler error:', err);

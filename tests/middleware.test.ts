@@ -285,22 +285,31 @@ describe('skipPath matching (audit passe 8 §3.1)', () => {
   });
 });
 
-describe('403 challenge minimal (anti-curl/view-source)', () => {
-  it('le 403 challenge contient le tableau ASCII + un script externe, PAS de JS inline', () => {
+describe('307 challenge minimal (anti-curl/view-source)', () => {
+  it('le 307 challenge a un body = tableau ASCII seul, PAS de HTML/JS', () => {
     const { readFileSync } = require('node:fs');
     const src = readFileSync(require('node:path').join(process.cwd(), 'src', 'core.ts'), 'utf-8');
-    // Le body du challenge : tableau ASCII + <script src> externe
-    expect(src).toContain('<pre>');
-    expect(src).toContain('/__sg_challenge.js?ts=');
-    // Plus de JS inline (crypto.subtle dans le body du challenge)
-    expect(src).toContain("ctx.path === '/__sg_challenge.js'");
+    // 307 + body = BLOCK_PAGE brut (text/plain), sans <pre> ni <script> inline
+    expect(src).toContain('status: 307');
+    expect(src).toContain('body: BLOCK_PAGE');
+    expect(src).toContain('contentType: \'text/plain\'');
+    // redirection vers le challenge
+    expect(src).toContain("ctx.path === '/__sg_challenge'");
   });
 
-  it('le JS challenge est servi sur /__sg_challenge.js', () => {
+  it('le JS challenge vit sur /__sg_challenge (suit le 307)', () => {
     const { readFileSync } = require('node:fs');
     const src = readFileSync(require('node:path').join(process.cwd(), 'src', 'core.ts'), 'utf-8');
     expect(src).toContain('new URLSearchParams(location.search)');
     expect(src).toContain('sg_proof=');
     expect(src).toContain("crypto.subtle.digest");
+  });
+
+  it('le cookie __sg_ok est signé HMAC et validé (navigations rapides)', () => {
+    const { readFileSync } = require('node:fs');
+    const src = readFileSync(require('node:path').join(process.cwd(), 'src', 'core.ts'), 'utf-8');
+    expect(src).toContain('sg_ok:');
+    expect(src).toContain('isSgOkValid');
+    expect(src).toContain('timingSafeEqual');
   });
 });

@@ -49,6 +49,7 @@ export interface EvaluateCtx {
   secFetchDest?: string;
   secFetchMode?: string;
   sgProof?: string;
+  sgOk?: string;
 }
 
 export interface BlockDecision {
@@ -56,6 +57,7 @@ export interface BlockDecision {
   status: number;
   contentType: string;
   body: string;
+  headers?: Record<string, string>;
 }
 
 export interface ShugoiCore {
@@ -66,6 +68,8 @@ export interface ShugoiCore {
   isWhitelistedBot(ua: string): boolean;
   isTrustedBot(ua: string, ip: string): Promise<boolean>;
   evaluate(ctx: EvaluateCtx): Promise<BlockDecision | null>;
+  isProofValid(proof: string): boolean;
+  sgOkCookie(proof: string): string | null;
   log(...args: unknown[]): void;
 }
 
@@ -106,6 +110,57 @@ export function createCore(options: ShugoiCoreOptions): ShugoiCore {
   const csp = buildCsp({ siteKey: options.siteKey, extraDirectives: options.extraDirectives || {}, splitRender: options.splitRender ?? true, apiOrigin: originOf(baseUrl) ?? undefined })
 
   function log(...args: unknown[]) { if (debug) console.log('[shugoi]', ...args) }
+
+  // ═══ PoW anti-curl helpers (définis ici, utilisés par evaluate ET l'interface) ═══
+  const POW_DIFF = 14; // ~16k itérations ≈ 5-15ms
+  const POW_OK_TTL_MS = 30 * 24 * 3600 * 1000; // cookie __sg_ok valable 30 jours
+  const powSecret = process.env.SHUGOKI_SIGNING_SECRET || process.env.SHUGOKI_SECRET || ''
+
+  function safeEqual(a: string, b: string): boolean {
+    if (a.length !== b.length) return false
+    const ba = Buffer.from(a, 'utf8')
+    const bb = Buffer.from(b, 'utf8')
+    return crypto.timingSafeEqual(ba, bb)
+  }
+
+  function isPowValid(proof: string): boolean {
+    if (!proof || !powSecret) return false
+    const sep = proof.indexOf(':')
+    if (sep <= 0) return false
+    const tsStr = proof.slice(0, sep)
+    const sol = proof.slice(sep + 1)
+    const ts = parseInt(tsStr, 10)
+    if (isNaN(ts) || Math.abs(Date.now() - ts * 1000) > 120000) return false
+    const salt = crypto.createHmac('sha256', powSecret).update(tsStr).digest('hex')
+    const digest = crypto.createHash('sha256').update(salt + ':' + sol).digest('hex')
+    let leading = 0
+    for (let i = 0; i < digest.length; i++) {
+      const nib = parseInt(digest[i], 16)
+      if (nib === 0) { leading += 4; continue }
+      const bin = nib.toString(2)
+      let z = 0; while (z < bin.length && bin[z] === '0') z++
+      leading += z; break
+    }
+    return leading >= POW_DIFF
+  }
+
+  function sgOkCookieValue(): string {
+    const ts = Math.floor(Date.now() / 1000)
+    const sig = crypto.createHmac('sha256', powSecret).update('sg_ok:' + ts).digest('hex')
+    return ts + ':' + sig
+  }
+
+  function isSgOkValid(cookieVal: string): boolean {
+    if (!powSecret) return false
+    const sep = cookieVal.indexOf(':')
+    if (sep <= 0) return false
+    const tsStr = cookieVal.slice(0, sep)
+    const sig = cookieVal.slice(sep + 1)
+    const ts = parseInt(tsStr, 10)
+    if (isNaN(ts) || Date.now() - ts * 1000 > POW_OK_TTL_MS || ts * 1000 > Date.now() + 60000) return false
+    const expected = crypto.createHmac('sha256', powSecret).update('sg_ok:' + tsStr).digest('hex')
+    return safeEqual(sig, expected)
+  }
 
   const validationPromise: Promise<void> = (async () => {
     if (siteSecret && baseUrl) {
@@ -183,72 +238,53 @@ export function createCore(options: ShugoiCoreOptions): ShugoiCore {
 
     if (isAllowlisted(ctx.path)) return null
 
-    // Route du challenge JS externe (servi sans challenge pour éviter une boucle).
-    // Le navigateur charge ce script depuis le 403 challenge, résout le PoW et
-    // redirige vers le chemin original avec ?sg_proof.
-    if (ctx.path === '/__sg_challenge.js') {
-      const js = `(function(){
-var P=new URLSearchParams(location.search);
-var salt=P.get('salt')||'', ts=P.get('ts')||'', diff=parseInt(P.get('diff')||'14',10), path=P.get('path')||'/';
-var enc=new TextEncoder();
-function bits(d){var l=0;for(var i=0;i<d.length;i++){var b=parseInt(d[i],16);if(b===0){l+=4;continue}var s=b.toString(2),z=0;while(z<s.length&&s[z]==='0')z++;l+=z;break}return l}
-var n=0;
-function step(){
-  crypto.subtle.digest('SHA-256',enc.encode(salt+':'+n.toString(16))).then(function(buf){
-    var h=Array.from(new Uint8Array(buf)).map(function(v){return v.toString(16).padStart(2,'0')}).join('');
-    if(bits(h)>=diff){var base=path+(location.search?location.search.replace(/[?&]sg_proof=[^&]*/,''):'');var q=(base.indexOf('?')>=0?'&':'?')+'sg_proof='+ts+':'+n.toString(16);location.replace(base+q)}
-    else{n++;if(n<300000)step()}
-  }).catch(function(){location.reload()});
-}
-step();
-})();`;
-      return { block: true, status: 200, contentType: 'application/javascript', body: js }
+    // ═══ Route du challenge JS (suit le 307 anti-curl) ═══
+    // Le navigateur arrive ici après le 307. Le script lit ts/salt/diff/path depuis
+    // son propre URL, résout le PoW puis redirige vers path?sg_proof=...
+    if (ctx.path === '/__sg_challenge') {
+      const js = `<script>
+(function(){
+  var P=new URLSearchParams(location.search);
+  var salt=P.get('salt')||'', ts=P.get('ts')||'', diff=parseInt(P.get('diff')||'14',10), path=P.get('path')||'/';
+  var enc=new TextEncoder();
+  function bits(d){var l=0;for(var i=0;i<d.length;i++){var b=parseInt(d[i],16);if(b===0){l+=4;continue}var s=b.toString(2),z=0;while(z<s.length&&s[z]==='0')z++;l+=z;break}return l}
+  var n=0;
+  function step(){
+    crypto.subtle.digest('SHA-256',enc.encode(salt+':'+n.toString(16))).then(function(buf){
+      var h=Array.from(new Uint8Array(buf)).map(function(v){return v.toString(16).padStart(2,'0')}).join('');
+      if(bits(h)>=diff){var base=path;var q=(base.indexOf('?')>=0?'&':'?')+'sg_proof='+ts+':'+n.toString(16);location.replace(base+q)}
+      else{n++;if(n<300000)step()}
+    }).catch(function(){location.reload()});
+  }
+  step();
+})();
+</script>`
+      return { block: true, status: 200, contentType: 'text/html', body: '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Shugoi</title></head><body>' + js + '</body></html>' }
     }
 
     // ═══ Pre-flight PoW challenge (anti-curl/view-source) ═══
-    // Même un curl avec headers navigateur parfaits reçoit 403 BLOCKED BY SHUGOI :
-    // le 1er hit est un mini-JS challenge qui résout SHA256(salt:nonce) puis reload
-    // avec ?sg_proof. Seul un navigateur qui EXÉCUTE le JS peut passer. Le view-source
-    // (qui n'exécute pas le JS) voit la page de blocage, pas le contenu.
-    // Skip : /__shugoi/*, /api/*, assets avec extension, pages avec ?sg_proof valide.
-    // NB : la racine "/" et les chemins finissant par "/" sont AUSSI des pages (challengeés).
+    // Un 307 dont le corps est UNIQUEMENT le tableau ASCII : curl le voit en clair,
+    // le navigateur suit la redirection vers /__sg_challenge (le JS qui résout le PoW).
+    // Après un PoW validé, un cookie __sg_ok (signé) évite le challenge aux navigations
+    // suivantes → chargement rapide pour les navigateurs réels.
     const isPage = !ctx.path.includes('/__shugoi/') && !ctx.path.startsWith('/api/')
       && !/\.[a-zA-Z0-9]{1,5}$/.test(ctx.path.split('?')[0])
-    const POW_DIFF = 14; // ~16k itérations ≈ 5-15ms
-    const powSecret = process.env.SHUGOKI_SIGNING_SECRET || process.env.SHUGOKI_SECRET
+
     if (isPage && powSecret && ctx.ua && /Mozilla/i.test(ctx.ua)) {
       const proof = ctx.sgProof || ''
-      const validProof = (() => {
-        const sep = proof.indexOf(':')
-        if (sep <= 0) return false
-        const tsStr = proof.slice(0, sep)
-        const sol = proof.slice(sep + 1)
-        const ts = parseInt(tsStr, 10)
-        if (isNaN(ts) || Math.abs(Date.now() - ts * 1000) > 120000) return false
-        const salt = crypto.createHmac('sha256', powSecret).update(tsStr).digest('hex')
-        const digest = crypto.createHash('sha256').update(salt + ':' + sol).digest('hex')
-        let leading = 0
-        for (let i = 0; i < digest.length; i++) {
-          const nib = parseInt(digest[i], 16)
-          if (nib === 0) { leading += 4; continue }
-          const bin = nib.toString(2)
-          let z = 0; while (z < bin.length && bin[z] === '0') z++
-          leading += z; break
-        }
-        return leading >= POW_DIFF
-      })()
-      if (!validProof) {
-        // Challenge PoW : le 403 renvoie SEULEMENT le tableau ASCII + un <script src>
-        // externe (le JS vit dans /__sg_challenge.js, curl ne le charge pas). Le navigateur
-        // charge le script, résout le PoW et redirige avec ?sg_proof.
+      const validProof = !!proof && isPowValid(proof)
+      const alreadyOk = !!ctx.sgOk && isSgOkValid(ctx.sgOk)
+      if (!validProof && !alreadyOk) {
+        // 307 vers le challenge : body = tableau ASCII SEUL (curl le voit tel quel).
+        // Le navigateur suit la redirection → /__sg_challenge?ts=&salt=&diff=&path=
         const tsNow = Math.floor(Date.now() / 1000)
         const salt = crypto.createHmac('sha256', powSecret).update(String(tsNow)).digest('hex')
         const path = (ctx.path.startsWith('/') ? ctx.path : '/' + ctx.path)
-        const chalUrl = '/__sg_challenge.js?ts=' + tsNow + '&salt=' + salt + '&diff=' + POW_DIFF + '&path=' + encodeURIComponent(path)
-        const html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Shugoi</title></head><body>\n<pre>' + BLOCK_PAGE + '</pre>\n<script src="' + chalUrl + '"></script>\n</body></html>'
-        log('pow challenge:', ctx.ua.slice(0, 40))
-        return { block: true, status: 403, contentType: 'text/html', body: html }
+        const chalUrl = '/__sg_challenge?ts=' + tsNow + '&salt=' + salt + '&diff=' + POW_DIFF + '&path=' + encodeURIComponent(path)
+        log('pow challenge (307):', ctx.ua.slice(0, 40))
+        return { block: true, status: 307, contentType: 'text/plain', body: BLOCK_PAGE, headers: { Location: chalUrl } }
       }
+      // sgProof ou cookie valide → on laisse passer (le middleware posera le cookie).
     }
 
     const flags = await fetchConfigForSiteKey(options.siteKey, baseUrl)
@@ -312,5 +348,11 @@ step();
     return null
   }
 
-  return { csp, cspEnabled, ensureValidated, isAllowlisted, isWhitelistedBot, isTrustedBot, evaluate, log }
+  return { csp, cspEnabled, ensureValidated, isAllowlisted, isWhitelistedBot, isTrustedBot, evaluate, log,
+    isProofValid: isPowValid,
+    sgOkCookie(proof: string): string | null {
+      if (!proof || !isPowValid(proof)) return null
+      return '__sg_ok=' + sgOkCookieValue() + '; Path=/; HttpOnly; SameSite=Lax; Max-Age=' + Math.floor(POW_OK_TTL_MS / 1000) + (process.env.NODE_ENV === 'production' ? '; Secure' : '')
+    }
+  }
 }
