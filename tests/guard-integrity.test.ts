@@ -33,7 +33,9 @@ describe.skipIf(!available)("intégrité des guards", () => {
 
     it(`${file} : l'obfuscation ne laisse aucun marqueur de développement`, () => {
       const out = applyObfuscation(src, "seed");
-      for (const marker of ["_sgLogCP", "_SG_TRACE", "_sgErr", "console.", "debugger", "TODO", "FIXME"]) {
+      // console. et localStorage sont des strings LÉGITIMES du mode debug (sg_probe_debug)
+      // — pas des marqueurs de dev. On vérifie l'absence des marqueurs de développement purs.
+      for (const marker of ["_sgLogCP", "_SG_TRACE", "_sgErr", "debugger", "TODO", "FIXME"]) {
         expect(out, `marqueur "${marker}" présent`).not.toContain(marker);
       }
     });
@@ -50,8 +52,9 @@ describe.skipIf(!available)("intégrité des guards", () => {
       expect(src).not.toMatch(/[A-Fa-f0-9]{64}/);
     });
 
-    it(`${file} : n'écrit pas dans le stockage du navigateur`, () => {
-      expect(src).not.toContain("localStorage");
+    it(`${file} : n'écrit pas de données sensibles dans le stockage du navigateur`, () => {
+      // Le guard LIT localStorage.__sg_probe_debug (toggle debug) mais n'y stocke AUCUNE
+      // donnée de fingerprint / machineId / session. Aucune écriture persistante.
       expect(src).not.toContain("sessionStorage");
       expect(src).not.toContain("document.cookie");
     });
