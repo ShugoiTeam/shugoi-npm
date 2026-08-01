@@ -312,7 +312,7 @@ describe('307 challenge minimal (anti-curl/view-source)', () => {
     expect(src).toContain("ctx.path === '/__sg_challenge'");
     expect(src).toContain('<pre>');
     expect(src).toContain('<script src="/__sg_challenge.js"></script>');
-    expect(src).toContain('contentType: \'application/javascript\'');
+    expect(src).toContain("'Content-Type': 'application/javascript; charset=utf-8'");
   });
 
   it('le cookie __sg_ok est signé HMAC et validé (navigations rapides)', () => {

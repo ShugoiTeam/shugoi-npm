@@ -267,7 +267,7 @@ function step(){
 }
 step();
 })();`
-      return { block: true, status: 200, contentType: 'application/javascript', body: js }
+      return { block: true, status: 200, contentType: 'text/plain', body: js, headers: { 'Content-Type': 'application/javascript; charset=utf-8' } }
     }
 
     // ═══ Pre-flight PoW challenge (anti-curl/view-source) ═══
