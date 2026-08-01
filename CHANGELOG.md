@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.3.4] - 2026-08-01
+
+### Security
+- **PoW anti-curl** : le skeleton fournit un challenge `{salt=HMAC(secret,ts), difficulty:15}` ;
+  le wlc refuse tout `/wlc` sans la preuve de calcul résolue en JS (`pow=ts:nonce`). Un bot
+  curl qui simule les headers navigateur ne peut plus obtenir de grant (il n'exécute pas le JS).
+- **Notice de consentement** : la popup est injectée DANS le HTML rendu (après le split-render)
+  au lieu du skeleton — elle ne disparaît plus quand le render remplace le document. L'ack est
+  UNIQUEMENT serveur, lié au machineId (stable par machine), plus de localStorage/cookie client.
+- **Fix Tor** : un navigateur légitime sans `Sec-Fetch-*` (ex. Tor Browser) ne reçoit plus de 403
+  texte brut — le guard client affiche la page de blocage dédiée (card "Tor détecté").
+
 ## [0.3.3] - 2026-08-01
 
 ### Security
