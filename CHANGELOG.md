@@ -4,7 +4,19 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [unreleased]
+## [0.3.3] - 2026-08-01
+
+### Security
+- **Anti-bypass render "token-only"** : le wlc émet un `render-grant` HMAC (`signRenderGrant`) ;
+  le render (`verifyRenderGrant`) refuse de livrer le HTML sans `mid` + `grant` valides.
+- Grant lié au **token + IP + TTL 120 s** (`mid:token:ip:timestamp`) — rejeu cross-token,
+  cross-IP ou expiré refusé (CH-01/02/03).
+- `verifyRenderGrant` factorisé et partagé par les adapters **Express / Next / Fastify** (parité).
+- **Pas d'oracle token** : réponses `not_found` uniformes (token mal formé, HMAC invalide ou
+  timestamp invalide) (CH-05).
+- Limite de **multi-lecture** du token renforcée (contentReplaceOn → 1 lecture) (CH-07).
+- `generateSkeleton` expose `window.__sg_token` (requis pour le grant lié au token) ; le token
+  reste obfusqué en clair (jamais en clair dans le HTML) (OB-03).
 
 ### Added
 - Config cache: shared whitelist+flags cache with 30s TTL, 10min stale max, background refresh, and inflight dedup (N-01).

@@ -1,5 +1,10 @@
+"use strict";
+var __create = Object.create;
 var __defProp = Object.defineProperty;
+var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
 var __getOwnPropNames = Object.getOwnPropertyNames;
+var __getProtoOf = Object.getPrototypeOf;
+var __hasOwnProp = Object.prototype.hasOwnProperty;
 var __esm = (fn, res) => function __init() {
   return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
 };
@@ -7,6 +12,23 @@ var __export = (target, all) => {
   for (var name in all)
     __defProp(target, name, { get: all[name], enumerable: true });
 };
+var __copyProps = (to, from, except, desc) => {
+  if (from && typeof from === "object" || typeof from === "function") {
+    for (let key of __getOwnPropNames(from))
+      if (!__hasOwnProp.call(to, key) && key !== except)
+        __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
+  }
+  return to;
+};
+var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__getProtoOf(mod)) : {}, __copyProps(
+  // If the importer is in node compatibility mode or this is not an ESM
+  // file that has been converted to a CommonJS file using a Babel-
+  // compatible transform (i.e. "__esModule" has not been set), then set
+  // "default" to the CommonJS "module.exports" for node compatibility.
+  isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target,
+  mod
+));
+var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 
 // src/locales.ts
 function resolveLocale(explicit, acceptLanguage) {
@@ -62,20 +84,16 @@ __export(render_exports, {
   storeHtml: () => storeHtml,
   verifyRenderGrant: () => verifyRenderGrant
 });
-import crypto, { createHash } from "crypto";
-import { writeFileSync, readFileSync, existsSync, unlinkSync, mkdirSync, readdirSync, chmodSync, statSync } from "fs";
-import { join } from "path";
-import { tmpdir } from "os";
 function tokenFileName(token) {
-  return createHash("sha256").update(token).digest("hex");
+  return (0, import_crypto.createHash)("sha256").update(token).digest("hex");
 }
 function startDiskCleanup() {
   setInterval(() => {
     try {
-      for (const f of readdirSync(TOKEN_DIR)) {
-        const p = join(TOKEN_DIR, f);
+      for (const f of (0, import_fs.readdirSync)(TOKEN_DIR)) {
+        const p = (0, import_path.join)(TOKEN_DIR, f);
         try {
-          if (Date.now() - statSync(p).mtimeMs > TOKEN_TTL) unlinkSync(p);
+          if (Date.now() - (0, import_fs.statSync)(p).mtimeMs > TOKEN_TTL) (0, import_fs.unlinkSync)(p);
         } catch {
         }
       }
@@ -85,15 +103,15 @@ function startDiskCleanup() {
 }
 function storeToDisk(token, html) {
   try {
-    writeFileSync(join(TOKEN_DIR, tokenFileName(token)), html, { encoding: "utf-8", mode: 384 });
+    (0, import_fs.writeFileSync)((0, import_path.join)(TOKEN_DIR, tokenFileName(token)), html, { encoding: "utf-8", mode: 384 });
   } catch {
   }
 }
 function readFromDisk(token) {
   try {
-    const p = join(TOKEN_DIR, tokenFileName(token));
-    if (!existsSync(p)) return null;
-    return readFileSync(p, "utf-8");
+    const p = (0, import_path.join)(TOKEN_DIR, tokenFileName(token));
+    if (!(0, import_fs.existsSync)(p)) return null;
+    return (0, import_fs.readFileSync)(p, "utf-8");
   } catch {
     return null;
   }
@@ -143,9 +161,9 @@ function verifyRenderGrant(mid, grant, token, ip) {
   const tsSec = parseInt(ts, 36);
   if (isNaN(tsSec) || Date.now() - tsSec * 1e3 > GRANT_TTL_MS) return false;
   const payload = "render-grant:" + [mid, token || "", ip || "", ts].join(":");
-  const exp = crypto.createHmac("sha256", gSecret).update(payload).digest("hex");
+  const exp = import_crypto.default.createHmac("sha256", gSecret).update(payload).digest("hex");
   try {
-    return crypto.timingSafeEqual(Buffer.from(sig, "hex"), Buffer.from(exp, "hex"));
+    return import_crypto.default.timingSafeEqual(Buffer.from(sig, "hex"), Buffer.from(exp, "hex"));
   } catch {
     return false;
   }
@@ -207,8 +225,8 @@ function verifyTokenAndRead(token, locale) {
   const secret = process.env.SHUGOKI_SIGNING_SECRET || process.env.SHUGOKI_SECRET;
   if (secret) {
     const payload = [siteKey, timestamp, nonce].join(":");
-    const expectedSig = crypto.createHmac("sha256", secret).update(payload).digest("hex");
-    if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expectedSig))) {
+    const expectedSig = import_crypto.default.createHmac("sha256", secret).update(payload).digest("hex");
+    if (!import_crypto.default.timingSafeEqual(Buffer.from(sig), Buffer.from(expectedSig))) {
       return { error: "not_found" };
     }
   }
@@ -234,9 +252,9 @@ async function handleRender(token, res, configUrl, mid, grant, ip) {
 function signToken(siteKey, timestamp, secretOverride) {
   const secret = secretOverride || process.env.SHUGOKI_SIGNING_SECRET || process.env.SHUGOKI_SECRET;
   if (!secret) return { token: "" };
-  const nonce = crypto.randomBytes(8).toString("hex");
+  const nonce = import_crypto.default.randomBytes(8).toString("hex");
   const payload = [siteKey, timestamp, nonce].join(":");
-  const sig = crypto.createHmac("sha256", secret).update(payload).digest("hex");
+  const sig = import_crypto.default.createHmac("sha256", secret).update(payload).digest("hex");
   return { token: payload + ":" + sig };
 }
 function configKey(baseUrl, siteKey) {
@@ -317,7 +335,7 @@ async function fetchGuardScripts(baseUrl, secret, siteKey) {
   cache.fetching = true;
   try {
     const cb = Date.now();
-    const sig = secret ? crypto.createHmac("sha256", secret).update(cb.toString()).digest("hex") : "";
+    const sig = secret ? import_crypto.default.createHmac("sha256", secret).update(cb.toString()).digest("hex") : "";
     const [dRes, gRes] = await Promise.all([
       fetch(baseUrl + "/guard-detect?key=" + sk + "&raw=1&cb=" + cb + (sig ? "&sig=" + sig : ""), { signal: AbortSignal.timeout(5e3) }),
       fetch(baseUrl + "/guard?key=" + sk + "&raw=1&cb=" + cb + (sig ? "&sig=" + sig : ""), { signal: AbortSignal.timeout(5e3) })
@@ -408,12 +426,16 @@ function enableDiskStore(multiProcess) {
   _diskEnabled = multiProcess;
   if (multiProcess) startDiskCleanup();
 }
-var TOKEN_DIR, TOKEN_TTL, MAX_ENTRIES, MAX_TOTAL_BYTES, MAX_TOKEN_READS, _memoryStore, _siteCache, _diskEnabled, _totalBytes, GRANT_TTL_MS, CONFIG_CACHE_TTL, CONFIG_STALE_MAX, CONFIG_FETCH_TIMEOUT, MAX_TENANTS, _configCache, GUARD_CACHE_TTL, _guardCaches;
+var import_crypto, import_fs, import_path, import_os, TOKEN_DIR, TOKEN_TTL, MAX_ENTRIES, MAX_TOTAL_BYTES, MAX_TOKEN_READS, _memoryStore, _siteCache, _diskEnabled, _totalBytes, GRANT_TTL_MS, CONFIG_CACHE_TTL, CONFIG_STALE_MAX, CONFIG_FETCH_TIMEOUT, MAX_TENANTS, _configCache, GUARD_CACHE_TTL, _guardCaches;
 var init_render = __esm({
   "src/render.ts"() {
     "use strict";
+    import_crypto = __toESM(require("crypto"), 1);
+    import_fs = require("fs");
+    import_path = require("path");
+    import_os = require("os");
     init_locales();
-    TOKEN_DIR = join(tmpdir(), "shugoi-render-" + (process.getuid?.() ?? "x"));
+    TOKEN_DIR = (0, import_path.join)((0, import_os.tmpdir)(), "shugoi-render-" + (process.getuid?.() ?? "x"));
     TOKEN_TTL = 12e4;
     MAX_ENTRIES = 5e3;
     MAX_TOTAL_BYTES = 64 * 1024 * 1024;
@@ -422,14 +444,14 @@ var init_render = __esm({
     _siteCache = /* @__PURE__ */ new Map();
     _diskEnabled = false;
     _totalBytes = 0;
-    if (!existsSync(TOKEN_DIR)) {
+    if (!(0, import_fs.existsSync)(TOKEN_DIR)) {
       try {
-        mkdirSync(TOKEN_DIR, { recursive: true, mode: 448 });
+        (0, import_fs.mkdirSync)(TOKEN_DIR, { recursive: true, mode: 448 });
       } catch {
       }
     }
     try {
-      chmodSync(TOKEN_DIR, 448);
+      (0, import_fs.chmodSync)(TOKEN_DIR, 448);
     } catch {
     }
     GRANT_TTL_MS = 12e4;
@@ -442,6 +464,32 @@ var init_render = __esm({
     _guardCaches = /* @__PURE__ */ new Map();
   }
 });
+
+// src/index.ts
+var src_exports = {};
+__export(src_exports, {
+  BLOCK_PAGE: () => BLOCK_PAGE,
+  DEFAULT_BOT_WHITELIST: () => DEFAULT_BOT_WHITELIST,
+  DEFAULT_HEADLESS_PATTERNS: () => DEFAULT_HEADLESS_PATTERNS,
+  ShugoiError: () => ShugoiError,
+  __clearConfigCache: () => __clearConfigCache,
+  buildCsp: () => buildCsp,
+  checkLicense: () => checkLicense,
+  createShugoiMiddleware: () => createShugoiMiddleware,
+  createShugoiPlugin: () => createShugoiPlugin,
+  fetchWhitelistForSiteKey: () => fetchWhitelistForSiteKey,
+  generateSkeleton: () => generateSkeleton,
+  handleRender: () => handleRender,
+  injectGuardScripts: () => injectGuardScripts,
+  mergeCsp: () => mergeCsp,
+  renderResponseData: () => renderResponseData,
+  scriptTags: () => scriptTags,
+  signToken: () => signToken,
+  storeHtml: () => storeHtml,
+  validateSiteKey: () => validateSiteKey,
+  verifyRenderGrant: () => verifyRenderGrant
+});
+module.exports = __toCommonJS(src_exports);
 
 // src/errors.ts
 var ShugoiError = class extends Error {
@@ -529,7 +577,7 @@ init_render();
 init_locales();
 
 // src/verify-bot.ts
-import { promises as dns } from "dns";
+var import_dns = require("dns");
 var BOT_DOMAINS = [
   { pattern: /Googlebot|Google-InspectionTool|Storebot-Google/i, suffixes: [".googlebot.com", ".google.com"] },
   { pattern: /Bingbot|adidxbot|BingPreview/i, suffixes: [".search.msn.com"] },
@@ -550,11 +598,11 @@ async function verifyBotIp(ua, ip) {
   if (hit && Date.now() - hit.at < VERIFY_TTL) return hit.ok;
   let ok = false;
   try {
-    const names = await dns.reverse(ip);
+    const names = await import_dns.promises.reverse(ip);
     const name = names.find((n) => entry.suffixes.some((s) => n.toLowerCase().endsWith(s)));
     if (name) {
-      const forward = await dns.resolve(name).catch(() => []);
-      const forward6 = await dns.resolve6(name).catch(() => []);
+      const forward = await import_dns.promises.resolve(name).catch(() => []);
+      const forward6 = await import_dns.promises.resolve6(name).catch(() => []);
       ok = forward.includes(ip) || forward6.includes(ip);
     }
   } catch {
@@ -1040,7 +1088,8 @@ async function validateSiteKey(options) {
     throw new ShugoiError("api_unreachable", "Shugoi API unreachable", err);
   }
 }
-export {
+// Annotate the CommonJS export names for ESM import in node:
+0 && (module.exports = {
   BLOCK_PAGE,
   DEFAULT_BOT_WHITELIST,
   DEFAULT_HEADLESS_PATTERNS,
@@ -1061,5 +1110,5 @@ export {
   storeHtml,
   validateSiteKey,
   verifyRenderGrant
-};
-//# sourceMappingURL=index.js.map
+});
+//# sourceMappingURL=index.cjs.map
