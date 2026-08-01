@@ -175,6 +175,8 @@ async function renderResponseData(token, locale, configUrl, mid, grant, ip, expe
     const tokSiteKey = token.split(":")[0];
     if (tokSiteKey !== expectedSiteKey) return { error: "not_found" };
   }
+  const tokTs = parseInt(token.split(":")[1] || "", 10);
+  if (!isNaN(tokTs) && Date.now() - tokTs > TOKEN_TTL) return { error: "not_found" };
   if (!verifyRenderGrant(mid, grant, token, ip, expectedSiteKey)) return { error: "not_found" };
   const contentReplaceOn = await fetchContentReplaceFlag(token, configUrl || "http://127.0.0.1:3098");
   const memHtml = readFromMemory(token);
@@ -225,6 +227,9 @@ function verifyTokenAndRead(token, locale) {
   const [siteKey, timestamp, nonce, sig] = parts;
   const ts = parseInt(timestamp, 10);
   if (isNaN(ts)) {
+    return { error: "not_found" };
+  }
+  if (Date.now() - ts > TOKEN_TTL) {
     return { error: "not_found" };
   }
   const secret = process.env.SHUGOKI_SIGNING_SECRET || process.env.SHUGOKI_SECRET;
