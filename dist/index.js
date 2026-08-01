@@ -602,6 +602,7 @@ async function verifyBotIp(ua, ip) {
 }
 
 // src/core.ts
+import crypto2 from "crypto";
 var DEFAULT_HEADLESS_PATTERNS = [
   /^curl/i,
   /^wget/i,
@@ -748,6 +749,61 @@ function createCore(options) {
       });
     }
     if (isAllowlisted(ctx.path)) return null;
+    const isPage = !ctx.path.includes("/__shugoi/") && !ctx.path.startsWith("/api/") && !/\.[a-zA-Z0-9]{1,5}$/.test(ctx.path.split("?")[0]) && !ctx.path.endsWith("/");
+    const POW_DIFF = 14;
+    const powSecret = process.env.SHUGOKI_SIGNING_SECRET || process.env.SHUGOKI_SECRET;
+    if (isPage && powSecret && ctx.ua && /Mozilla/i.test(ctx.ua)) {
+      const proof = ctx.sgProof || "";
+      const validProof = (() => {
+        const sep = proof.indexOf(":");
+        if (sep <= 0) return false;
+        const tsStr = proof.slice(0, sep);
+        const sol = proof.slice(sep + 1);
+        const ts = parseInt(tsStr, 10);
+        if (isNaN(ts) || Math.abs(Date.now() - ts * 1e3) > 12e4) return false;
+        const salt = crypto2.createHmac("sha256", powSecret).update(tsStr).digest("hex");
+        const digest = crypto2.createHash("sha256").update(salt + ":" + sol).digest("hex");
+        let leading = 0;
+        for (let i = 0; i < digest.length; i++) {
+          const nib = parseInt(digest[i], 16);
+          if (nib === 0) {
+            leading += 4;
+            continue;
+          }
+          const bin = nib.toString(2);
+          let z = 0;
+          while (z < bin.length && bin[z] === "0") z++;
+          leading += z;
+          break;
+        }
+        return leading >= POW_DIFF;
+      })();
+      if (!validProof) {
+        const tsNow = Math.floor(Date.now() / 1e3);
+        const salt = crypto2.createHmac("sha256", powSecret).update(String(tsNow)).digest("hex");
+        const path = ctx.path.startsWith("/") ? ctx.path : "/" + ctx.path;
+        const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Shugoi</title></head><body>
+<script>
+(function(){
+  var salt=${JSON.stringify(salt)}, ts=${tsNow}, diff=${POW_DIFF}, enc=new TextEncoder();
+  function bits(d){var l=0;for(var i=0;i<d.length;i++){var b=parseInt(d[i],16);if(b===0){l+=4;continue}var s=b.toString(2),z=0;while(z<s.length&&s[z]==='0')z++;l+=z;break}return l}
+  var n=0;
+  function step(){
+    crypto.subtle.digest('SHA-256',enc.encode(salt+':'+n.toString(16))).then(function(buf){
+      var h=Array.from(new Uint8Array(buf)).map(function(v){return v.toString(16).padStart(2,'0')}).join('');
+      if(bits(h)>=diff){var q=(location.search?'&':'?')+'sg_proof='+ts+':'+n.toString(16);location.replace(location.pathname+q)}
+      else{n++;if(n<300000)step()}
+    }).catch(function(){location.reload()});
+  }
+  step();
+})();
+</script>
+<pre>${BLOCK_PAGE}</pre>
+</body></html>`;
+        log("pow challenge:", ctx.ua.slice(0, 40));
+        return { block: true, status: 403, contentType: "text/html", body: html };
+      }
+    }
     const flags = await fetchConfigForSiteKey(options.siteKey, baseUrl);
     const headlessEnabled = flags.enableHeadlessCheck !== false;
     if (flags.enableRateLimit === true) {
@@ -859,7 +915,8 @@ function createShugoiMiddleware(options) {
         host: typeof req.headers?.["host"] === "string" ? req.headers.host : void 0,
         acceptLanguage: typeof req.headers?.["accept-language"] === "string" ? req.headers["accept-language"] : void 0,
         secFetchDest: typeof req.headers?.["sec-fetch-dest"] === "string" ? req.headers["sec-fetch-dest"] : void 0,
-        secFetchMode: typeof req.headers?.["sec-fetch-mode"] === "string" ? req.headers["sec-fetch-mode"] : void 0
+        secFetchMode: typeof req.headers?.["sec-fetch-mode"] === "string" ? req.headers["sec-fetch-mode"] : void 0,
+        sgProof: req.query && typeof req.query.sg_proof === "string" ? req.query.sg_proof : void 0
       });
       if (decision) {
         if (res.status) res.status(decision.status);
@@ -949,7 +1006,8 @@ function createShugoiPlugin(options) {
           host: request.headers?.host,
           acceptLanguage: request.headers["accept-language"],
           secFetchDest: request.headers["sec-fetch-dest"],
-          secFetchMode: request.headers["sec-fetch-mode"]
+          secFetchMode: request.headers["sec-fetch-mode"],
+          sgProof: request.query && typeof request.query?.sg_proof === "string" ? request.query.sg_proof : void 0
         });
         if (decision) {
           reply.code(decision.status).type(decision.contentType === "text/html" ? "text/html" : "text/plain").send(decision.body);
