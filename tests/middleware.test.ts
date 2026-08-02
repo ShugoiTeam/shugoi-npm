@@ -340,3 +340,19 @@ describe('challenge couvre les extensions (audit anti-bypass)', () => {
     expect(src).toContain('index.js, /app.js');
   });
 });
+
+describe('X-Forwarded-Prefix (sous-chemin reverse proxy)', () => {
+  it('le challenge 307 préfixe la Location et le path avec forwardedPrefix', () => {
+    const { readFileSync } = require('node:fs');
+    const src = readFileSync(require('node:path').join(process.cwd(), 'src', 'core.ts'), 'utf-8');
+    expect(src).toContain('forwardedPrefix');
+    expect(src).toContain("prefix + '/__sg_challenge?ts='");
+    expect(src).toContain('encodeURIComponent(prefix + path)');
+  });
+
+  it('le middleware transmet x-forwarded-prefix à evaluate', () => {
+    const { readFileSync } = require('node:fs');
+    const mw = readFileSync(require('node:path').join(process.cwd(), 'src', 'middleware.ts'), 'utf-8');
+    expect(mw).toContain("['x-forwarded-prefix']");
+  });
+});

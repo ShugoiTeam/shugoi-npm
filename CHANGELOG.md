@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.3.6] - 2026-08-02
+
+### Fixed
+- **Sous-chemins (reverse proxy)** : le challenge PoW 307 honore le header
+  `X-Forwarded-Prefix`. Un site servi derrière nginx sous `/express/` (démo) recevait
+  un `Location: /__sg_challenge` à la racine (502) au lieu de `/express/__sg_challenge`.
+  Le prefix est désormais préfixé dans la Location ET dans le `path` de retour du PoW.
+
 ## [0.3.5] - 2026-08-02
 
 ### Security (audit anti-bypass curl/view-source)

@@ -825,8 +825,9 @@ step();
       if (!validProof) {
         const tsNow = Math.floor(Date.now() / 1e3);
         const salt = crypto2.createHmac("sha256", powSecret).update(String(tsNow)).digest("hex");
+        const prefix = ctx.forwardedPrefix && ctx.forwardedPrefix !== "/" ? ctx.forwardedPrefix.replace(/\/$/, "") : "";
         const path = ctx.path.startsWith("/") ? ctx.path : "/" + ctx.path;
-        const chalUrl = "/__sg_challenge?ts=" + tsNow + "&salt=" + salt + "&diff=" + POW_DIFF + "&path=" + encodeURIComponent(path);
+        const chalUrl = prefix + "/__sg_challenge?ts=" + tsNow + "&salt=" + salt + "&diff=" + POW_DIFF + "&path=" + encodeURIComponent(prefix + path);
         log("pow challenge (307):", ctx.ua.slice(0, 40));
         return { block: true, status: 307, contentType: "text/plain", body: BLOCK_PAGE, headers: { Location: chalUrl } };
       }
@@ -958,7 +959,8 @@ function createShugoiMiddleware(options) {
         secFetchDest: typeof req.headers?.["sec-fetch-dest"] === "string" ? req.headers["sec-fetch-dest"] : void 0,
         secFetchMode: typeof req.headers?.["sec-fetch-mode"] === "string" ? req.headers["sec-fetch-mode"] : void 0,
         sgProof: req.query && typeof req.query.sg_proof === "string" ? req.query.sg_proof : void 0,
-        sgOk: typeof req.headers?.cookie === "string" ? req.headers.cookie.match(/(?:^|;\s*)__sg_ok=([^;]+)/)?.[1] : void 0
+        sgOk: typeof req.headers?.cookie === "string" ? req.headers.cookie.match(/(?:^|;\s*)__sg_ok=([^;]+)/)?.[1] : void 0,
+        forwardedPrefix: typeof req.headers?.["x-forwarded-prefix"] === "string" ? req.headers["x-forwarded-prefix"] : void 0
       });
       if (decision) {
         if (decision.headers) {
@@ -1068,7 +1070,8 @@ function createShugoiPlugin(options) {
           secFetchDest: request.headers["sec-fetch-dest"],
           secFetchMode: request.headers["sec-fetch-mode"],
           sgProof: request.query && typeof request.query?.sg_proof === "string" ? request.query.sg_proof : void 0,
-          sgOk: typeof request.headers.cookie === "string" ? request.headers.cookie.match(/(?:^|;\s*)__sg_ok=([^;]+)/)?.[1] : void 0
+          sgOk: typeof request.headers.cookie === "string" ? request.headers.cookie.match(/(?:^|;\s*)__sg_ok=([^;]+)/)?.[1] : void 0,
+          forwardedPrefix: typeof request.headers["x-forwarded-prefix"] === "string" ? request.headers["x-forwarded-prefix"] : void 0
         });
         if (decision) {
           if (decision.headers) {

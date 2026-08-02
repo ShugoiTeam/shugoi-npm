@@ -101,6 +101,7 @@ export function createShugoiMiddleware(options: ShugoiCoreOptions) {
         secFetchMode: typeof req.headers?.['sec-fetch-mode'] === 'string' ? req.headers['sec-fetch-mode'] : undefined,
         sgProof: (req.query && typeof (req.query as Record<string, unknown>).sg_proof === 'string') ? (req.query as Record<string, unknown>).sg_proof as string : undefined,
         sgOk: (typeof req.headers?.cookie === 'string' ? req.headers.cookie.match(/(?:^|;\s*)__sg_ok=([^;]+)/)?.[1] : undefined),
+        forwardedPrefix: (typeof req.headers?.['x-forwarded-prefix'] === 'string' ? req.headers['x-forwarded-prefix'] : undefined),
       });
 
       if (decision) {
@@ -228,6 +229,7 @@ export function createShugoiPlugin(options: ShugoiCoreOptions) {
           secFetchMode: request.headers['sec-fetch-mode'],
           sgProof: (request.query && typeof request.query?.sg_proof === 'string') ? request.query.sg_proof as string : undefined,
           sgOk: (typeof request.headers.cookie === 'string' ? request.headers.cookie.match(/(?:^|;\s*)__sg_ok=([^;]+)/)?.[1] : undefined),
+          forwardedPrefix: (typeof request.headers['x-forwarded-prefix'] === 'string' ? request.headers['x-forwarded-prefix'] : undefined),
         });
 
         if (decision) {

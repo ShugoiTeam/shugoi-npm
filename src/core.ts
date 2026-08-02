@@ -50,6 +50,7 @@ export interface EvaluateCtx {
   secFetchMode?: string;
   sgProof?: string;
   sgOk?: string;
+  forwardedPrefix?: string;
 }
 
 export interface BlockDecision {
@@ -280,10 +281,13 @@ step();
       if (!validProof) {
         // 307 vers le challenge : body = tableau ASCII SEUL (curl le voit tel quel).
         // Le navigateur suit la redirection → /__sg_challenge?ts=&salt=&diff=&path=
+        // Le prefix X-Forwarded-Prefix (ex. /express derrière un reverse proxy) est
+        // préfixé pour que la redirection reste dans le sous-chemin de la démo.
         const tsNow = Math.floor(Date.now() / 1000)
         const salt = crypto.createHmac('sha256', powSecret).update(String(tsNow)).digest('hex')
+        const prefix = ctx.forwardedPrefix && ctx.forwardedPrefix !== '/' ? ctx.forwardedPrefix.replace(/\/$/, '') : ''
         const path = (ctx.path.startsWith('/') ? ctx.path : '/' + ctx.path)
-        const chalUrl = '/__sg_challenge?ts=' + tsNow + '&salt=' + salt + '&diff=' + POW_DIFF + '&path=' + encodeURIComponent(path)
+        const chalUrl = prefix + '/__sg_challenge?ts=' + tsNow + '&salt=' + salt + '&diff=' + POW_DIFF + '&path=' + encodeURIComponent(prefix + path)
         log('pow challenge (307):', ctx.ua.slice(0, 40))
         return { block: true, status: 307, contentType: 'text/plain', body: BLOCK_PAGE, headers: { Location: chalUrl } }
       }
