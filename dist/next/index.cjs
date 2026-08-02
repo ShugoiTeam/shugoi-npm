@@ -319,7 +319,11 @@ async function generateSkeleton(siteKey, token, baseUrl, restrictedAccess, white
   const _powTs = Math.floor(Date.now() / 1e3);
   const _powSecret = process.env.SHUGOKI_SIGNING_SECRET || process.env.SHUGOKI_SECRET || "";
   const _powSalt = _powSecret ? import_crypto.default.createHmac("sha256", _powSecret).update(String(_powTs)).digest("hex") : "";
-  fragments.push("window.__sg_pow=" + JSON.stringify({ ts: _powTs, salt: _powSalt, difficulty: 10 }));
+  const _powDiff = (() => {
+    const raw = Number(process.env.SHUGOKI_POW_DIFF || "12");
+    return Number.isInteger(raw) && raw >= 8 && raw <= 24 ? raw : 12;
+  })();
+  fragments.push("window.__sg_pow=" + JSON.stringify({ ts: _powTs, salt: _powSalt, difficulty: _powDiff }));
   const _ntpDrift = (typeof globalThis !== "undefined" ? globalThis.__sg_ntpDrift : 0) || 0;
   const _ntpTime = globalThis.__sg_ntpTime || Date.now() - _ntpDrift;
   const _clockts = clockts || _ntpTime;

@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.3.9] - 2026-08-02
+
+### Security
+- **PoW configurable (audit #6)** : la difficulté du proof-of-work était codée en dur à
+  10. Désormais `SHUGOKI_POW_DIFF` (env, défaut 12) la pilote, synchronisée entre
+  `core.ts` (challenge 307), `render.ts` (`__sg_pow.difficulty`) et `whitelist.ts` côté
+  site. Plus de constante faible en dur.
+
 ## [0.3.8] - 2026-08-02
 
 ### Security

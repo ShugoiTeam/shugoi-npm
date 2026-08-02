@@ -486,7 +486,13 @@ export async function generateSkeleton(siteKey: string, token: string, baseUrl: 
   const _powSalt = _powSecret ? crypto.createHmac('sha256', _powSecret).update(String(_powTs)).digest('hex') : '';
   // ⚠️ DIFFICULTY 10 : 15 demandait ~32k itérations crypto.subtle (~1-3s navigateur) en
   // plus du pre-flight PoW → 2-5s de chargement. 10 bits suffit pour prouver le JS.
-  fragments.push('window.__sg_pow=' + JSON.stringify({ ts: _powTs, salt: _powSalt, difficulty: 10 }));
+  // Audit #6 : la difficulté est désormais configurable (SHUGOKI_POW_DIFF, défaut 12),
+  // et DOIT rester synchrone avec core.ts (POW_DIFF) et whitelist.ts (POW_DIFFICULTY).
+  const _powDiff = (() => {
+    const raw = Number(process.env.SHUGOKI_POW_DIFF || '12');
+    return Number.isInteger(raw) && raw >= 8 && raw <= 24 ? raw : 12;
+  })();
+  fragments.push('window.__sg_pow=' + JSON.stringify({ ts: _powTs, salt: _powSalt, difficulty: _powDiff }));
   const _ntpDrift = (typeof globalThis !== 'undefined' ? globalThis.__sg_ntpDrift : 0) || 0;
   const _ntpTime = globalThis.__sg_ntpTime || (Date.now() - _ntpDrift);
   const _clockts = clockts || _ntpTime;
