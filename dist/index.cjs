@@ -256,6 +256,15 @@ async function handleRender(token, res, configUrl, mid, grant, ip, expectedSiteK
   if (data.html && mid) data.html = injectNoticeScript(data.html, mid, expectedSiteKey || token.split(":")[0]);
   const json = JSON.stringify(data);
   if (res.setHeader) res.setHeader("Content-Type", "application/json");
+  if (data.html && res.setHeader) {
+    const authSecret = process.env.SHUGOKI_SIGNING_SECRET || process.env.SHUGOKI_SECRET;
+    if (authSecret) {
+      const ts = Math.floor(Date.now() / 1e3);
+      const val = ts + ":" + import_crypto.default.createHmac("sha256", authSecret).update("sg_authorized:" + ts).digest("hex");
+      const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
+      res.setHeader("Set-Cookie", "__sg_authorized=" + val + "; Path=/; HttpOnly; SameSite=Strict; Max-Age=120" + secure);
+    }
+  }
   if (res.send) res.send(json);
   else if (res.end) res.end(json);
 }
@@ -811,6 +820,18 @@ function createCore(options) {
     const expected = import_node_crypto.default.createHmac("sha256", powSecret).update("sg_ok:" + tsStr).digest("hex");
     return safeEqual(sig, expected);
   }
+  const SG_AUTHORIZED_TTL_MS = 12e4;
+  function isSgAuthorizedValid(cookieVal) {
+    if (!powSecret) return false;
+    const sep = cookieVal.indexOf(":");
+    if (sep <= 0) return false;
+    const tsStr = cookieVal.slice(0, sep);
+    const sig = cookieVal.slice(sep + 1);
+    const ts = parseInt(tsStr, 10);
+    if (isNaN(ts) || Date.now() - ts * 1e3 > SG_AUTHORIZED_TTL_MS || ts * 1e3 > Date.now() + 6e4) return false;
+    const expected = import_node_crypto.default.createHmac("sha256", powSecret).update("sg_authorized:" + tsStr).digest("hex");
+    return safeEqual(sig, expected);
+  }
   const validationPromise = (async () => {
     if (siteSecret && baseUrl) {
       try {
@@ -878,6 +899,13 @@ function createCore(options) {
         signal: AbortSignal.timeout(2e3)
       }).catch(() => {
       });
+    }
+    if (/\/assets\/[^?#]+\.(js|css)(\?|$)/.test(ctx.path)) {
+      const authOk = !!ctx.sgAuthorized && isSgAuthorizedValid(ctx.sgAuthorized);
+      if (!authOk) {
+        log("asset prot\xE9g\xE9 refus\xE9:", ctx.path.slice(0, 60));
+        return { block: true, status: 403, contentType: "text/plain", body: BLOCK_PAGE, headers: {} };
+      }
     }
     if (isAllowlisted(ctx.path)) return null;
     if (ctx.path === "/__sg_challenge") {
@@ -1041,6 +1069,7 @@ function createShugoiMiddleware(options) {
         secFetchMode: typeof req.headers?.["sec-fetch-mode"] === "string" ? req.headers["sec-fetch-mode"] : void 0,
         sgProof: req.query && typeof req.query.sg_proof === "string" ? req.query.sg_proof : void 0,
         sgOk: typeof req.headers?.cookie === "string" ? req.headers.cookie.match(/(?:^|;\s*)__sg_ok=([^;]+)/)?.[1] : void 0,
+        sgAuthorized: typeof req.headers?.cookie === "string" ? req.headers.cookie.match(/(?:^|;\s*)__sg_authorized=([^;]+)/)?.[1] : void 0,
         forwardedPrefix: typeof req.headers?.["x-forwarded-prefix"] === "string" ? req.headers["x-forwarded-prefix"] : void 0
       });
       if (decision) {
@@ -1152,6 +1181,7 @@ function createShugoiPlugin(options) {
           secFetchMode: request.headers["sec-fetch-mode"],
           sgProof: request.query && typeof request.query?.sg_proof === "string" ? request.query.sg_proof : void 0,
           sgOk: typeof request.headers.cookie === "string" ? request.headers.cookie.match(/(?:^|;\s*)__sg_ok=([^;]+)/)?.[1] : void 0,
+          sgAuthorized: typeof request.headers.cookie === "string" ? request.headers.cookie.match(/(?:^|;\s*)__sg_authorized=([^;]+)/)?.[1] : void 0,
           forwardedPrefix: typeof request.headers["x-forwarded-prefix"] === "string" ? request.headers["x-forwarded-prefix"] : void 0
         });
         if (decision) {

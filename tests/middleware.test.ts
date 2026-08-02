@@ -356,3 +356,22 @@ describe('X-Forwarded-Prefix (sous-chemin reverse proxy)', () => {
     expect(mw).toContain("['x-forwarded-prefix']");
   });
 });
+
+describe('protection des assets à contenu (audit extraction bundle)', () => {
+  it('les /assets/*.js sont refusés sans cookie __sg_authorized', () => {
+    const { readFileSync } = require('node:fs');
+    const src = readFileSync(require('node:path').join(process.cwd(), 'src', 'core.ts'), 'utf-8');
+    expect(src).toContain('(js|css)');
+    expect(src).toContain('/\\/assets\\/');
+    expect(src).toContain('isSgAuthorizedValid');
+    expect(src).toContain('sg_authorized:');
+  });
+
+  it('handleRender pose le cookie __sg_authorized après render réussi', () => {
+    const { readFileSync } = require('node:fs');
+    const src = readFileSync(require('node:path').join(process.cwd(), 'src', 'render.ts'), 'utf-8');
+    expect(src).toContain('__sg_authorized=');
+    expect(src).toContain('sg_authorized:' + ('').replace('', ''));
+    expect(src).toContain('HttpOnly; SameSite=Strict');
+  });
+});

@@ -50,6 +50,7 @@ export interface EvaluateCtx {
   secFetchMode?: string;
   sgProof?: string;
   sgOk?: string;
+  sgAuthorized?: string;
   forwardedPrefix?: string;
 }
 
@@ -163,6 +164,22 @@ export function createCore(options: ShugoiCoreOptions): ShugoiCore {
     return safeEqual(sig, expected)
   }
 
+  // Cookie __sg_authorized posé par handleRender après un render réussi (grant valide).
+  // Protège les assets à contenu (/assets/*.js, *.css) : sans lui, le bundle JS est
+  // téléchargeable publiquement → extraction du contenu. TTL court (120s).
+  const SG_AUTHORIZED_TTL_MS = 120_000;
+  function isSgAuthorizedValid(cookieVal: string): boolean {
+    if (!powSecret) return false
+    const sep = cookieVal.indexOf(':')
+    if (sep <= 0) return false
+    const tsStr = cookieVal.slice(0, sep)
+    const sig = cookieVal.slice(sep + 1)
+    const ts = parseInt(tsStr, 10)
+    if (isNaN(ts) || Date.now() - ts * 1000 > SG_AUTHORIZED_TTL_MS || ts * 1000 > Date.now() + 60000) return false
+    const expected = crypto.createHmac('sha256', powSecret).update('sg_authorized:' + tsStr).digest('hex')
+    return safeEqual(sig, expected)
+  }
+
   const validationPromise: Promise<void> = (async () => {
     if (siteSecret && baseUrl) {
       try {
@@ -235,6 +252,20 @@ export function createCore(options: ShugoiCoreOptions): ShugoiCore {
         body: JSON.stringify({ siteKey: options.siteKey, reason: 'validation_failed' }),
         signal: AbortSignal.timeout(2000),
       }).catch(() => {})
+    }
+
+    // ═══ Protection des assets à contenu (/assets/*.js, *.css) ═══
+    // Le bundle SPA contient les textes/structure de la page. Servi publiquement, il
+    // permet d'extraire tout le contenu sans passer la whitelist (audit). On exige donc
+    // le cookie __sg_authorized (posé par handleRender après un render réussi) pour le
+    // télécharger. Un curl direct / un non-validé reçoit le tableau BLOCKED.
+    // NB : on vérifie AVANT isAllowlisted (les assets sont allowlistés pour le split-render).
+    if (/\/assets\/[^?#]+\.(js|css)(\?|$)/.test(ctx.path)) {
+      const authOk = !!ctx.sgAuthorized && isSgAuthorizedValid(ctx.sgAuthorized)
+      if (!authOk) {
+        log('asset protégé refusé:', ctx.path.slice(0, 60))
+        return { block: true, status: 403, contentType: 'text/plain', body: BLOCK_PAGE, headers: {} }
+      }
     }
 
     if (isAllowlisted(ctx.path)) return null

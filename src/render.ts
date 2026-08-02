@@ -246,6 +246,19 @@ export async function handleRender(token: string, res: { setHeader?: (k: string,
   if (data.html && mid) data.html = injectNoticeScript(data.html, mid, expectedSiteKey || token.split(':')[0]);
   const json = JSON.stringify(data);
   if (res.setHeader) res.setHeader('Content-Type', 'application/json');
+  // Audits : pose un cookie d'autorisation __sg_authorized quand le render réussit
+  // (grant valide + HTML servi). Ce cookie permet ensuite de charger les assets
+  // protégés (/assets/*.js) — sans lui, un téléchargement direct du bundle est refusé.
+  // Signé avec SHUGOKI_SIGNING_SECRET (jamais exposé), TTL court = durée de session.
+  if (data.html && res.setHeader) {
+    const authSecret = process.env.SHUGOKI_SIGNING_SECRET || process.env.SHUGOKI_SECRET;
+    if (authSecret) {
+      const ts = Math.floor(Date.now() / 1000);
+      const val = ts + ':' + crypto.createHmac('sha256', authSecret).update('sg_authorized:' + ts).digest('hex');
+      const secure = process.env.NODE_ENV === 'production' ? '; Secure' : '';
+      res.setHeader('Set-Cookie', '__sg_authorized=' + val + '; Path=/; HttpOnly; SameSite=Strict; Max-Age=120' + secure);
+    }
+  }
   if (res.send) res.send(json);
   else if (res.end) res.end(json);
 }

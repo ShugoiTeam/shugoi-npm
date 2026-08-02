@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.3.8] - 2026-08-02
+
+### Security
+- **Protection des assets à contenu** : le bundle SPA (`/assets/*.js`, `*.css`) contient
+  les textes et la structure des pages. Servi publiquement, il permettait d'extraire
+  tout le contenu sans passer la whitelist (audit). Désormais, `handleRender` pose un
+  cookie `__sg_authorized` (HMAC signé, TTL 120s) quand le render réussit (grant valide),
+  et le middleware refuse `/assets/*.js|css` sans ce cookie (403 tableau). Un curl direct
+  ou un client non validé ne peut plus télécharger le bundle.
+
 ## [0.3.7] - 2026-08-02
 
 ### Security
