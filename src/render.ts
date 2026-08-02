@@ -263,10 +263,43 @@ const NOTICE_SCRIPT = `
   if(!mid||!sk||window.__sg_noticeEnabled===false)return;
   var base=window.__sg_baseUrl||'';
   var origin=base.replace(/\\/api\\/v1\\/?$/,'');
+  var _OVERLAY_CSS='position:fixed!important;inset:0!important;z-index:2147483647!important;background:rgba(0,0,0,.6)!important;display:flex!important;align-items:center!important;justify-content:center!important;padding:1.2rem!important';
+  var _CARD_CSS='background:#fff!important;border:4px solid #000!important;border-radius:28px 6px 32px 10px!important;box-shadow:14px 14px 0 #000!important;padding:0!important;max-width:720px!important;width:100%!important;text-align:center!important;font-family:Arial,sans-serif!important;display:flex!important;overflow:hidden!important';
+  var _CARD_HTML='<div style="flex:0 0 320px;display:flex;align-items:center;justify-content:center;padding:1.5rem 1rem 1.5rem 3rem;overflow:hidden"><img src="'+origin+'/favicon.png" alt="" style="width:100%;height:auto;max-width:220px;pointer-events:none"></div><div style="flex:1;padding:1.6rem 1.8rem;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center"><img src="'+origin+'/brand-block.png" alt="Shugoi" style="display:block;margin:0 0 .3rem;pointer-events:none;max-width:100%;height:auto;max-height:40px"><div style="border:2px solid #000;display:inline-block;border-radius:8px 2px 12px 4px;padding:.2rem .6rem;font-size:.5rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#E87090;margin-bottom:.6rem">Protection anti-abus</div><p style="font-size:.8rem;color:#555;line-height:1.7;margin:0 .4rem .6rem;max-width:280px">Ce site utilise Shugoi pour se prot\\u00e9ger contre les abus et la fraude. Des caract\\u00e9ristiques techniques de votre navigateur sont analys\\u00e9es pour d\\u00e9tecter les scripts automatis\\u00e9s, Tor, les VPN et les environnements virtuels. Aucune donn\\u00e9e personnelle n\\'est collect\\u00e9e.</p><button id="__sg_ok" style="background:#E87090;color:#fff;border:3px solid #000;border-radius:12px 3px 14px 5px;padding:.35rem 1.4rem;font-size:.8rem;font-weight:700;cursor:pointer">OK</button><div style="margin-top:.5rem;font-size:.5rem;color:#ccc"><a href="'+origin+'/legal/shugoi-notice" target="_blank" style="color:#E87090;text-decoration:underline">En savoir plus \\u00b7 shugoi.com</a></div></div>';
   function ack(){try{fetch(base+'/notice',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({machineId:mid,siteKey:sk}),keepalive:true,signal:AbortSignal.timeout(4000)}).catch(function(){})}catch(e){}}
-  function build(){var o=document.createElement('div');o.id='__sg_o';o.style.cssText='position:fixed!important;inset:0!important;z-index:2147483647!important;background:rgba(0,0,0,.6)!important;display:flex!important;align-items:center!important;justify-content:center!important;padding:1.2rem!important';var c=document.createElement('div');c.id='__sg_cd';c.style.cssText='background:#fff!important;border:4px solid #000!important;border-radius:28px 6px 32px 10px!important;box-shadow:14px 14px 0 #000!important;padding:0!important;max-width:720px!important;width:100%!important;text-align:center!important;font-family:Arial,sans-serif!important;display:flex!important;overflow:hidden!important';c.innerHTML='<div style="flex:0 0 320px;display:flex;align-items:center;justify-content:center;padding:1.5rem 1rem 1.5rem 3rem;overflow:hidden"><img src="'+origin+'/favicon.png" alt="" style="width:100%;height:auto;max-width:220px;pointer-events:none"></div><div style="flex:1;padding:1.6rem 1.8rem;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center"><img src="'+origin+'/brand-block.png" alt="Shugoi" style="display:block;margin:0 0 .3rem;pointer-events:none;max-width:100%;height:auto;max-height:40px"><div style="border:2px solid #000;display:inline-block;border-radius:8px 2px 12px 4px;padding:.2rem .6rem;font-size:.5rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#E87090;margin-bottom:.6rem">Protection anti-abus</div><p style="font-size:.8rem;color:#555;line-height:1.7;margin:0 .4rem .6rem;max-width:280px">Ce site utilise Shugoi pour se prot\\u00e9ger contre les abus et la fraude. Des caract\\u00e9ristiques techniques de votre navigateur sont analys\\u00e9es pour d\\u00e9tecter les scripts automatis\\u00e9s, Tor, les VPN et les environnements virtuels. Aucune donn\\u00e9e personnelle n\\'est collect\\u00e9e.</p><button id="__sg_ok" style="background:#E87090;color:#fff;border:3px solid #000;border-radius:12px 3px 14px 5px;padding:.35rem 1.4rem;font-size:.8rem;font-weight:700;cursor:pointer">OK</button><div style="margin-top:.5rem;font-size:.5rem;color:#ccc"><a href="'+origin+'/legal/shugoi-notice" target="_blank" style="color:#E87090;text-decoration:underline">En savoir plus \\u00b7 shugoi.com</a></div></div>';o.appendChild(c);document.documentElement.appendChild(o);document.body.style.overflow='hidden';document.documentElement.style.overflow='hidden';var ok=document.getElementById('__sg_ok');if(ok)ok.onclick=function(){ack();var el=document.getElementById('__sg_o');if(el&&el.parentNode)el.parentNode.removeChild(el);document.body.style.overflow='';document.documentElement.style.overflow=''};}
-  function show(){if(document.body)build();else if(document.addEventListener)document.addEventListener('DOMContentLoaded',build);else setTimeout(show,50)}
-  fetch(base+'/notice?machineId='+encodeURIComponent(mid)+'&siteKey='+encodeURIComponent(sk),{signal:AbortSignal.timeout(4000)}).then(function(r){return r.json()}).then(function(d){if(!d.acknowledged)show()}).catch(function(){show()});
+  function buildOverlay(){
+    var o=document.createElement('div');o.id='__sg_o';o.style.cssText=_OVERLAY_CSS;
+    var c=document.createElement('div');c.id='__sg_cd';c.style.cssText=_CARD_CSS;
+    c.innerHTML=_CARD_HTML;
+    o.appendChild(c);return o;
+  }
+  function okHandler(keepMo){ack();var el=document.getElementById('__sg_o');if(el&&el.parentNode)el.parentNode.removeChild(el);document.body.style.overflow='';document.documentElement.style.overflow='';if(keepMo===true){try{mo.disconnect()}catch(e){}}}
+  function rebindOk(){var b=document.getElementById('__sg_ok');if(b)b.onclick=function(){okHandler(true)};}
+  function enforce(){
+    var o=document.getElementById('__sg_o');
+    if(!o){document.documentElement.appendChild(buildOverlay());document.body.style.overflow='hidden';document.documentElement.style.overflow='hidden';rebindOk();return;}
+    if(o.style.cssText!==_OVERLAY_CSS)o.style.cssText=_OVERLAY_CSS;
+    var c=document.getElementById('__sg_cd');
+    if(!c){var fresh=buildOverlay();o.innerHTML='';o.appendChild(fresh.childNodes[0]);document.body.style.overflow='hidden';document.documentElement.style.overflow='hidden';rebindOk();return;}
+    if(c.style.cssText!==_CARD_CSS)c.style.cssText=_CARD_CSS;
+    if(c.innerHTML!==_CARD_HTML){c.innerHTML=_CARD_HTML;rebindOk();}
+    if(document.body.style.overflow!=='hidden')document.body.style.overflow='hidden';
+    if(document.documentElement.style.overflow!=='hidden')document.documentElement.style.overflow='hidden';
+  }
+  var mo=null;
+  function show(){
+    document.documentElement.appendChild(buildOverlay());
+    var sp=window.scrollY||window.pageYOffset||0;
+    document.body.style.overflow='hidden';document.documentElement.style.overflow='hidden';
+    window.addEventListener('scroll',function(){window.scrollTo(0,sp)}, {passive:false});
+    window.addEventListener('touchmove',function(e){e.preventDefault()},{passive:false});
+    window.addEventListener('wheel',function(e){e.preventDefault()},{passive:false});
+    rebindOk();
+    mo=new MutationObserver(function(){enforce();});
+    mo.observe(document.documentElement,{childList:true,subtree:true,attributes:true,characterData:true,attributeFilter:['style','class','id']});
+  }
+  function init(){if(document.body)show();else if(document.addEventListener)document.addEventListener('DOMContentLoaded',show);else setTimeout(init,50)}
+  fetch(base+'/notice?machineId='+encodeURIComponent(mid)+'&siteKey='+encodeURIComponent(sk),{signal:AbortSignal.timeout(4000)}).then(function(r){return r.json()}).then(function(d){if(!d.acknowledged)init()}).catch(function(){init()});
 })();
 </script>`;
 

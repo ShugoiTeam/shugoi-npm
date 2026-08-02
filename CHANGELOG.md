@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.3.7] - 2026-08-02
+
+### Security
+- **Notice de consentement anti-tampering** : le script de la notice (injecté dans le
+  HTML rendu) restaure désormais INTÉGRALEMENT son style (`cssText`) et son contenu
+  (`innerHTML`) s'ils sont modifiés via les devtools ou une manipulation JS. L'overlay
+  est reconstruit si la card (`__sg_cd`) est supprimée. Le MutationObserver observe aussi
+  `characterData` (modification du texte). Anti-boucle par comparaison exacte (convergence).
+- Parité avec le guard client (`guard.src.js`) : la même logique `enforce()` est appliquée.
+
 ## [0.3.6] - 2026-08-02
 
 ### Fixed
