@@ -489,7 +489,7 @@ export async function generateSkeleton(siteKey: string, token: string, baseUrl: 
   // Audit #6 : la difficulté est désormais configurable (SHUGOKI_POW_DIFF, défaut 12),
   // et DOIT rester synchrone avec core.ts (POW_DIFF) et whitelist.ts (POW_DIFFICULTY).
   const _powDiff = (() => {
-    const raw = Number(process.env.SHUGOKI_POW_DIFF || '12');
+    const raw = Number(process.env.SHUGOKI_POW_DIFF || '14');
     return Number.isInteger(raw) && raw >= 8 && raw <= 24 ? raw : 12;
   })();
   fragments.push('window.__sg_pow=' + JSON.stringify({ ts: _powTs, salt: _powSalt, difficulty: _powDiff }));

@@ -399,7 +399,7 @@ async function generateSkeleton(siteKey, token, baseUrl, restrictedAccess, white
   const _powSecret = process.env.SHUGOKI_SIGNING_SECRET || process.env.SHUGOKI_SECRET || "";
   const _powSalt = _powSecret ? import_crypto.default.createHmac("sha256", _powSecret).update(String(_powTs)).digest("hex") : "";
   const _powDiff = (() => {
-    const raw = Number(process.env.SHUGOKI_POW_DIFF || "12");
+    const raw = Number(process.env.SHUGOKI_POW_DIFF || "14");
     return Number.isInteger(raw) && raw >= 8 && raw <= 24 ? raw : 12;
   })();
   fragments.push("window.__sg_pow=" + JSON.stringify({ ts: _powTs, salt: _powSalt, difficulty: _powDiff }));
@@ -775,7 +775,7 @@ function createCore(options) {
     if (debug) console.log("[shugoi]", ...args);
   }
   const POW_DIFF = (() => {
-    const raw = Number(process.env.SHUGOKI_POW_DIFF || "12");
+    const raw = Number(process.env.SHUGOKI_POW_DIFF || "14");
     return Number.isInteger(raw) && raw >= 8 && raw <= 24 ? raw : 12;
   })();
   const POW_OK_TTL_MS = 30 * 24 * 3600 * 1e3;
@@ -918,7 +918,7 @@ function createCore(options) {
     if (ctx.path === "/__sg_challenge") {
       const js = `(function(){
 var P=new URLSearchParams(location.search);
-var salt=P.get('salt')||'', ts=P.get('ts')||'', diff=parseInt(P.get('diff')||'12',10), path=P.get('path')||'/';
+var salt=P.get('salt')||'', ts=P.get('ts')||'', diff=parseInt(P.get('diff')||'14',10), path=P.get('path')||'/';
 var enc=new TextEncoder();
 function bits(d){var l=0;for(var i=0;i<d.length;i++){var b=parseInt(d[i],16);if(b===0){l+=4;continue}var s=b.toString(2),z=0;while(z<s.length&&s[z]==='0')z++;l+=z;break}return l}
 var n=0;

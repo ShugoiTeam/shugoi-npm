@@ -280,7 +280,7 @@ async function generateSkeleton(siteKey, token, baseUrl, restrictedAccess, white
   const _powSecret = process.env.SHUGOKI_SIGNING_SECRET || process.env.SHUGOKI_SECRET || "";
   const _powSalt = _powSecret ? crypto.createHmac("sha256", _powSecret).update(String(_powTs)).digest("hex") : "";
   const _powDiff = (() => {
-    const raw = Number(process.env.SHUGOKI_POW_DIFF || "12");
+    const raw = Number(process.env.SHUGOKI_POW_DIFF || "14");
     return Number.isInteger(raw) && raw >= 8 && raw <= 24 ? raw : 12;
   })();
   fragments.push("window.__sg_pow=" + JSON.stringify({ ts: _powTs, salt: _powSalt, difficulty: _powDiff }));
