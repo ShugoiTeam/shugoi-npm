@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.4.0] - 2026-08-02
+
+### Fixed
+- **Notice de consentement : la page ne gèle plus.** Le MutationObserver anti-tampering
+  observait `document.documentElement` en `subtree:true` → chaque mutation de
+  style/class n'importe où dans la page (SPA React, animations) déclenchait la
+  restauration de la notice et le blocage du scroll, rendant la page inutilisable.
+  Il n'observe désormais QUE la popup (`__sg_o` / `__sg_cd`) : seule la suppression
+  ou modification de la carte est restaurée, tant que la notice n'a pas été fermée.
+- **Bouton « Non merci »** ajouté : l'utilisateur peut accepter (OK → ack serveur)
+  ou refuser (ferme la popup sans ack). Plus de blocage global scroll/touch/wheel.
+
 ## [0.3.9] - 2026-08-02
 
 ### Security
