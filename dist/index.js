@@ -488,23 +488,31 @@ var init_render = __esm({
   function close(){_closed=true;try{if(mo)mo.disconnect()}catch(e){}var el=document.getElementById('__sg_o');if(el&&el.parentNode)el.parentNode.removeChild(el);document.body.style.overflow='';document.documentElement.style.overflow='';}
   function okHandler(){ack();close();}
   function rebind(){var b=document.getElementById('__sg_ok');if(b)b.onclick=okHandler;}
+  function enforce(){
+    if(_closed)return;
+    var o=document.getElementById('__sg_o');
+    // Overlay supprim\xE9 \u2192 recr\xE9er (le MO sur documentElement childList le d\xE9tecte).
+    if(!o){var fresh=buildOverlay();document.documentElement.appendChild(fresh);rebind();return;}
+    if(o.style.cssText!==_OVERLAY_CSS)o.style.cssText=_OVERLAY_CSS;
+    var c=document.getElementById('__sg_cd');
+    if(!c){o.innerHTML='';o.appendChild(buildOverlay().firstChild);rebind();return;}
+    if(c.style.cssText!==_CARD_CSS)c.style.cssText=_CARD_CSS;
+    if(c.innerHTML!==_CARD_HTML){c.innerHTML=_CARD_HTML;rebind();}
+  }
   function show(){
     _closed=false;
     var o=buildOverlay();document.documentElement.appendChild(o);
     document.body.style.overflow='hidden';document.documentElement.style.overflow='hidden';
     rebind();
-    // Anti-tampering LIMIT\xC9 \xE0 la popup : on observe UNIQUEMENT __sg_o (subtree), jamais
-    // le reste du document. Les mutations de style/class du reste de la page (SPA React,
-    // animations) ne d\xE9clenchent rien \u2014 \xE7a gelait la page. En revanche toute modification
-    // DANS la popup (suppression de la carte, innerHTML, attributs) est restaur\xE9e.
+    // Anti-tampering cibl\xE9 SANS geler la page :
+    //  - documentElement en childList SEUL \u2192 d\xE9tecte la SUPPRESSION de __sg_o (le MO
+    //    pos\xE9 sur __sg_o ne signale jamais son propre retrait du DOM). childList seul
+    //    (sans subtree/attributes) est quasi inerte pour la SPA \u2192 pas de freeze.
+    //  - __sg_o en subtree+attributes+characterData \u2192 restaure toute modification
+    //    DANS la popup (carte supprim\xE9e, innerHTML, style, class, id).
     try{
-      mo=new MutationObserver(function(){
-        if(_closed)return;
-        var c=document.getElementById('__sg_cd');
-        if(!c){var o2=document.getElementById('__sg_o');if(o2){o2.innerHTML='';o2.appendChild(buildOverlay().firstChild);rebind();}return;}
-        if(c.style.cssText!==_CARD_CSS)c.style.cssText=_CARD_CSS;
-        if(c.innerHTML!==_CARD_HTML){c.innerHTML=_CARD_HTML;rebind();}
-      });
+      mo=new MutationObserver(function(){enforce();});
+      mo.observe(document.documentElement,{childList:true});
       var o3=document.getElementById('__sg_o');
       if(o3){
         mo.observe(o3,{childList:true,subtree:true,attributes:true,characterData:true,attributeFilter:['style','class','id']});

@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.4.2] - 2026-08-02
+
+### Fixed
+- **La popup notice ne peut plus être supprimée.** Le MutationObserver posé sur
+  `__sg_o` ne signalait jamais le retrait de `__sg_o` lui-même du DOM — on pouvait
+  supprimer l'overlay librement. Désormais `document.documentElement` est aussi
+  observé en `childList` SEUL (léger, sans subtree/attributes → pas de freeze SPA) :
+  toute suppression de `__sg_o` recrée immédiatement l'overlay. Le style de l'overlay
+  (`_OVERLAY_CSS`) est aussi restauré, en plus de la carte.
+
 ## [0.4.1] - 2026-08-02
 
 ### Fixed
