@@ -497,7 +497,7 @@ var init_render = __esm({
   var origin=base.replace(/\\/api\\/v1\\/?$/,'');
   var _OVERLAY_CSS='position:fixed!important;inset:0!important;z-index:2147483647!important;background:rgba(0,0,0,.6)!important;display:flex!important;align-items:center!important;justify-content:center!important;padding:1.2rem!important';
   var _CARD_CSS='background:#fff!important;border:4px solid #000!important;border-radius:28px 6px 32px 10px!important;box-shadow:14px 14px 0 #000!important;padding:0!important;max-width:720px!important;width:100%!important;text-align:center!important;font-family:Arial,sans-serif!important;display:flex!important;overflow:hidden!important';
-  var _CARD_HTML='<div style="flex:0 0 320px;display:flex;align-items:center;justify-content:center;padding:1.5rem 1rem 1.5rem 3rem;overflow:hidden"><img src="'+origin+'/favicon.png" alt="" style="width:100%;height:auto;max-width:220px;pointer-events:none"></div><div style="flex:1;padding:1.6rem 1.8rem;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center"><img src="'+origin+'/brand-block.png" alt="Shugoi" style="display:block;margin:0 0 .3rem;pointer-events:none;max-width:100%;height:auto;max-height:40px"><div style="border:2px solid #000;display:inline-block;border-radius:8px 2px 12px 4px;padding:.2rem .6rem;font-size:.5rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#E87090;margin-bottom:.6rem">Protection anti-abus</div><p style="font-size:.8rem;color:#555;line-height:1.7;margin:0 .4rem .6rem;max-width:280px">Ce site utilise Shugoi pour se prot\\u00e9ger contre les abus et la fraude. Des caract\\u00e9ristiques techniques de votre navigateur sont analys\\u00e9es pour d\\u00e9tecter les scripts automatis\\u00e9s, Tor, les VPN et les environnements virtuels. Aucune donn\\u00e9e personnelle n\\'est collect\\u00e9e.</p><div style="display:flex;gap:.5rem;justify-content:center;flex-wrap:wrap"><button id="__sg_ok" style="background:#E87090;color:#fff;border:3px solid #000;border-radius:12px 3px 14px 5px;padding:.35rem 1.2rem;font-size:.8rem;font-weight:700;cursor:pointer">OK</button><button id="__sg_no" style="background:#fff;color:#333;border:3px solid #000;border-radius:12px 3px 14px 5px;padding:.35rem 1.2rem;font-size:.8rem;font-weight:700;cursor:pointer">Non merci</button></div><div style="margin-top:.5rem;font-size:.5rem;color:#ccc"><a href="'+origin+'/legal/shugoi-notice" target="_blank" style="color:#E87090;text-decoration:underline">En savoir plus \\u00b7 shugoi.com</a></div></div>';
+  var _CARD_HTML='<div style="flex:0 0 320px;display:flex;align-items:center;justify-content:center;padding:1.5rem 1rem 1.5rem 3rem;overflow:hidden"><img src="'+origin+'/favicon.png" alt="" style="width:100%;height:auto;max-width:220px;pointer-events:none"></div><div style="flex:1;padding:1.6rem 1.8rem;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center"><img src="'+origin+'/brand-block.png" alt="Shugoi" style="display:block;margin:0 0 .3rem;pointer-events:none;max-width:100%;height:auto;max-height:40px"><div style="border:2px solid #000;display:inline-block;border-radius:8px 2px 12px 4px;padding:.2rem .6rem;font-size:.5rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#E87090;margin-bottom:.6rem">Protection anti-abus</div><p style="font-size:.8rem;color:#555;line-height:1.7;margin:0 .4rem .6rem;max-width:280px">Ce site utilise Shugoi pour se prot\\u00e9ger contre les abus et la fraude. Des caract\\u00e9ristiques techniques de votre navigateur sont analys\\u00e9es pour d\\u00e9tecter les scripts automatis\\u00e9s, Tor, les VPN et les environnements virtuels. Aucune donn\\u00e9e personnelle n\\'est collect\\u00e9e.</p><div style="margin-top:.5rem"><button id="__sg_ok" style="background:#E87090;color:#fff;border:3px solid #000;border-radius:12px 3px 14px 5px;padding:.4rem 2rem;font-size:.8rem;font-weight:700;cursor:pointer">OK</button></div><div style="margin-top:.5rem;font-size:.5rem;color:#ccc"><a href="'+origin+'/legal/shugoi-notice" target="_blank" style="color:#E87090;text-decoration:underline">En savoir plus \\u00b7 shugoi.com</a></div></div>';
   var _closed=false;
   var mo=null;
   function ack(){try{fetch(base+'/notice',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({machineId:mid,siteKey:sk}),keepalive:true,signal:AbortSignal.timeout(4000)}).catch(function(){})}catch(e){}}
@@ -509,17 +509,16 @@ var init_render = __esm({
   }
   function close(){_closed=true;try{if(mo)mo.disconnect()}catch(e){}var el=document.getElementById('__sg_o');if(el&&el.parentNode)el.parentNode.removeChild(el);document.body.style.overflow='';document.documentElement.style.overflow='';}
   function okHandler(){ack();close();}
-  function noHandler(){close();}
-  function rebind(){var b=document.getElementById('__sg_ok');if(b)b.onclick=okHandler;var n=document.getElementById('__sg_no');if(n)n.onclick=noHandler;}
+  function rebind(){var b=document.getElementById('__sg_ok');if(b)b.onclick=okHandler;}
   function show(){
     _closed=false;
     var o=buildOverlay();document.documentElement.appendChild(o);
     document.body.style.overflow='hidden';document.documentElement.style.overflow='hidden';
     rebind();
-    // Anti-tampering LIMIT\xC9 \xE0 la popup : on observe uniquement __sg_o et __sg_cd,
-    // jamais le reste du document. Chaque mutation de style/class n'importe o\xF9 dans
-    // la page (SPA React, animations, etc.) ne doit PAS d\xE9clencher de restauration \u2014
-    // \xE7a gelait la page. Seule la suppression/modification de la carte est restaur\xE9e.
+    // Anti-tampering LIMIT\xC9 \xE0 la popup : on observe UNIQUEMENT __sg_o (subtree), jamais
+    // le reste du document. Les mutations de style/class du reste de la page (SPA React,
+    // animations) ne d\xE9clenchent rien \u2014 \xE7a gelait la page. En revanche toute modification
+    // DANS la popup (suppression de la carte, innerHTML, attributs) est restaur\xE9e.
     try{
       mo=new MutationObserver(function(){
         if(_closed)return;
@@ -530,9 +529,7 @@ var init_render = __esm({
       });
       var o3=document.getElementById('__sg_o');
       if(o3){
-        mo.observe(o3,{childList:true,subtree:true,characterData:true});
-        var c2=document.getElementById('__sg_cd');
-        if(c2)mo.observe(c2,{attributes:true,attributeFilter:['style']});
+        mo.observe(o3,{childList:true,subtree:true,attributes:true,characterData:true,attributeFilter:['style','class','id']});
       }
     }catch(e){}
   }

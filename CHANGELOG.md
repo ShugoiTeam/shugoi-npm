@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.4.1] - 2026-08-02
+
+### Fixed
+- **Notice obligatoire** : retrait du bouton « Non merci » — la notice ne peut plus
+  être refusée, seul le bouton OK (ack serveur) la ferme.
+- **MutationObserver renforcé et ciblé** : observe désormais `__sg_o` en `subtree`
+  avec `attributes` (style/class/id) + `childList` + `characterData`. Toute
+  modification DANS la popup (suppression de la carte, innerHTML, style) est
+  restaurée. Le reste du document n'est jamais observé → la page reste interactive.
+
 ## [0.4.0] - 2026-08-02
 
 ### Fixed
