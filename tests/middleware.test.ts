@@ -323,8 +323,9 @@ describe('307 challenge minimal (anti-curl/view-source)', () => {
     expect(src).toContain('sg_ok:');
     expect(src).toContain('isSgOkValid');
     expect(src).toContain('timingSafeEqual');
-    // Le cookie ne bypass PAS le challenge (le view-source doit toujours voir le tableau)
-    expect(src).toContain('if (!validProof) {');
+    // Round 2 : un cookie __sg_ok VALIDE (HMAC serveur) saute le pre-flight PoW — mais
+    // un cookie invalide/absent déclenche toujours le challenge (307).
+    expect(src).toContain('if (!validProof && !validCookie) {');
   });
 });
 
