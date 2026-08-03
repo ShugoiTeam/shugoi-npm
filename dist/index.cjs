@@ -79,6 +79,7 @@ __export(render_exports, {
   getConfig: () => getConfig,
   handleRender: () => handleRender,
   injectGuardScripts: () => injectGuardScripts,
+  injectNoReferrer: () => injectNoReferrer,
   renderResponseData: () => renderResponseData,
   signToken: () => signToken,
   storeHtml: () => storeHtml,
@@ -251,11 +252,22 @@ function verifyTokenAndRead(token, locale) {
   }
   return { error: "not_found" };
 }
+function injectNoReferrer(html) {
+  const meta = '<meta name="referrer" content="no-referrer">';
+  if (html.includes("<head>")) return html.replace("<head>", "<head>" + meta);
+  if (html.includes("<html")) {
+    const m = html.match(/<html[^>]*>/);
+    if (m) return html.replace(m[0], m[0] + meta);
+  }
+  return meta + html;
+}
 async function handleRender(token, res, configUrl, mid, grant, ip, expectedSiteKey) {
   const data = await renderResponseData(token, void 0, configUrl, mid, grant, ip, expectedSiteKey);
   if (data.html && mid) data.html = injectNoticeScript(data.html, mid, expectedSiteKey || token.split(":")[0]);
+  if (data.html) data.html = injectNoReferrer(data.html);
   const json = JSON.stringify(data);
   if (res.setHeader) res.setHeader("Content-Type", "application/json");
+  if (res.setHeader) res.setHeader("Referrer-Policy", "no-referrer");
   if (data.html && res.setHeader) {
     const authSecret = process.env.SHUGOKI_SIGNING_SECRET || process.env.SHUGOKI_SECRET;
     if (authSecret) {
@@ -394,6 +406,7 @@ async function generateSkeleton(siteKey, token, baseUrl, restrictedAccess, white
   fragments.push("window.__sg_siteKey=" + JSON.stringify(siteKey));
   fragments.push("window.__sg_baseUrl=" + JSON.stringify(baseUrl));
   fragments.push("window.__sg_config=" + JSON.stringify(cfg));
+  fragments.push("window.__sg_diagEnabled=" + (process.env.NODE_ENV === "production" ? "false" : "true"));
   fragments.push("try{if((location.search||'').indexOf('sg_proof=')>=0){var _qs=location.search.replace(/[?&]sg_proof=[^&]*/,'');var _cu=location.pathname+(_qs?_qs:'')+location.hash;history.replaceState(null,'',_cu)}}catch(e){}");
   const _powTs = Math.floor(Date.now() / 1e3);
   const _powSecret = process.env.SHUGOKI_SIGNING_SECRET || process.env.SHUGOKI_SECRET || "";
@@ -486,7 +499,7 @@ var init_render = __esm({
       (0, import_fs.chmodSync)(TOKEN_DIR, 448);
     } catch {
     }
-    GRANT_TTL_MS = 12e4;
+    GRANT_TTL_MS = 6e4;
     NOTICE_SCRIPT = `
 <script>
 (function(){
@@ -791,6 +804,50 @@ function createCore(options) {
   })();
   const POW_OK_TTL_MS = 30 * 24 * 3600 * 1e3;
   const powSecret = process.env.SHUGOKI_SIGNING_SECRET || process.env.SHUGOKI_SECRET || "";
+  const POW_TTL_MS = 6e4;
+  const CHALLENGE_LIMIT = (() => {
+    const raw = Number(process.env.SHUGOKI_CHALLENGE_LIMIT || "60");
+    return Number.isInteger(raw) && raw > 0 ? raw : 60;
+  })();
+  const CHALLENGE_WINDOW_MS = (() => {
+    const raw = Number(process.env.SHUGOKI_CHALLENGE_WINDOW || "60");
+    return Number.isInteger(raw) && raw > 0 ? raw * 1e3 : 6e4;
+  })();
+  const CHALLENGE_MAX_BLOCK_MS = 15 * 60 * 1e3;
+  const _challengeLimits = /* @__PURE__ */ new Map();
+  setInterval(() => {
+    const now = Date.now();
+    for (const [k, e] of _challengeLimits) {
+      if (now > e.blockedUntil && now - e.windowStart > CHALLENGE_WINDOW_MS * 2) _challengeLimits.delete(k);
+    }
+  }, CHALLENGE_WINDOW_MS).unref();
+  function allowChallenge(ip) {
+    if (!ip || ip === "unknown") return true;
+    const now = Date.now();
+    let e = _challengeLimits.get(ip);
+    if (!e || now - e.windowStart >= CHALLENGE_WINDOW_MS) {
+      _challengeLimits.set(ip, { count: 1, windowStart: now, blockedUntil: 0 });
+      return true;
+    }
+    e.count++;
+    if (e.blockedUntil > now) return false;
+    if (e.count > CHALLENGE_LIMIT) {
+      const backoffMs = Math.min(6e4 * Math.pow(2, Math.min(e.count - CHALLENGE_LIMIT, 10)), CHALLENGE_MAX_BLOCK_MS);
+      e.blockedUntil = now + backoffMs;
+      e.count = 0;
+      return false;
+    }
+    return true;
+  }
+  function safeChallengePath(p) {
+    if (!p) return "/";
+    if (p.charAt(0) !== "/" || p.charAt(1) === "/" || p.indexOf("\\") >= 0) return "/";
+    for (let i = 0; i < p.length; i++) {
+      const c = p.charCodeAt(i);
+      if (c < 32 || c === 127) return "/";
+    }
+    return p;
+  }
   function safeEqual(a, b) {
     if (a.length !== b.length) return false;
     const ba = Buffer.from(a, "utf8");
@@ -804,7 +861,7 @@ function createCore(options) {
     const tsStr = proof.slice(0, sep);
     const sol = proof.slice(sep + 1);
     const ts = parseInt(tsStr, 10);
-    if (isNaN(ts) || Math.abs(Date.now() - ts * 1e3) > 12e4) return false;
+    if (isNaN(ts) || Math.abs(Date.now() - ts * 1e3) > POW_TTL_MS) return false;
     const salt = import_node_crypto.default.createHmac("sha256", powSecret).update(tsStr).digest("hex");
     const digest = import_node_crypto.default.createHash("sha256").update(salt + ":" + sol).digest("hex");
     let leading = 0;
@@ -814,10 +871,7 @@ function createCore(options) {
         leading += 4;
         continue;
       }
-      const bin = nib.toString(2);
-      let z = 0;
-      while (z < bin.length && bin[z] === "0") z++;
-      leading += z;
+      leading += nib & 8 ? 0 : nib & 4 ? 1 : nib & 2 ? 2 : 3;
       break;
     }
     return leading >= POW_DIFF;
@@ -927,11 +981,22 @@ function createCore(options) {
     }
     if (isAllowlisted(ctx.path)) return null;
     if (ctx.path === "/__sg_challenge") {
+      if (!allowChallenge(ctx.ip)) {
+        const loc = resolveLocale(void 0, ctx.acceptLanguage);
+        const lmsgs = MESSAGES[loc];
+        return { block: true, status: 429, contentType: "text/html", body: shieldPage(lmsgs.rateLimitTitle, lmsgs.rateLimitBody("1 min"), lmsgs.rateLimitBadge, ctx.host || "", 60, loc) };
+      }
       const js = `(function(){
 var P=new URLSearchParams(location.search);
 var salt=P.get('salt')||'', ts=P.get('ts')||'', diff=parseInt(P.get('diff')||'14',10), path=P.get('path')||'/';
+// Open redirect (audit #5) : un //evil.com (protocole-relatif) ou un backslash
+// d\xE9tourneraient le location.replace ci-dessous vers un domaine externe. On n'accepte
+// qu'un chemin relatif commen\xE7ant par UN SEUL '/', sans backslash ni contr\xF4le.
+if(path.charAt(0)!=='/'||path.charAt(1)==='/'||path.indexOf('\\\\')>=0)path='/';
 var enc=new TextEncoder();
-function bits(d){var l=0;for(var i=0;i<d.length;i++){var b=parseInt(d[i],16);if(b===0){l+=4;continue}var s=b.toString(2),z=0;while(z<s.length&&s[z]==='0')z++;l+=z;break}return l}
+// Audit 2026-08-03 : comptage de bits CORRIG\xC9 (z\xE9ros internes du premier nibble
+// non-nul compt\xE9s) \u2014 DOIT rester synchrone avec isPowValid serveur + guard + whitelist.
+function bits(d){var l=0;for(var i=0;i<d.length;i++){var b=parseInt(d[i],16);if(b===0){l+=4;continue}l+=(b&8)?0:(b&4)?1:(b&2)?2:3;break}return l}
 var n=0;
 function step(){
   crypto.subtle.digest('SHA-256',enc.encode(salt+':'+n.toString(16))).then(function(buf){
@@ -949,11 +1014,18 @@ step();
     if (isPage && powSecret && ctx.ua && /Mozilla/i.test(ctx.ua)) {
       const proof = ctx.sgProof || "";
       const validProof = !!proof && isPowValid(proof);
-      if (!validProof) {
+      const validCookie = !!ctx.sgOk && isSgOkValid(ctx.sgOk);
+      if (!validProof && !validCookie) {
+        if (!allowChallenge(ctx.ip)) {
+          const loc = resolveLocale(void 0, ctx.acceptLanguage);
+          const lmsgs = MESSAGES[loc];
+          log("challenge rate-limited:", ctx.ip.slice(0, 24), ctx.ua.slice(0, 40));
+          return { block: true, status: 429, contentType: "text/html", body: shieldPage(lmsgs.rateLimitTitle, lmsgs.rateLimitBody("1 min"), lmsgs.rateLimitBadge, ctx.host || "", 60, loc) };
+        }
         const tsNow = Math.floor(Date.now() / 1e3);
         const salt = import_node_crypto.default.createHmac("sha256", powSecret).update(String(tsNow)).digest("hex");
         const prefix = ctx.forwardedPrefix && ctx.forwardedPrefix !== "/" ? ctx.forwardedPrefix.replace(/\/$/, "") : "";
-        const path = ctx.path.startsWith("/") ? ctx.path : "/" + ctx.path;
+        const path = safeChallengePath(ctx.path.startsWith("/") ? ctx.path : "/" + ctx.path);
         const chalUrl = prefix + "/__sg_challenge?ts=" + tsNow + "&salt=" + salt + "&diff=" + POW_DIFF + "&path=" + encodeURIComponent(prefix + path);
         log("pow challenge (307):", ctx.ua.slice(0, 40));
         return { block: true, status: 307, contentType: "text/plain", body: BLOCK_PAGE, headers: { Location: chalUrl } };
@@ -1176,9 +1248,11 @@ function createShugoiPlugin(options) {
       }
     });
     fastify.get("/__shugoi/render", async (request, reply) => {
-      const { renderResponseData: renderResponseData3 } = await Promise.resolve().then(() => (init_render(), render_exports));
+      const { renderResponseData: renderResponseData3, injectNoReferrer: injectNoReferrer2 } = await Promise.resolve().then(() => (init_render(), render_exports));
       const ip = (typeof request.headers?.["x-forwarded-for"] === "string" ? request.headers["x-forwarded-for"].split(",")[0]?.trim() : void 0) || (typeof request.ip === "string" ? request.ip : "unknown");
       const data = await renderResponseData3(request.query.token || "", void 0, options.baseUrl, request.query.mid || "", request.query.grant || "", ip, options.siteKey);
+      if (data.html) data.html = injectNoReferrer2(data.html);
+      reply.header("Referrer-Policy", "no-referrer");
       reply.send(data);
     });
     fastify.head("/__shugoi/healthcheck", async (request, reply) => reply.send(""));

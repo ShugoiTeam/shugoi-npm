@@ -200,11 +200,14 @@ export function createShugoiPlugin(options: ShugoiCoreOptions) {
 
     // Render endpoint
     fastify.get('/__shugoi/render', async (request: any, reply: any) => {
-      const { renderResponseData } = await import('./render');
+      const { renderResponseData, injectNoReferrer } = await import('./render');
       const ip = (typeof request.headers?.['x-forwarded-for'] === 'string'
         ? request.headers['x-forwarded-for'].split(',')[0]?.trim()
         : undefined) || (typeof request.ip === 'string' ? request.ip : 'unknown');
       const data = await renderResponseData(request.query.token || '', undefined, options.baseUrl, request.query.mid || '', request.query.grant || '', ip, options.siteKey);
+      // Anti-leak du grant (résidu #2) : ne jamais laisser l'URL du render fuiter via Referer.
+      if (data.html) data.html = injectNoReferrer(data.html);
+      reply.header('Referrer-Policy', 'no-referrer');
       reply.send(data);
     });
 

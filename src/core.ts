@@ -125,6 +125,73 @@ export function createCore(options: ShugoiCoreOptions): ShugoiCore {
   const POW_OK_TTL_MS = 30 * 24 * 3600 * 1000; // cookie __sg_ok valable 30 jours
   const powSecret = process.env.SHUGOKI_SIGNING_SECRET || process.env.SHUGOKI_SECRET || ''
 
+  // ═══ Fenêtre de validité d'une preuve PoW (audit 2026-08-03 #7 : rejeu) ═══
+  // Une preuve `sg_proof=ts:nonce` est acceptée si |now - ts| <= POW_TTL_MS. 120 s
+  // laissait une fenêtre de rejeu confortable ; 60 s suffit pour une navigation
+  // humaine (le solve est < 1 s) et réduit la durée de vie d'une preuve volée/rejouée.
+  const POW_TTL_MS = 60_000;
+
+  // ═══ Anti-scraping : rate-limit de l'émission du challenge (audit #6) ═══
+  // Le 307 anti-curl est STATELESS : sans limite, un script résout 20 challenges en
+  // série gratuitement (constaté par l'audit externe). On borne par IP :
+  //   - SHUGOKI_CHALLENGE_LIMIT = nombre max de challenges par fenêtre (défaut 60)
+  //   - SHUGOKI_CHALLENGE_WINDOW = fenêtre en secondes (défaut 60)
+  // Un SPA légitime déclenche 1-3 challenges par session (navigations full-page),
+  // 60/min ne le pénalise pas ; un scraper qui bourrine est freiné puis bloqué 429.
+  const CHALLENGE_LIMIT = (() => {
+    const raw = Number(process.env.SHUGOKI_CHALLENGE_LIMIT || "60");
+    return Number.isInteger(raw) && raw > 0 ? raw : 60;
+  })();
+  const CHALLENGE_WINDOW_MS = (() => {
+    const raw = Number(process.env.SHUGOKI_CHALLENGE_WINDOW || "60");
+    return Number.isInteger(raw) && raw > 0 ? raw * 1000 : 60_000;
+  })();
+  const CHALLENGE_MAX_BLOCK_MS = 15 * 60 * 1000; // plafond du blocage progressif
+  const _challengeLimits = new Map<string, { count: number; windowStart: number; blockedUntil: number }>();
+  setInterval(() => {
+    const now = Date.now();
+    for (const [k, e] of _challengeLimits) {
+      if (now > e.blockedUntil && now - e.windowStart > CHALLENGE_WINDOW_MS * 2) _challengeLimits.delete(k);
+    }
+  }, CHALLENGE_WINDOW_MS).unref();
+
+  // Retourne true si le challenge peut être émis pour cette IP. Au-delà du quota,
+  // un backoff exponentiel (2^n minutes, plafonné) s'applique : un scraper est
+  // ralenti à l'infini, un humain ne le ressent jamais (blocage ≥ 2^12 min).
+  function allowChallenge(ip: string): boolean {
+    if (!ip || ip === 'unknown') return true;
+    const now = Date.now();
+    let e = _challengeLimits.get(ip);
+    if (!e || now - e.windowStart >= CHALLENGE_WINDOW_MS) {
+      _challengeLimits.set(ip, { count: 1, windowStart: now, blockedUntil: 0 });
+      return true;
+    }
+    e.count++;
+    if (e.blockedUntil > now) return false;
+    if (e.count > CHALLENGE_LIMIT) {
+      const backoffMs = Math.min(60_000 * Math.pow(2, Math.min(e.count - CHALLENGE_LIMIT, 10)), CHALLENGE_MAX_BLOCK_MS);
+      e.blockedUntil = now + backoffMs;
+      e.count = 0;
+      return false;
+    }
+    return true;
+  }
+
+  // ═══ Sanitisation du `path` du challenge (audit #5 : open redirect) ═══
+  // Le `path` reflété dans l'URL du challenge finit dans un `location.replace()` côté
+  // client. Un `//evil.com` (protocole-relatif) ou un backslash (`\evil.com`, traité
+  // comme `/` par certains navigateurs) détournent la redirection vers un domaine
+  // externe. On n'accepte qu'un chemin relatif commençant par UN SEUL `/`.
+  function safeChallengePath(p: string): string {
+    if (!p) return '/';
+    if (p.charAt(0) !== '/' || p.charAt(1) === '/' || p.indexOf('\\') >= 0) return '/';
+    for (let i = 0; i < p.length; i++) {
+      const c = p.charCodeAt(i);
+      if (c < 0x20 || c === 0x7f) return '/';
+    }
+    return p;
+  }
+
   function safeEqual(a: string, b: string): boolean {
     if (a.length !== b.length) return false
     const ba = Buffer.from(a, 'utf8')
@@ -139,16 +206,20 @@ export function createCore(options: ShugoiCoreOptions): ShugoiCore {
     const tsStr = proof.slice(0, sep)
     const sol = proof.slice(sep + 1)
     const ts = parseInt(tsStr, 10)
-    if (isNaN(ts) || Math.abs(Date.now() - ts * 1000) > 120000) return false
+    if (isNaN(ts) || Math.abs(Date.now() - ts * 1000) > POW_TTL_MS) return false
     const salt = crypto.createHmac('sha256', powSecret).update(tsStr).digest('hex')
     const digest = crypto.createHash('sha256').update(salt + ':' + sol).digest('hex')
+    // Vérifie POW_DIFFICULTY bits à zéro en tête (en hex, chaque nibble = 4 bits).
+    // Audit 2026-08-03 : comptage CORRIGÉ — l'ancienne version sous-comptait les zéros
+    // internes du premier nibble non-nul (`3` → '11' → 0 au lieu de 2), ce qui rendait
+    // la difficulté effective ~2^12.5 au lieu de 2^14. Le comptage ci-dessous est exact
+    // et DOIT rester synchrone avec render.ts (challenge JS), whitelist.ts et le guard.
     let leading = 0
     for (let i = 0; i < digest.length; i++) {
       const nib = parseInt(digest[i], 16)
       if (nib === 0) { leading += 4; continue }
-      const bin = nib.toString(2)
-      let z = 0; while (z < bin.length && bin[z] === '0') z++
-      leading += z; break
+      leading += (nib & 8) ? 0 : (nib & 4) ? 1 : (nib & 2) ? 2 : 3
+      break
     }
     return leading >= POW_DIFF
   }
@@ -283,11 +354,24 @@ export function createCore(options: ShugoiCoreOptions): ShugoiCore {
     // pas de flash pendant la résolution PoW. Le JS de résolution est INLINE (économise
     // un aller-retour réseau : pas de <script src> externe → chargement plus rapide).
     if (ctx.path === '/__sg_challenge') {
+      // Anti-scraping (audit #6) : la page de challenge est aussi bornée par IP —
+      // un script peut la requêter directement sans passer par le 307.
+      if (!allowChallenge(ctx.ip)) {
+        const loc = resolveLocale(undefined, ctx.acceptLanguage)
+        const lmsgs = MESSAGES[loc]
+        return { block: true, status: 429, contentType: 'text/html', body: shieldPage(lmsgs.rateLimitTitle, lmsgs.rateLimitBody('1 min'), lmsgs.rateLimitBadge, ctx.host || '', 60, loc) }
+      }
       const js = `(function(){
 var P=new URLSearchParams(location.search);
 var salt=P.get('salt')||'', ts=P.get('ts')||'', diff=parseInt(P.get('diff')||'14',10), path=P.get('path')||'/';
+// Open redirect (audit #5) : un //evil.com (protocole-relatif) ou un backslash
+// détourneraient le location.replace ci-dessous vers un domaine externe. On n'accepte
+// qu'un chemin relatif commençant par UN SEUL '/', sans backslash ni contrôle.
+if(path.charAt(0)!=='/'||path.charAt(1)==='/'||path.indexOf('\\\\')>=0)path='/';
 var enc=new TextEncoder();
-function bits(d){var l=0;for(var i=0;i<d.length;i++){var b=parseInt(d[i],16);if(b===0){l+=4;continue}var s=b.toString(2),z=0;while(z<s.length&&s[z]==='0')z++;l+=z;break}return l}
+// Audit 2026-08-03 : comptage de bits CORRIGÉ (zéros internes du premier nibble
+// non-nul comptés) — DOIT rester synchrone avec isPowValid serveur + guard + whitelist.
+function bits(d){var l=0;for(var i=0;i<d.length;i++){var b=parseInt(d[i],16);if(b===0){l+=4;continue}l+=(b&8)?0:(b&4)?1:(b&2)?2:3;break}return l}
 var n=0;
 function step(){
   crypto.subtle.digest('SHA-256',enc.encode(salt+':'+n.toString(16))).then(function(buf){
@@ -316,7 +400,25 @@ step();
     if (isPage && powSecret && ctx.ua && /Mozilla/i.test(ctx.ua)) {
       const proof = ctx.sgProof || ''
       const validProof = !!proof && isPowValid(proof)
-      if (!validProof) {
+      // Re-audit (résidu #3) : un cookie __sg_ok valide (HMAC serveur, 30 j) saute le
+      // pre-flight PoW. Il est posé APRÈS une première résolution réussie (middleware).
+      // Bénéfices :
+      //   - UX : 1 PoW par navigateur/30 j au lieu d'un par chargement de page ;
+      //   - anti-DoS NAT : un IP partagé (entreprise/VPN) ne consomme plus le quota de
+      //     challenge à chaque utilisateur — seuls les visiteurs sans cookie challengent.
+      // Un script doit de toute façon résoudre le PoW une première fois pour obtenir le
+      // cookie, puis le vrai verrou reste le render-grant (wlc + raw + mid).
+      const validCookie = !!ctx.sgOk && isSgOkValid(ctx.sgOk)
+      if (!validProof && !validCookie) {
+        // Anti-scraping (audit #6) : on refuse d'émettre le challenge à un IP qui
+        // bourrine (solve en série). 429 shield au lieu du 307 — un humain ne le
+        // ressent jamais (quota 60/fenêtre), un scraper est ralenti indéfiniment.
+        if (!allowChallenge(ctx.ip)) {
+          const loc = resolveLocale(undefined, ctx.acceptLanguage)
+          const lmsgs = MESSAGES[loc]
+          log('challenge rate-limited:', ctx.ip.slice(0, 24), ctx.ua.slice(0, 40))
+          return { block: true, status: 429, contentType: 'text/html', body: shieldPage(lmsgs.rateLimitTitle, lmsgs.rateLimitBody('1 min'), lmsgs.rateLimitBadge, ctx.host || '', 60, loc) }
+        }
         // 307 vers le challenge : body = tableau ASCII SEUL (curl le voit tel quel).
         // Le navigateur suit la redirection → /__sg_challenge?ts=&salt=&diff=&path=
         // Le prefix X-Forwarded-Prefix (ex. /express derrière un reverse proxy) est
@@ -324,7 +426,8 @@ step();
         const tsNow = Math.floor(Date.now() / 1000)
         const salt = crypto.createHmac('sha256', powSecret).update(String(tsNow)).digest('hex')
         const prefix = ctx.forwardedPrefix && ctx.forwardedPrefix !== '/' ? ctx.forwardedPrefix.replace(/\/$/, '') : ''
-        const path = (ctx.path.startsWith('/') ? ctx.path : '/' + ctx.path)
+        // Sanitisation open redirect (audit #5) : on ne reflète jamais un path brut.
+        const path = safeChallengePath(ctx.path.startsWith('/') ? ctx.path : '/' + ctx.path)
         const chalUrl = prefix + '/__sg_challenge?ts=' + tsNow + '&salt=' + salt + '&diff=' + POW_DIFF + '&path=' + encodeURIComponent(prefix + path)
         log('pow challenge (307):', ctx.ua.slice(0, 40))
         return { block: true, status: 307, contentType: 'text/plain', body: BLOCK_PAGE, headers: { Location: chalUrl } }

@@ -100,7 +100,7 @@ function readFromMemory(token: string): string | null {
 // le token (SHUGOKI_SIGNING_SECRET) → vérifiable localement, sans état partagé.
 // Format : base36(timestamp) + ":" + HMAC(secret, "render-grant:mid:token:ip:timestamp").
 // Lié au token + IP + TTL (CH-01/02/03). Factorisé pour les adapters Express/Next/Fastify.
-const GRANT_TTL_MS = 120_000;
+const GRANT_TTL_MS = 60_000;
 
 export function verifyRenderGrant(mid: string | undefined, grant: string | undefined, token?: string, ip?: string, expectedSiteKey?: string): boolean {
   const gSecret = process.env.SHUGOKI_SIGNING_SECRET || process.env.SHUGOKI_SECRET;
@@ -241,11 +241,31 @@ function verifyTokenAndRead(token: string, locale?: Locale): { html?: string; er
   return { error: 'not_found' };
 }
 
+// Anti-leak du grant (re-audit 2026-08-03, résidu #2) : le render est appelé avec
+// `token` (+ éventuellement `grant`/`mid`) en query string. Sans politique de référent,
+// un site client qui charge une ressource externe peut fuir l'URL complète (avec le
+// grant) via le header Referer. On force no-referrer :
+//   - header Referrer-Policy sur la réponse render (module + adaptateur),
+//   - meta referrer dans le HTML rendu (le document réel ré-écrit par document.write
+//     reprend sa propre politique pour ses sous-ressources).
+export function injectNoReferrer(html: string): string {
+  const meta = '<meta name="referrer" content="no-referrer">';
+  if (html.includes('<head>')) return html.replace('<head>', '<head>' + meta);
+  if (html.includes('<html')) {
+    const m = html.match(/<html[^>]*>/);
+    if (m) return html.replace(m[0], m[0] + meta);
+  }
+  return meta + html;
+}
+
 export async function handleRender(token: string, res: { setHeader?: (k: string, v: string) => void; send?: (body: string) => void; end?: (body: string) => void }, configUrl?: string, mid?: string, grant?: string, ip?: string, expectedSiteKey?: string) {
   const data = await renderResponseData(token, undefined, configUrl, mid, grant, ip, expectedSiteKey);
   if (data.html && mid) data.html = injectNoticeScript(data.html, mid, expectedSiteKey || token.split(':')[0]);
+  if (data.html) data.html = injectNoReferrer(data.html);
   const json = JSON.stringify(data);
   if (res.setHeader) res.setHeader('Content-Type', 'application/json');
+  // Anti-leak du grant (résidu #2) : ne jamais laisser l'URL du render fuiter via Referer.
+  if (res.setHeader) res.setHeader('Referrer-Policy', 'no-referrer');
   // Audits : pose un cookie d'autorisation __sg_authorized quand le render réussit
   // (grant valide + HTML servi). Ce cookie permet ensuite de charger les assets
   // protégés (/assets/*.js) — sans lui, un téléchargement direct du bundle est refusé.
@@ -486,6 +506,11 @@ export async function generateSkeleton(siteKey: string, token: string, baseUrl: 
   fragments.push('window.__sg_siteKey=' + JSON.stringify(siteKey));
   fragments.push('window.__sg_baseUrl=' + JSON.stringify(baseUrl));
   fragments.push('window.__sg_config=' + JSON.stringify(cfg));
+  // Mode debug (audit #8) : piloté UNIQUEMENT par le serveur. En production ce flag
+  // est toujours false → le guard n'active jamais ses traces via ?sg_probe_debug=1
+  // ou localStorage. (Nom volontairement différent de "debug" pour ne pas exposer
+  // un toggle générique que l'attaquant chercherait.)
+  fragments.push('window.__sg_diagEnabled=' + (process.env.NODE_ENV === 'production' ? 'false' : 'true'));
   // Nettoie l'URL : retire ?sg_proof de la barre d'adresse (le PoW a été validé serveur).
   // history.replaceState ne recharge pas — le skeleton reste affiché, l'URL devient propre.
   // Conserve le reste du query (ex. ?sg_probe_debug=1), retire uniquement sg_proof.

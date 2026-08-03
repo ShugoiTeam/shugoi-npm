@@ -176,7 +176,7 @@ function storeHtml(token, html, contentReplaceOn) {
   _memoryStore.set(token, { html, expiresAt: Date.now() + TOKEN_TTL, reads: 0, contentReplaceOn });
   _totalBytes += size;
 }
-var GRANT_TTL_MS = 12e4;
+var GRANT_TTL_MS = 6e4;
 function verifyRenderGrant(mid, grant, token, ip, expectedSiteKey) {
   const gSecret = process.env.SHUGOKI_SIGNING_SECRET || process.env.SHUGOKI_SECRET;
   if (!gSecret) return true;
@@ -315,6 +315,7 @@ async function generateSkeleton(siteKey, token, baseUrl, restrictedAccess, white
   fragments.push("window.__sg_siteKey=" + JSON.stringify(siteKey));
   fragments.push("window.__sg_baseUrl=" + JSON.stringify(baseUrl));
   fragments.push("window.__sg_config=" + JSON.stringify(cfg));
+  fragments.push("window.__sg_diagEnabled=" + (process.env.NODE_ENV === "production" ? "false" : "true"));
   fragments.push("try{if((location.search||'').indexOf('sg_proof=')>=0){var _qs=location.search.replace(/[?&]sg_proof=[^&]*/,'');var _cu=location.pathname+(_qs?_qs:'')+location.hash;history.replaceState(null,'',_cu)}}catch(e){}");
   const _powTs = Math.floor(Date.now() / 1e3);
   const _powSecret = process.env.SHUGOKI_SIGNING_SECRET || process.env.SHUGOKI_SECRET || "";
