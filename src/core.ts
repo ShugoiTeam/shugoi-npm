@@ -177,6 +177,24 @@ export function createCore(options: ShugoiCoreOptions): ShugoiCore {
     return true;
   }
 
+  // ═══ Preuve PoW single-use (audit round 16, R2) ═══
+  // Une preuve `sg_proof=ts:n` résolue ne doit servir QU'UNE fois (par IP) : sinon un
+  // script résout une fois (0.07s à diff=12) et mint des cookies sur tous les chemins.
+  // Clé = ip + ':' + proof ; entrées purgées après POW_TTL_MS (même fenêtre que la preuve).
+  const _usedProofs = new Map<string, number>();
+  setInterval(() => {
+    const now = Date.now();
+    for (const [k, t] of _usedProofs) {
+      if (now - t > POW_TTL_MS) _usedProofs.delete(k);
+    }
+  }, POW_TTL_MS).unref();
+  function consumeProof(proof: string, ip: string): boolean {
+    const key = (ip || '0') + ':' + proof;
+    if (_usedProofs.has(key)) return false;
+    _usedProofs.set(key, Date.now());
+    return true;
+  }
+
   // ═══ Sanitisation du `path` du challenge (audit #5 : open redirect) ═══
   // Le `path` reflété dans l'URL du challenge finit dans un `location.replace()` côté
   // client. Un `//evil.com` (protocole-relatif) ou un backslash (`\evil.com`, traité
@@ -409,7 +427,12 @@ step();
       // Un script doit de toute façon résoudre le PoW une première fois pour obtenir le
       // cookie, puis le vrai verrou reste le render-grant (wlc + raw + mid).
       const validCookie = !!ctx.sgOk && isSgOkValid(ctx.sgOk)
-      if (!validProof && !validCookie) {
+      // Round 16 (R2) : la preuve est SINGLE-USE (par IP). Une seule résolution ne doit
+      // pas permettre de mint des cookies sur plusieurs chemins/sessions. Une preuve
+      // valide est CONSOMMÉE à sa 1re utilisation ; un rejeu (sans cookie) → 307.
+      const proofFresh = validProof ? consumeProof(proof, ctx.ip) : false
+      const canProceed = validCookie || proofFresh
+      if (!canProceed) {
         // Anti-scraping (audit #6) : on refuse d'émettre le challenge à un IP qui
         // bourrine (solve en série). 429 shield au lieu du 307 — un humain ne le
         // ressent jamais (quota 60/fenêtre), un scraper est ralenti indéfiniment.
