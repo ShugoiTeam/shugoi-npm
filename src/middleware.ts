@@ -38,6 +38,17 @@ export function createShugoiMiddleware(options: ShugoiCoreOptions) {
 
       // Render endpoint — handled by middleware adapter
       if (path.endsWith('/__shugoi/render')) {
+        // Round 13 : restreindre à GET/HEAD (le client fetch en GET). POST/PUT/DELETE
+        // renvoyaient un 200 sans effet d'état — surface réduite, méthode normalisée.
+        const m = String((req.method || 'GET')).toUpperCase();
+        if (m !== 'GET' && m !== 'HEAD') {
+          if (res.status) res.status(405);
+          if (res.type) res.type('application/json');
+          const body = JSON.stringify({ error: 'method_not_allowed' });
+          if (res.send) res.send(body);
+          else if (res.end) res.end(body);
+          return;
+        }
         const { handleRender } = await import('./render');
         const q = (req.query && (req.query as Record<string, string>)) || {};
         const ip = (typeof req.headers?.['x-forwarded-for'] === 'string'
@@ -46,6 +57,19 @@ export function createShugoiMiddleware(options: ShugoiCoreOptions) {
         // CRITIQUE 1 (§7bis) : le render vérifie que le token appartient à CE site
         // (options.siteKey) — un grant émis par un autre site (pyxelze) est refusé ici.
         return handleRender(q.token || '', res, internalUrl, q.mid || '', q.grant || '', ip, options.siteKey);
+      }
+
+      // Challenge page : GET/HEAD uniquement (round 13, même normalisation).
+      if (path === '/__sg_challenge') {
+        const m = String((req.method || 'GET')).toUpperCase();
+        if (m !== 'GET' && m !== 'HEAD') {
+          if (res.status) res.status(405);
+          if (res.type) res.type('application/json');
+          const body = JSON.stringify({ error: 'method_not_allowed' });
+          if (res.send) res.send(body);
+          else if (res.end) res.end(body);
+          return;
+        }
       }
 
       // CSP: merge with existing header
