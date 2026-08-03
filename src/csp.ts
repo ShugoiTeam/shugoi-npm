@@ -71,5 +71,15 @@ export function mergeCsp(existing: string | undefined, added: string): string {
     v.forEach((x) => set.add(x));
     base.set(k, set);
   }
+  // Spec CSP : le mot-clé 'none' doit être SEUL dans une directive — sinon il est ignoré
+  // par le navigateur (warning + comportement ambigu). Lors d'un merge (ex. un site client
+  // définit frame-ancestors 'none' et le module ajoute 'self'), on garde uniquement 'none'
+  // (le plus restrictif) → CSP toujours valide, quelle que soit la CSP préexistante.
+  for (const [, set] of base) {
+    if (set.has("'none'") && set.size > 1) {
+      set.clear();
+      set.add("'none'");
+    }
+  }
   return [...base.entries()].map(([k, v]) => `${k} ${[...v].join(' ')}`).join('; ');
 }

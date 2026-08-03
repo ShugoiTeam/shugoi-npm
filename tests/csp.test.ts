@@ -59,4 +59,14 @@ describe('mergeCsp', () => {
     const result = mergeCsp("script-src 'self'", "script-src 'self' https://shugoi.com");
     expect(result).toContain("script-src 'self' https://shugoi.com");
   });
+
+  it("le mot-clé 'none' reste SEUL dans une directive (sinon le navigateur l'ignore)", () => {
+    // site client : frame-ancestors 'none' + module : frame-ancestors 'self'
+    const result = mergeCsp("default-src 'self'; frame-ancestors 'none'", "frame-ancestors 'self'");
+    expect(result).toContain("frame-ancestors 'none'");
+    expect(result).not.toContain("frame-ancestors 'none' 'self'");
+    // l'inverse aussi : 'none' ajouté par le module doit écraser les autres sources
+    const r2 = mergeCsp("frame-ancestors 'self'", "frame-ancestors 'none'");
+    expect(r2).toContain("frame-ancestors 'none'");
+  });
 });
