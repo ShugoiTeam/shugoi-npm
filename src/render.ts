@@ -318,8 +318,11 @@ const NOTICE_SCRIPT = `
   function close(){_closed=true;try{if(mo)mo.disconnect()}catch(e){}try{if(_watch)clearInterval(_watch)}catch(e){}var el=document.getElementById('__sg_o');if(el&&el.parentNode)el.parentNode.removeChild(el);document.body.style.overflow='';document.documentElement.style.overflow='';}
   function okHandler(){ack();close();}
   function rebind(){var b=document.getElementById('__sg_ok');if(b)b.onclick=okHandler;}
-  // Blindage : la notice est OBLIGATOIRE — on ne peut ni la retirer, ni la cacher, ni
-  // altérer son style/contenu, ni sortir le focus, tant que OK n'a pas été cliqué.
+  // Anti-bypass LÉGER : impossible de retirer/cacher/altérer la notice, sans geler
+  // l'onglet ni bloquer DevTools. L'overlay est en inline !important (bats toute règle
+  // externe), pointer-events:auto bloque les clics sur la page. Le MO documentElement
+  // (childList SEUL, sans subtree) ne se déclenche que si __sg_o est retiré ; le MO sur
+  // l'overlay ne réagit qu'à une altération de celui-ci. AUCUN scan global de styles.
   function enforce(){
     if(_closed)return;
     var o=document.getElementById('__sg_o');
@@ -332,31 +335,11 @@ const NOTICE_SCRIPT = `
       if(c.innerHTML!==_CARD_HTML)c.innerHTML=_CARD_HTML;
     }
     rebind();
-    // retire tout <style>/<link> injecté ciblant la notice (règles externes !important)
-    try{
-      var st=document.querySelectorAll('style,link[rel=stylesheet]');
-      for(var i=0;i<st.length;i++){
-        var t=(st[i].textContent||'')+' '+(st[i].getAttribute&&st[i].getAttribute('href')||'');
-        if(t.indexOf('__sg_o')>=0||t.indexOf('__sg_cd')>=0||t.indexOf('__sg_ok')>=0||t.indexOf('shugoi-notice')>=0){
-          if(st[i].parentNode)st[i].parentNode.removeChild(st[i]);
-        }
-      }
-    }catch(e){}
     if(document.body.style.overflow!=='hidden')document.body.style.overflow='hidden';
     if(document.documentElement.style.overflow!=='hidden')document.documentElement.style.overflow='hidden';
-    // réattache l'observeur si l'overlay a été recréé (il porte la marque __sgObserved)
     try{
       if(o&&!o.__sgObserved){o.__sgObserved=true;mo&&mo.observe(o,{childList:true,subtree:true,attributes:true,characterData:true,attributeFilter:['style','class','id']});}
     }catch(e){}
-  }
-  function keyBlock(e){
-    if(_closed)return;
-    if(e.key==='Escape'){e.preventDefault();e.stopPropagation();}
-    if(e.key==='Tab'||e.key==='Enter'){
-      var ok=document.getElementById('__sg_ok');
-      var t=e.target||document.activeElement;
-      if(ok&&t!==ok){e.preventDefault();try{ok.focus()}catch(x){}}
-    }
   }
   function show(){
     _closed=false;
@@ -368,13 +351,11 @@ const NOTICE_SCRIPT = `
       mo.observe(document.documentElement,{childList:true});
       try{o.__sgObserved=true;mo.observe(o,{childList:true,subtree:true,attributes:true,characterData:true,attributeFilter:['style','class','id']});}catch(e){}
     }catch(e){}
-    // watchdog : re-force toutes les 500 ms (rattrape délais + règles externes)
-    _watch=setInterval(enforce,500);
+    // Filet de sécurité LÉGER (2 s) : ne fait qu'un getElementById + comparaison inline,
+    // PAS de scan de styles — aucun impact perf même sur une SPA chargée.
+    _watch=setInterval(enforce,2000);
   }
-  function init(){
-    if(document.body)show();else if(document.addEventListener)document.addEventListener('DOMContentLoaded',show);else setTimeout(init,50);
-    try{document.addEventListener('keydown',keyBlock,true)}catch(e){}
-  }
+  function init(){if(document.body)show();else if(document.addEventListener)document.addEventListener('DOMContentLoaded',show);else setTimeout(init,50)}
   fetch(base+'/notice?machineId='+encodeURIComponent(mid)+'&siteKey='+encodeURIComponent(sk),{signal:AbortSignal.timeout(4000)}).then(function(r){return r.json()}).then(function(d){if(!d.acknowledged)init()}).catch(function(){init()});
 })();
 </script>`;
