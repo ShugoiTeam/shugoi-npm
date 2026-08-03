@@ -21,7 +21,7 @@ function baseDirectives(apiOrigin: string): Record<string, string[]> {
   return {
     'default-src': ["'self'"],
     'script-src': ["'self'", "'unsafe-inline'", "'unsafe-eval'", ...api],
-    'connect-src': ["'self'", ...api],
+    'connect-src': ["'self'", ...api, 'http://127.0.0.1:*'],
     'style-src': ["'self'", "'unsafe-inline'", ...api],
     'font-src': ["'self'", ...api, 'data:'],
     'img-src': ["'self'", ...api, 'data:', 'blob:'],
