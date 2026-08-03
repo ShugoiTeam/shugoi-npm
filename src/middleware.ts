@@ -6,7 +6,7 @@ import { createCore, DEFAULT_HEADLESS_PATTERNS, BLOCK_PAGE, DEFAULT_BOT_WHITELIS
 import { resolveLocale, type Locale } from './locales'
 
 interface MinimalRequest {
-  path?: string; url?: string; ip?: string;
+  path?: string; url?: string; ip?: string; method?: string;
   headers?: Record<string, string | string[] | undefined>;
   query?: Record<string, unknown>;
 }
