@@ -302,11 +302,12 @@ const NOTICE_SCRIPT = `
   if(!mid||!sk||window.__sg_noticeEnabled===false)return;
   var base=window.__sg_baseUrl||'';
   var origin=base.replace(/\\/api\\/v1\\/?$/,'');
-  var _OVERLAY_CSS='position:fixed!important;inset:0!important;z-index:2147483647!important;background:rgba(0,0,0,.6)!important;display:flex!important;align-items:center!important;justify-content:center!important;padding:1.2rem!important';
+  var _OVERLAY_CSS='position:fixed!important;inset:0!important;z-index:2147483647!important;background:rgba(0,0,0,.6)!important;display:flex!important;align-items:center!important;justify-content:center!important;padding:1.2rem!important;pointer-events:auto!important';
   var _CARD_CSS='background:#fff!important;border:4px solid #000!important;border-radius:28px 6px 32px 10px!important;box-shadow:14px 14px 0 #000!important;padding:0!important;max-width:720px!important;width:100%!important;text-align:center!important;font-family:Arial,sans-serif!important;display:flex!important;overflow:hidden!important';
   var _CARD_HTML='<div style="flex:0 0 320px;display:flex;align-items:center;justify-content:center;padding:1.5rem 1rem 1.5rem 3rem;overflow:hidden"><img src="'+origin+'/favicon.png" alt="" style="width:100%;height:auto;max-width:220px;pointer-events:none"></div><div style="flex:1;padding:1.6rem 1.8rem;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center"><img src="'+origin+'/brand-block.png" alt="Shugoi" style="display:block;margin:0 0 .3rem;pointer-events:none;max-width:100%;height:auto;max-height:40px"><div style="border:2px solid #000;display:inline-block;border-radius:8px 2px 12px 4px;padding:.2rem .6rem;font-size:.5rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#E87090;margin-bottom:.6rem">Protection anti-abus</div><p style="font-size:.8rem;color:#555;line-height:1.7;margin:0 .4rem .6rem;max-width:280px">Ce site utilise Shugoi pour se prot\\u00e9ger contre les abus et la fraude. Des caract\\u00e9ristiques techniques de votre navigateur sont analys\\u00e9es pour d\\u00e9tecter les scripts automatis\\u00e9s, Tor, les VPN et les environnements virtuels. Aucune donn\\u00e9e personnelle n\\'est collect\\u00e9e.</p><div style="margin-top:.5rem"><button id="__sg_ok" style="background:#E87090;color:#fff;border:3px solid #000;border-radius:12px 3px 14px 5px;padding:.4rem 2rem;font-size:.8rem;font-weight:700;cursor:pointer">OK</button></div><div style="margin-top:.5rem;font-size:.5rem;color:#ccc"><a href="'+origin+'/legal/shugoi-notice" target="_blank" style="color:#E87090;text-decoration:underline">En savoir plus \\u00b7 shugoi.com</a></div></div>';
   var _closed=false;
   var mo=null;
+  var _watch=null;
   function ack(){try{fetch(base+'/notice',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({machineId:mid,siteKey:sk}),keepalive:true,signal:AbortSignal.timeout(4000)}).catch(function(){})}catch(e){}}
   function buildOverlay(){
     var o=document.createElement('div');o.id='__sg_o';o.style.cssText=_OVERLAY_CSS;
@@ -314,41 +315,66 @@ const NOTICE_SCRIPT = `
     c.innerHTML=_CARD_HTML;
     o.appendChild(c);return o;
   }
-  function close(){_closed=true;try{if(mo)mo.disconnect()}catch(e){}var el=document.getElementById('__sg_o');if(el&&el.parentNode)el.parentNode.removeChild(el);document.body.style.overflow='';document.documentElement.style.overflow='';}
+  function close(){_closed=true;try{if(mo)mo.disconnect()}catch(e){}try{if(_watch)clearInterval(_watch)}catch(e){}var el=document.getElementById('__sg_o');if(el&&el.parentNode)el.parentNode.removeChild(el);document.body.style.overflow='';document.documentElement.style.overflow='';}
   function okHandler(){ack();close();}
   function rebind(){var b=document.getElementById('__sg_ok');if(b)b.onclick=okHandler;}
+  // Blindage : la notice est OBLIGATOIRE — on ne peut ni la retirer, ni la cacher, ni
+  // altérer son style/contenu, ni sortir le focus, tant que OK n'a pas été cliqué.
   function enforce(){
     if(_closed)return;
     var o=document.getElementById('__sg_o');
-    // Overlay supprimé → recréer (le MO sur documentElement childList le détecte).
-    if(!o){var fresh=buildOverlay();document.documentElement.appendChild(fresh);rebind();return;}
+    if(!o){o=buildOverlay();document.documentElement.appendChild(o);}
     if(o.style.cssText!==_OVERLAY_CSS)o.style.cssText=_OVERLAY_CSS;
     var c=document.getElementById('__sg_cd');
-    if(!c){o.innerHTML='';o.appendChild(buildOverlay().firstChild);rebind();return;}
-    if(c.style.cssText!==_CARD_CSS)c.style.cssText=_CARD_CSS;
-    if(c.innerHTML!==_CARD_HTML){c.innerHTML=_CARD_HTML;rebind();}
+    if(!c){o.innerHTML='';o.appendChild(buildOverlay().firstChild);}
+    else{
+      if(c.style.cssText!==_CARD_CSS)c.style.cssText=_CARD_CSS;
+      if(c.innerHTML!==_CARD_HTML)c.innerHTML=_CARD_HTML;
+    }
+    rebind();
+    // retire tout <style>/<link> injecté ciblant la notice (règles externes !important)
+    try{
+      var st=document.querySelectorAll('style,link[rel=stylesheet]');
+      for(var i=0;i<st.length;i++){
+        var t=(st[i].textContent||'')+' '+(st[i].getAttribute&&st[i].getAttribute('href')||'');
+        if(t.indexOf('__sg_o')>=0||t.indexOf('__sg_cd')>=0||t.indexOf('__sg_ok')>=0||t.indexOf('shugoi-notice')>=0){
+          if(st[i].parentNode)st[i].parentNode.removeChild(st[i]);
+        }
+      }
+    }catch(e){}
+    if(document.body.style.overflow!=='hidden')document.body.style.overflow='hidden';
+    if(document.documentElement.style.overflow!=='hidden')document.documentElement.style.overflow='hidden';
+    // réattache l'observeur si l'overlay a été recréé (il porte la marque __sgObserved)
+    try{
+      if(o&&!o.__sgObserved){o.__sgObserved=true;mo&&mo.observe(o,{childList:true,subtree:true,attributes:true,characterData:true,attributeFilter:['style','class','id']});}
+    }catch(e){}
+  }
+  function keyBlock(e){
+    if(_closed)return;
+    if(e.key==='Escape'){e.preventDefault();e.stopPropagation();}
+    if(e.key==='Tab'||e.key==='Enter'){
+      var ok=document.getElementById('__sg_ok');
+      var t=e.target||document.activeElement;
+      if(ok&&t!==ok){e.preventDefault();try{ok.focus()}catch(x){}}
+    }
   }
   function show(){
     _closed=false;
     var o=buildOverlay();document.documentElement.appendChild(o);
     document.body.style.overflow='hidden';document.documentElement.style.overflow='hidden';
     rebind();
-    // Anti-tampering ciblé SANS geler la page :
-    //  - documentElement en childList SEUL → détecte la SUPPRESSION de __sg_o (le MO
-    //    posé sur __sg_o ne signale jamais son propre retrait du DOM). childList seul
-    //    (sans subtree/attributes) est quasi inerte pour la SPA → pas de freeze.
-    //  - __sg_o en subtree+attributes+characterData → restaure toute modification
-    //    DANS la popup (carte supprimée, innerHTML, style, class, id).
     try{
       mo=new MutationObserver(function(){enforce();});
       mo.observe(document.documentElement,{childList:true});
-      var o3=document.getElementById('__sg_o');
-      if(o3){
-        mo.observe(o3,{childList:true,subtree:true,attributes:true,characterData:true,attributeFilter:['style','class','id']});
-      }
+      try{o.__sgObserved=true;mo.observe(o,{childList:true,subtree:true,attributes:true,characterData:true,attributeFilter:['style','class','id']});}catch(e){}
     }catch(e){}
+    // watchdog : re-force toutes les 500 ms (rattrape délais + règles externes)
+    _watch=setInterval(enforce,500);
   }
-  function init(){if(document.body)show();else if(document.addEventListener)document.addEventListener('DOMContentLoaded',show);else setTimeout(init,50)}
+  function init(){
+    if(document.body)show();else if(document.addEventListener)document.addEventListener('DOMContentLoaded',show);else setTimeout(init,50);
+    try{document.addEventListener('keydown',keyBlock,true)}catch(e){}
+  }
   fetch(base+'/notice?machineId='+encodeURIComponent(mid)+'&siteKey='+encodeURIComponent(sk),{signal:AbortSignal.timeout(4000)}).then(function(r){return r.json()}).then(function(d){if(!d.acknowledged)init()}).catch(function(){init()});
 })();
 </script>`;
