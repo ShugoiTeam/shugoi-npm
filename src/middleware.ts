@@ -208,6 +208,9 @@ export function createShugoiPlugin(options: ShugoiCoreOptions) {
       // Anti-leak du grant (résidu #2) : ne jamais laisser l'URL du render fuiter via Referer.
       if (data.html) data.html = injectNoReferrer(data.html);
       reply.header('Referrer-Policy', 'no-referrer');
+      // Contenu protégé : jamais mis en cache (round 6 — CDN bypass).
+      reply.header('Cache-Control', 'no-store, no-cache, must-revalidate, no-transform');
+      reply.header('Pragma', 'no-cache');
       reply.send(data);
     });
 

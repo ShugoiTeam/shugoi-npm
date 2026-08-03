@@ -266,6 +266,12 @@ export async function handleRender(token: string, res: { setHeader?: (k: string,
   if (res.setHeader) res.setHeader('Content-Type', 'application/json');
   // Anti-leak du grant (résidu #2) : ne jamais laisser l'URL du render fuiter via Referer.
   if (res.setHeader) res.setHeader('Referrer-Policy', 'no-referrer');
+  // Contenu protégé : JAMAIS mis en cache (round 6, angle cache headers). Un CDN (ex.
+  // Cloudflare) ou un proxy qui mettrait en cache la réponse render la servirait sans
+  // le grant → le contenu whitelisté fuiterait. no-store sur la réponse ET no-transform
+  // (évite qu'un CDN réécrive le HTML rendu).
+  if (res.setHeader) res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, no-transform');
+  if (res.setHeader) res.setHeader('Pragma', 'no-cache');
   // Audits : pose un cookie d'autorisation __sg_authorized quand le render réussit
   // (grant valide + HTML servi). Ce cookie permet ensuite de charger les assets
   // protégés (/assets/*.js) — sans lui, un téléchargement direct du bundle est refusé.
