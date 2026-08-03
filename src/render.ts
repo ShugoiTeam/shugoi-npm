@@ -242,14 +242,13 @@ function verifyTokenAndRead(token: string, locale?: Locale): { html?: string; er
 }
 
 // Anti-leak du grant (re-audit 2026-08-03, résidu #2) : le render est appelé avec
-// `token` (+ éventuellement `grant`/`mid`) en query string. Sans politique de référent,
-// un site client qui charge une ressource externe peut fuir l'URL complète (avec le
-// grant) via le header Referer. On force no-referrer :
-//   - header Referrer-Policy sur la réponse render (module + adaptateur),
-//   - meta referrer dans le HTML rendu (le document réel ré-écrit par document.write
-//     reprend sa propre politique pour ses sous-ressources).
-export function injectNoReferrer(html: string): string {
-  const meta = '<meta name="referrer" content="no-referrer">';
+// `token` (+ éventuellement `grant`/`mid`) en query string. APRÈS document.write, l'URL
+// de la page est l'URL d'origine (le grant n'y est plus) → un referrer strict-origin
+// suffit : cross-origin → seul l'ORIGINE est envoyée (jamais le grant, jamais le chemin).
+// ⚠️ NE PAS utiliser no-referrer : ça casse les embeds YouTube (erreur 153 —
+// "embedder identity missing referrer", YouTube exige un Referrer pour valider l'embedder).
+export function injectReferrerPolicy(html: string): string {
+  const meta = '<meta name="referrer" content="strict-origin-when-cross-origin">';
   if (html.includes('<head>')) return html.replace('<head>', '<head>' + meta);
   if (html.includes('<html')) {
     const m = html.match(/<html[^>]*>/);
@@ -261,11 +260,12 @@ export function injectNoReferrer(html: string): string {
 export async function handleRender(token: string, res: { setHeader?: (k: string, v: string) => void; send?: (body: string) => void; end?: (body: string) => void }, configUrl?: string, mid?: string, grant?: string, ip?: string, expectedSiteKey?: string) {
   const data = await renderResponseData(token, undefined, configUrl, mid, grant, ip, expectedSiteKey);
   if (data.html && mid) data.html = injectNoticeScript(data.html, mid, expectedSiteKey || token.split(':')[0]);
-  if (data.html) data.html = injectNoReferrer(data.html);
+  if (data.html) data.html = injectReferrerPolicy(data.html);
   const json = JSON.stringify(data);
   if (res.setHeader) res.setHeader('Content-Type', 'application/json');
-  // Anti-leak du grant (résidu #2) : ne jamais laisser l'URL du render fuiter via Referer.
-  if (res.setHeader) res.setHeader('Referrer-Policy', 'no-referrer');
+  // Anti-leak du grant : strict-origin-when-cross-origin (pas no-referrer — casserait
+  // les embeds YouTube 153). Cross-origin → origin seule, jamais le grant.
+  if (res.setHeader) res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   // Contenu protégé : JAMAIS mis en cache (round 6, angle cache headers). Un CDN (ex.
   // Cloudflare) ou un proxy qui mettrait en cache la réponse render la servirait sans
   // le grant → le contenu whitelisté fuiterait. no-store sur la réponse ET no-transform
