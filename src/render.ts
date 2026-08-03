@@ -257,9 +257,9 @@ export function injectReferrerPolicy(html: string): string {
   return meta + html;
 }
 
-export async function handleRender(token: string, res: { setHeader?: (k: string, v: string) => void; send?: (body: string) => void; end?: (body: string) => void }, configUrl?: string, mid?: string, grant?: string, ip?: string, expectedSiteKey?: string) {
+export async function handleRender(token: string, res: { setHeader?: (k: string, v: string) => void; send?: (body: string) => void; end?: (body: string) => void }, configUrl?: string, mid?: string, grant?: string, ip?: string, expectedSiteKey?: string, baseUrl?: string) {
   const data = await renderResponseData(token, undefined, configUrl, mid, grant, ip, expectedSiteKey);
-  if (data.html && mid) data.html = injectNoticeScript(data.html, mid, expectedSiteKey || token.split(':')[0]);
+  if (data.html && mid) data.html = injectNoticeScript(data.html, mid, expectedSiteKey || token.split(':')[0], baseUrl);
   if (data.html) data.html = injectReferrerPolicy(data.html);
   const json = JSON.stringify(data);
   if (res.setHeader) res.setHeader('Content-Type', 'application/json');
@@ -364,10 +364,14 @@ const NOTICE_SCRIPT = `
 })();
 </script>`;
 
-function injectNoticeScript(html: string, mid: string, siteKey: string): string {
+function injectNoticeScript(html: string, mid: string, siteKey: string, baseUrl?: string): string {
+  const baseVal = baseUrl || '';
   const inject = NOTICE_SCRIPT
     .replace('var mid=window.__sg_mid||\'\';', 'var mid=' + JSON.stringify(mid) + '||\'\';')
     .replace('var sk=window.__sg_siteKey||\'\';', 'var sk=' + JSON.stringify(siteKey) + '||\'\';')
+    // base INJECTÉE (ne pas dépendre de window.__sg_baseUrl : nettoyé par _sgCl après 1,5s →
+    // sinon la notice appelle /notice relatif → page d'éval → l'ack ne passe jamais)
+    .replace('var base=window.__sg_baseUrl||\'\';', 'var base=' + JSON.stringify(baseVal) + '||window.__sg_baseUrl||\'\';')
     .replace('window.__sg_noticeEnabled', 'window.__sg_noticeEnabled');
   if (html.includes('</body>')) return html.replace('</body>', inject + '</body>');
   return html + inject;

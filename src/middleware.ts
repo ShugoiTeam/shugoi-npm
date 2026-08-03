@@ -56,7 +56,8 @@ export function createShugoiMiddleware(options: ShugoiCoreOptions) {
           : undefined) || (typeof req.ip === 'string' ? req.ip : 'unknown');
         // CRITIQUE 1 (§7bis) : le render vérifie que le token appartient à CE site
         // (options.siteKey) — un grant émis par un autre site (pyxelze) est refusé ici.
-        return handleRender(q.token || '', res, internalUrl, q.mid || '', q.grant || '', ip, options.siteKey);
+        // baseUrl transmis à la notice (injectée) : __sg_baseUrl est nettoyé par _sgCl.
+        return handleRender(q.token || '', res, internalUrl, q.mid || '', q.grant || '', ip, options.siteKey, baseUrl);
       }
 
       // Challenge page : GET/HEAD uniquement (round 13, même normalisation).
