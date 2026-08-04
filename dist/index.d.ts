@@ -21,7 +21,7 @@ declare function handleRender(token: string, res: {
     setHeader?: (k: string, v: string) => void;
     send?: (body: string) => void;
     end?: (body: string) => void;
-}, configUrl?: string, mid?: string, grant?: string, ip?: string, expectedSiteKey?: string): Promise<void>;
+}, configUrl?: string, mid?: string, grant?: string, ip?: string, expectedSiteKey?: string, baseUrl?: string): Promise<void>;
 declare function signToken(siteKey: string, timestamp: number, secretOverride?: string): {
     token: string;
 };
@@ -142,6 +142,7 @@ interface MinimalRequest {
     path?: string;
     url?: string;
     ip?: string;
+    method?: string;
     headers?: Record<string, string | string[] | undefined>;
     query?: Record<string, unknown>;
 }

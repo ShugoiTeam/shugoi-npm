@@ -57,7 +57,7 @@ __export(render_exports, {
   getConfig: () => getConfig,
   handleRender: () => handleRender,
   injectGuardScripts: () => injectGuardScripts,
-  injectNoReferrer: () => injectNoReferrer,
+  injectReferrerPolicy: () => injectReferrerPolicy,
   renderResponseData: () => renderResponseData,
   signToken: () => signToken,
   storeHtml: () => storeHtml,
@@ -234,8 +234,8 @@ function verifyTokenAndRead(token, locale) {
   }
   return { error: "not_found" };
 }
-function injectNoReferrer(html) {
-  const meta = '<meta name="referrer" content="no-referrer">';
+function injectReferrerPolicy(html) {
+  const meta = '<meta name="referrer" content="strict-origin-when-cross-origin">';
   if (html.includes("<head>")) return html.replace("<head>", "<head>" + meta);
   if (html.includes("<html")) {
     const m = html.match(/<html[^>]*>/);
@@ -243,13 +243,15 @@ function injectNoReferrer(html) {
   }
   return meta + html;
 }
-async function handleRender(token, res, configUrl, mid, grant, ip, expectedSiteKey) {
+async function handleRender(token, res, configUrl, mid, grant, ip, expectedSiteKey, baseUrl) {
   const data = await renderResponseData(token, void 0, configUrl, mid, grant, ip, expectedSiteKey);
-  if (data.html && mid) data.html = injectNoticeScript(data.html, mid, expectedSiteKey || token.split(":")[0]);
-  if (data.html) data.html = injectNoReferrer(data.html);
+  if (data.html && mid) data.html = injectNoticeScript(data.html, mid, expectedSiteKey || token.split(":")[0], baseUrl);
+  if (data.html) data.html = injectReferrerPolicy(data.html);
   const json = JSON.stringify(data);
   if (res.setHeader) res.setHeader("Content-Type", "application/json");
-  if (res.setHeader) res.setHeader("Referrer-Policy", "no-referrer");
+  if (res.setHeader) res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+  if (res.setHeader) res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, no-transform");
+  if (res.setHeader) res.setHeader("Pragma", "no-cache");
   if (data.html && res.setHeader) {
     const authSecret = process.env.SHUGOKI_SIGNING_SECRET || process.env.SHUGOKI_SECRET;
     if (authSecret) {
@@ -262,8 +264,9 @@ async function handleRender(token, res, configUrl, mid, grant, ip, expectedSiteK
   if (res.send) res.send(json);
   else if (res.end) res.end(json);
 }
-function injectNoticeScript(html, mid, siteKey) {
-  const inject = NOTICE_SCRIPT.replace("var mid=window.__sg_mid||'';", "var mid=" + JSON.stringify(mid) + "||'';").replace("var sk=window.__sg_siteKey||'';", "var sk=" + JSON.stringify(siteKey) + "||'';").replace("window.__sg_noticeEnabled", "window.__sg_noticeEnabled");
+function injectNoticeScript(html, mid, siteKey, baseUrl) {
+  const baseVal = baseUrl || "";
+  const inject = NOTICE_SCRIPT.replace("var mid=window.__sg_mid||'';", "var mid=" + JSON.stringify(mid) + "||'';").replace("var sk=window.__sg_siteKey||'';", "var sk=" + JSON.stringify(siteKey) + "||'';").replace("var base=window.__sg_baseUrl||'';", "var base=" + JSON.stringify(baseVal) + "||window.__sg_baseUrl||'';").replace("window.__sg_noticeEnabled", "window.__sg_noticeEnabled");
   if (html.includes("</body>")) return html.replace("</body>", inject + "</body>");
   return html + inject;
 }
@@ -486,11 +489,12 @@ var init_render = __esm({
   if(!mid||!sk||window.__sg_noticeEnabled===false)return;
   var base=window.__sg_baseUrl||'';
   var origin=base.replace(/\\/api\\/v1\\/?$/,'');
-  var _OVERLAY_CSS='position:fixed!important;inset:0!important;z-index:2147483647!important;background:rgba(0,0,0,.6)!important;display:flex!important;align-items:center!important;justify-content:center!important;padding:1.2rem!important';
+  var _OVERLAY_CSS='position:fixed!important;inset:0!important;z-index:2147483647!important;background:rgba(0,0,0,.6)!important;display:flex!important;align-items:center!important;justify-content:center!important;padding:1.2rem!important;pointer-events:auto!important';
   var _CARD_CSS='background:#fff!important;border:4px solid #000!important;border-radius:28px 6px 32px 10px!important;box-shadow:14px 14px 0 #000!important;padding:0!important;max-width:720px!important;width:100%!important;text-align:center!important;font-family:Arial,sans-serif!important;display:flex!important;overflow:hidden!important';
   var _CARD_HTML='<div style="flex:0 0 320px;display:flex;align-items:center;justify-content:center;padding:1.5rem 1rem 1.5rem 3rem;overflow:hidden"><img src="'+origin+'/favicon.png" alt="" style="width:100%;height:auto;max-width:220px;pointer-events:none"></div><div style="flex:1;padding:1.6rem 1.8rem;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center"><img src="'+origin+'/brand-block.png" alt="Shugoi" style="display:block;margin:0 0 .3rem;pointer-events:none;max-width:100%;height:auto;max-height:40px"><div style="border:2px solid #000;display:inline-block;border-radius:8px 2px 12px 4px;padding:.2rem .6rem;font-size:.5rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#E87090;margin-bottom:.6rem">Protection anti-abus</div><p style="font-size:.8rem;color:#555;line-height:1.7;margin:0 .4rem .6rem;max-width:280px">Ce site utilise Shugoi pour se prot\\u00e9ger contre les abus et la fraude. Des caract\\u00e9ristiques techniques de votre navigateur sont analys\\u00e9es pour d\\u00e9tecter les scripts automatis\\u00e9s, Tor, les VPN et les environnements virtuels. Aucune donn\\u00e9e personnelle n\\'est collect\\u00e9e.</p><div style="margin-top:.5rem"><button id="__sg_ok" style="background:#E87090;color:#fff;border:3px solid #000;border-radius:12px 3px 14px 5px;padding:.4rem 2rem;font-size:.8rem;font-weight:700;cursor:pointer">OK</button></div><div style="margin-top:.5rem;font-size:.5rem;color:#ccc"><a href="'+origin+'/legal/shugoi-notice" target="_blank" style="color:#E87090;text-decoration:underline">En savoir plus \\u00b7 shugoi.com</a></div></div>';
   var _closed=false;
   var mo=null;
+  var _applying=false;
   function ack(){try{fetch(base+'/notice',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({machineId:mid,siteKey:sk}),keepalive:true,signal:AbortSignal.timeout(4000)}).catch(function(){})}catch(e){}}
   function buildOverlay(){
     var o=document.createElement('div');o.id='__sg_o';o.style.cssText=_OVERLAY_CSS;
@@ -501,35 +505,45 @@ var init_render = __esm({
   function close(){_closed=true;try{if(mo)mo.disconnect()}catch(e){}var el=document.getElementById('__sg_o');if(el&&el.parentNode)el.parentNode.removeChild(el);document.body.style.overflow='';document.documentElement.style.overflow='';}
   function okHandler(){ack();close();}
   function rebind(){var b=document.getElementById('__sg_ok');if(b)b.onclick=okHandler;}
+  // Anti-bypass 100% MUTATION OBSERVER (aucun setInterval).
+  // CRITIQUE anti-freeze : le flag _applying + mo.takeRecords() cassent la boucle MO \u2014
+  // nos propres modifications (style/innerHTML re-appliqu\xE9s) ne re-d\xE9clenchent PAS le MO
+  // (le navigateur normalise cssText/innerHTML, donc la comparaison \xE9choue toujours et
+  // on r\xE9-appliquerait \xE0 l'infini). takeRecords() vide la file des mutations que NOS
+  // changements ont g\xE9n\xE9r\xE9e \u2192 une seule passe par alt\xE9ration r\xE9elle, jamais de gel.
   function enforce(){
-    if(_closed)return;
-    var o=document.getElementById('__sg_o');
-    // Overlay supprim\xE9 \u2192 recr\xE9er (le MO sur documentElement childList le d\xE9tecte).
-    if(!o){var fresh=buildOverlay();document.documentElement.appendChild(fresh);rebind();return;}
-    if(o.style.cssText!==_OVERLAY_CSS)o.style.cssText=_OVERLAY_CSS;
-    var c=document.getElementById('__sg_cd');
-    if(!c){o.innerHTML='';o.appendChild(buildOverlay().firstChild);rebind();return;}
-    if(c.style.cssText!==_CARD_CSS)c.style.cssText=_CARD_CSS;
-    if(c.innerHTML!==_CARD_HTML){c.innerHTML=_CARD_HTML;rebind();}
+    if(_closed||_applying)return;
+    _applying=true;
+    try{
+      var o=document.getElementById('__sg_o');
+      if(!o){o=buildOverlay();document.documentElement.appendChild(o);}
+      if(o.style.cssText!==_OVERLAY_CSS)o.style.cssText=_OVERLAY_CSS;
+      var c=document.getElementById('__sg_cd');
+      if(!c){o.innerHTML='';o.appendChild(buildOverlay().firstChild);}
+      else{
+        if(c.style.cssText!==_CARD_CSS)c.style.cssText=_CARD_CSS;
+        if(c.innerHTML!==_CARD_HTML)c.innerHTML=_CARD_HTML;
+      }
+      rebind();
+      if(document.body.style.overflow!=='hidden')document.body.style.overflow='hidden';
+      if(document.documentElement.style.overflow!=='hidden')document.documentElement.style.overflow='hidden';
+      try{
+        if(o&&!o.__sgObserved){o.__sgObserved=true;mo&&mo.observe(o,{childList:true,subtree:true,attributes:true,characterData:true,attributeFilter:['style','class','id']});}
+      }catch(e){}
+    }finally{
+      _applying=false;
+      try{if(mo)mo.takeRecords();}catch(e){}
+    }
   }
   function show(){
     _closed=false;
     var o=buildOverlay();document.documentElement.appendChild(o);
     document.body.style.overflow='hidden';document.documentElement.style.overflow='hidden';
     rebind();
-    // Anti-tampering cibl\xE9 SANS geler la page :
-    //  - documentElement en childList SEUL \u2192 d\xE9tecte la SUPPRESSION de __sg_o (le MO
-    //    pos\xE9 sur __sg_o ne signale jamais son propre retrait du DOM). childList seul
-    //    (sans subtree/attributes) est quasi inerte pour la SPA \u2192 pas de freeze.
-    //  - __sg_o en subtree+attributes+characterData \u2192 restaure toute modification
-    //    DANS la popup (carte supprim\xE9e, innerHTML, style, class, id).
     try{
       mo=new MutationObserver(function(){enforce();});
       mo.observe(document.documentElement,{childList:true});
-      var o3=document.getElementById('__sg_o');
-      if(o3){
-        mo.observe(o3,{childList:true,subtree:true,attributes:true,characterData:true,attributeFilter:['style','class','id']});
-      }
+      try{o.__sgObserved=true;mo.observe(o,{childList:true,subtree:true,attributes:true,characterData:true,attributeFilter:['style','class','id']});}catch(e){}
     }catch(e){}
   }
   function init(){if(document.body)show();else if(document.addEventListener)document.addEventListener('DOMContentLoaded',show);else setTimeout(init,50)}
@@ -623,6 +637,12 @@ function mergeCsp(existing, added) {
     const set = base.get(k) ?? /* @__PURE__ */ new Set();
     v.forEach((x) => set.add(x));
     base.set(k, set);
+  }
+  for (const [, set] of base) {
+    if (set.has("'none'") && set.size > 1) {
+      set.clear();
+      set.add("'none'");
+    }
   }
   return [...base.entries()].map(([k, v]) => `${k} ${[...v].join(" ")}`).join("; ");
 }
@@ -791,6 +811,19 @@ function createCore(options) {
     }
     return true;
   }
+  const _usedProofs = /* @__PURE__ */ new Map();
+  setInterval(() => {
+    const now = Date.now();
+    for (const [k, t] of _usedProofs) {
+      if (now - t > POW_TTL_MS) _usedProofs.delete(k);
+    }
+  }, POW_TTL_MS).unref();
+  function consumeProof(proof, ip) {
+    const key = (ip || "0") + ":" + proof;
+    if (_usedProofs.has(key)) return false;
+    _usedProofs.set(key, Date.now());
+    return true;
+  }
   function safeChallengePath(p) {
     if (!p) return "/";
     if (p.charAt(0) !== "/" || p.charAt(1) === "/" || p.indexOf("\\") >= 0) return "/";
@@ -906,7 +939,7 @@ function createCore(options) {
     if (!isWhitelistedBot(ua)) return false;
     if (!verifyBots) return true;
     const verified = await verifyBotIp(ua, ip);
-    if (verified === null) return true;
+    if (verified === null) return false;
     return verified;
   }
   async function evaluate(ctx) {
@@ -963,11 +996,13 @@ step();
       return { block: true, status: 200, contentType: "text/html", body: html };
     }
     const isPage = !ctx.path.includes("/__shugoi/") && !ctx.path.startsWith("/api/");
-    if (isPage && powSecret && ctx.ua && /Mozilla/i.test(ctx.ua)) {
+    if (isPage && powSecret && ctx.ua) {
       const proof = ctx.sgProof || "";
       const validProof = !!proof && isPowValid(proof);
       const validCookie = !!ctx.sgOk && isSgOkValid(ctx.sgOk);
-      if (!validProof && !validCookie) {
+      const proofFresh = validProof ? consumeProof(proof, ctx.ip) : false;
+      const canProceed = validCookie || proofFresh;
+      if (!canProceed) {
         if (!allowChallenge(ctx.ip)) {
           const loc = resolveLocale(void 0, ctx.acceptLanguage);
           const lmsgs = MESSAGES[loc];
@@ -1064,10 +1099,30 @@ function createShugoiMiddleware(options) {
     try {
       const path = (req.path ?? req.url ?? "/").split("?")[0];
       if (path.endsWith("/__shugoi/render")) {
+        const m = String(req.method || "GET").toUpperCase();
+        if (m !== "GET" && m !== "HEAD") {
+          if (res.status) res.status(405);
+          if (res.type) res.type("application/json");
+          const body = JSON.stringify({ error: "method_not_allowed" });
+          if (res.send) res.send(body);
+          else if (res.end) res.end(body);
+          return;
+        }
         const { handleRender: handleRender2 } = await Promise.resolve().then(() => (init_render(), render_exports));
         const q = req.query && req.query || {};
         const ip2 = (typeof req.headers?.["x-forwarded-for"] === "string" ? req.headers["x-forwarded-for"].split(",")[0]?.trim() : void 0) || (typeof req.ip === "string" ? req.ip : "unknown");
-        return handleRender2(q.token || "", res, internalUrl, q.mid || "", q.grant || "", ip2, options.siteKey);
+        return handleRender2(q.token || "", res, internalUrl, q.mid || "", q.grant || "", ip2, options.siteKey, baseUrl);
+      }
+      if (path === "/__sg_challenge") {
+        const m = String(req.method || "GET").toUpperCase();
+        if (m !== "GET" && m !== "HEAD") {
+          if (res.status) res.status(405);
+          if (res.type) res.type("application/json");
+          const body = JSON.stringify({ error: "method_not_allowed" });
+          if (res.send) res.send(body);
+          else if (res.end) res.end(body);
+          return;
+        }
       }
       if (core.cspEnabled && res.setHeader) {
         if (res.getHeader) {
@@ -1200,11 +1255,13 @@ function createShugoiPlugin(options) {
       }
     });
     fastify.get("/__shugoi/render", async (request, reply) => {
-      const { renderResponseData: renderResponseData3, injectNoReferrer: injectNoReferrer2 } = await Promise.resolve().then(() => (init_render(), render_exports));
+      const { renderResponseData: renderResponseData3, injectReferrerPolicy: injectReferrerPolicy2 } = await Promise.resolve().then(() => (init_render(), render_exports));
       const ip = (typeof request.headers?.["x-forwarded-for"] === "string" ? request.headers["x-forwarded-for"].split(",")[0]?.trim() : void 0) || (typeof request.ip === "string" ? request.ip : "unknown");
       const data = await renderResponseData3(request.query.token || "", void 0, options.baseUrl, request.query.mid || "", request.query.grant || "", ip, options.siteKey);
-      if (data.html) data.html = injectNoReferrer2(data.html);
-      reply.header("Referrer-Policy", "no-referrer");
+      if (data.html) data.html = injectReferrerPolicy2(data.html);
+      reply.header("Referrer-Policy", "strict-origin-when-cross-origin");
+      reply.header("Cache-Control", "no-store, no-cache, must-revalidate, no-transform");
+      reply.header("Pragma", "no-cache");
       reply.send(data);
     });
     fastify.head("/__shugoi/healthcheck", async (request, reply) => reply.send(""));

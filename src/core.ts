@@ -330,7 +330,7 @@ export function createCore(options: ShugoiCoreOptions): ShugoiCore {
     if (!isWhitelistedBot(ua)) return false
     if (!verifyBots) return true
     const verified = await verifyBotIp(ua, ip)
-    if (verified === null) return true
+    if (verified === null) return false
     return verified
   }
 
@@ -415,7 +415,7 @@ step();
     // (/assets/*, /robots.txt...) sont allowlisted et ne passent pas par ici.
     const isPage = !ctx.path.includes('/__shugoi/') && !ctx.path.startsWith('/api/')
 
-    if (isPage && powSecret && ctx.ua && /Mozilla/i.test(ctx.ua)) {
+    if (isPage && powSecret && ctx.ua) {
       const proof = ctx.sgProof || ''
       const validProof = !!proof && isPowValid(proof)
       // Re-audit (résidu #3) : un cookie __sg_ok valide (HMAC serveur, 30 j) saute le
