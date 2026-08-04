@@ -177,10 +177,14 @@ export function createCore(options: ShugoiCoreOptions): ShugoiCore {
     return true;
   }
 
-  // ═══ Preuve PoW single-use (audit round 16, R2) ═══
-  // Une preuve `sg_proof=ts:n` résolue ne doit servir QU'UNE fois (par IP) : sinon un
-  // script résout une fois (0.07s à diff=12) et mint des cookies sur tous les chemins.
-  // Clé = ip + ':' + proof ; entrées purgées après POW_TTL_MS (même fenêtre que la preuve).
+  // ═══ Preuve PoW single-use GLOBAL (round 17) ═══
+  // Une preuve `sg_proof=ts:nonce:solution` résolue ne doit servir QU'UNE fois, quel
+  // que soit l'IP : la preuve embarque un nonce aléatoire unique → clé = proof seule.
+  // (Round 16 : la clé `ip:proof` laissait un rejeu CROSS-IP → 200 : un script résolvait
+  // une fois et rejouait la preuve via botnet/rotation d'IP. Round 17 : la 1re requête
+  // qui présente la preuve la consomme, TOUTE autre requête (n'importe quel IP) → 307.
+  // Bonus NAT : deux visiteurs derrière le même IP ont des preuves distinctes → aucun
+  // cross-user). Entrées purgées après POW_TTL_MS (même fenêtre que la preuve).
   const _usedProofs = new Map<string, number>();
   setInterval(() => {
     const now = Date.now();
@@ -188,10 +192,9 @@ export function createCore(options: ShugoiCoreOptions): ShugoiCore {
       if (now - t > POW_TTL_MS) _usedProofs.delete(k);
     }
   }, POW_TTL_MS).unref();
-  function consumeProof(proof: string, ip: string): boolean {
-    const key = (ip || '0') + ':' + proof;
-    if (_usedProofs.has(key)) return false;
-    _usedProofs.set(key, Date.now());
+  function consumeProof(proof: string): boolean {
+    if (_usedProofs.has(proof)) return false;
+    _usedProofs.set(proof, Date.now());
     return true;
   }
 
@@ -470,7 +473,7 @@ step();
       // Round 16 (R2) : la preuve est SINGLE-USE (par IP). Une seule résolution ne doit
       // pas permettre de mint des cookies sur plusieurs chemins/sessions. Une preuve
       // valide est CONSOMMÉE à sa 1re utilisation ; un rejeu (sans cookie) → 307.
-      const proofFresh = validProof ? consumeProof(proof, ctx.ip) : false
+      const proofFresh = validProof ? consumeProof(proof) : false
       const canProceed = validCookie || proofFresh
       if (!canProceed) {
         // Anti-scraping (audit #6) : on refuse d'émettre le challenge à un IP qui

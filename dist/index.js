@@ -819,10 +819,9 @@ function createCore(options) {
       if (now - t > POW_TTL_MS) _usedProofs.delete(k);
     }
   }, POW_TTL_MS).unref();
-  function consumeProof(proof, ip) {
-    const key = (ip || "0") + ":" + proof;
-    if (_usedProofs.has(key)) return false;
-    _usedProofs.set(key, Date.now());
+  function consumeProof(proof) {
+    if (_usedProofs.has(proof)) return false;
+    _usedProofs.set(proof, Date.now());
     return true;
   }
   function safeChallengePath(p) {
@@ -1024,7 +1023,7 @@ step();
       const proof = ctx.sgProof || "";
       const validProof = !!proof && isPowValid(proof);
       const validCookie = !!ctx.sgOk && isSgOkValid(ctx.sgOk, ctx.ip, ctx.ua);
-      const proofFresh = validProof ? consumeProof(proof, ctx.ip) : false;
+      const proofFresh = validProof ? consumeProof(proof) : false;
       const canProceed = validCookie || proofFresh;
       if (!canProceed) {
         if (!allowChallenge(ctx.ip)) {
