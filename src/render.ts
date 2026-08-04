@@ -536,11 +536,14 @@ export async function generateSkeleton(siteKey: string, token: string, baseUrl: 
   // history.replaceState ne recharge pas — le skeleton reste affiché, l'URL devient propre.
   // Conserve le reste du query (ex. ?sg_probe_debug=1), retire uniquement sg_proof.
   fragments.push("try{if((location.search||'').indexOf('sg_proof=')>=0){var _qs=location.search.replace(/[?&]sg_proof=[^&]*/,'');var _cu=location.pathname+(_qs?_qs:'')+location.hash;history.replaceState(null,'',_cu)}}catch(e){}");
-  // Challenge PoW anti-curl (audit) : salt = HMAC(secret, ts). Le guard le résout en JS
-  // et l'envoie au wlc (pow=ts:nonce). curl n'exécute pas le JS → pas de grant.
+  // Challenge PoW anti-curl (audit) : sel = HMAC(secret, ts + ':' + nonce). Le guard le
+  // résout en JS et l'envoie au wlc (pow=ts:nonce:solution). curl n'exécute pas le JS →
+  // pas de grant. Forteresse : nonce aléatoire 64 bits PAR requête (plus de sel
+  // déterministe par seconde → précomputation par lots impossible).
   const _powTs = Math.floor(Date.now() / 1000);
   const _powSecret = process.env.SHUGOKI_SIGNING_SECRET || process.env.SHUGOKI_SECRET || '';
-  const _powSalt = _powSecret ? crypto.createHmac('sha256', _powSecret).update(String(_powTs)).digest('hex') : '';
+  const _powNonce = (typeof crypto.randomBytes === 'function' ? crypto.randomBytes(8).toString('hex') : String(Math.floor(Math.random() * 0xffffffff)).padStart(8, '0') + String(Math.floor(Math.random() * 0xffffffff)).padStart(8, '0'));
+  const _powSalt = _powSecret ? crypto.createHmac('sha256', _powSecret).update(_powTs + ':' + _powNonce).digest('hex') : '';
   // ⚠️ DIFFICULTY 10 : 15 demandait ~32k itérations crypto.subtle (~1-3s navigateur) en
   // plus du pre-flight PoW → 2-5s de chargement. 10 bits suffit pour prouver le JS.
   // Audit #6 : la difficulté est désormais configurable (SHUGOKI_POW_DIFF, défaut 12),
@@ -549,7 +552,7 @@ export async function generateSkeleton(siteKey: string, token: string, baseUrl: 
     const raw = Number(process.env.SHUGOKI_POW_DIFF || '14');
     return Number.isInteger(raw) && raw >= 8 && raw <= 24 ? raw : 12;
   })();
-  fragments.push('window.__sg_pow=' + JSON.stringify({ ts: _powTs, salt: _powSalt, difficulty: _powDiff }));
+  fragments.push('window.__sg_pow=' + JSON.stringify({ ts: _powTs, nonce: _powNonce, salt: _powSalt, difficulty: _powDiff }));
   const _ntpDrift = (typeof globalThis !== 'undefined' ? globalThis.__sg_ntpDrift : 0) || 0;
   const _ntpTime = globalThis.__sg_ntpTime || (Date.now() - _ntpDrift);
   const _clockts = clockts || _ntpTime;

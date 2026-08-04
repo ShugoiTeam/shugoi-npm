@@ -71,7 +71,7 @@ export interface ShugoiCore {
   isTrustedBot(ua: string, ip: string): Promise<boolean>;
   evaluate(ctx: EvaluateCtx): Promise<BlockDecision | null>;
   isProofValid(proof: string): boolean;
-  sgOkCookie(proof: string): string | null;
+  sgOkCookie(proof: string, ip: string, ua: string): string | null;
   log(...args: unknown[]): void;
 }
 
@@ -217,15 +217,48 @@ export function createCore(options: ShugoiCoreOptions): ShugoiCore {
     return crypto.timingSafeEqual(ba, bb)
   }
 
+  // ═══ Forteresse : sel RANDOM par challenge (nonce) + preuve ts:nonce:solution ═══
+  // L'ancien sel HMAC(secret, ts) était DÉTERMINISTE par seconde : le même sel pour
+  // tous les visiteurs de la seconde → un adversaire pouvait précalculer un lot de
+  // solutions et les rejouer via une botnet/rotation d'IP (la preuve single-use ne
+  // protège que d'un rejeu SAME-IP). Chaque challenge reçoit désormais un nonce
+  // aléatoire 64 bits : la preuve `ts:nonce:solution` est liée à SA challenge, la
+  // précomputation par lots devient impossible (chaque sollicitation = nouveau sel).
+  function sgNonce(): string {
+    return crypto.randomBytes(8).toString('hex')
+  }
+
+  // Bucket d'IP (sans ':' pour rester parseable dans le cookie). IPv4 → /24 (3 octets),
+  // IPv6 → 4 hextets. Une rotation d'IP dans le même sous-réseau garde le cookie valide.
+  function ipBucket(ip: string): string {
+    if (!ip || ip === 'unknown') return '0'
+    if (ip.includes('.')) {
+      const m = ip.match(/^(\d+\.\d+\.\d+)(?:\.\d+)?$/)
+      if (m) return m[1]
+      return '0'
+    }
+    if (ip.includes(':')) {
+      const segs = ip.split(':').filter(Boolean)
+      return segs.slice(0, 4).join('.') || '0'
+    }
+    return '0'
+  }
+
+  // Empreinte UA (16 hex) — un changement de navigateur invalide le cookie → re-challenge.
+  function uaFp(ua: string): string {
+    return crypto.createHash('sha256').update(ua || '').digest('hex').slice(0, 16)
+  }
+
   function isPowValid(proof: string): boolean {
     if (!proof || !powSecret) return false
-    const sep = proof.indexOf(':')
-    if (sep <= 0) return false
-    const tsStr = proof.slice(0, sep)
-    const sol = proof.slice(sep + 1)
+    const parts = proof.split(':')
+    if (parts.length !== 3) return false
+    const [tsStr, nonce, sol] = parts
+    if (!tsStr || !nonce || !sol) return false
+    if (!/^[0-9a-f]{16}$/.test(nonce)) return false
     const ts = parseInt(tsStr, 10)
     if (isNaN(ts) || Math.abs(Date.now() - ts * 1000) > POW_TTL_MS) return false
-    const salt = crypto.createHmac('sha256', powSecret).update(tsStr).digest('hex')
+    const salt = crypto.createHmac('sha256', powSecret).update(tsStr + ':' + nonce).digest('hex')
     const digest = crypto.createHash('sha256').update(salt + ':' + sol).digest('hex')
     // Vérifie POW_DIFFICULTY bits à zéro en tête (en hex, chaque nibble = 4 bits).
     // Audit 2026-08-03 : comptage CORRIGÉ — l'ancienne version sous-comptait les zéros
@@ -242,21 +275,28 @@ export function createCore(options: ShugoiCoreOptions): ShugoiCore {
     return leading >= POW_DIFF
   }
 
-  function sgOkCookieValue(): string {
+  // Forteresse : le cookie __sg_ok est lié au bucket IP + empreinte UA. Un cookie
+  // volé/soustrait n'est plus rejouable depuis une autre IP (ou un autre navigateur) —
+  // la signature inclut ipBucket + uaFp. Format : ts:ipBucket:uaFp:sig.
+  function sgOkCookieValue(ip: string, ua: string): string {
     const ts = Math.floor(Date.now() / 1000)
-    const sig = crypto.createHmac('sha256', powSecret).update('sg_ok:' + ts).digest('hex')
-    return ts + ':' + sig
+    const bucket = ipBucket(ip)
+    const fp = uaFp(ua)
+    const sig = crypto.createHmac('sha256', powSecret).update('sg_ok:' + ts + ':' + bucket + ':' + fp).digest('hex')
+    return ts + ':' + bucket + ':' + fp + ':' + sig
   }
 
-  function isSgOkValid(cookieVal: string): boolean {
+  function isSgOkValid(cookieVal: string, ip: string, ua: string): boolean {
     if (!powSecret) return false
-    const sep = cookieVal.indexOf(':')
-    if (sep <= 0) return false
-    const tsStr = cookieVal.slice(0, sep)
-    const sig = cookieVal.slice(sep + 1)
+    const parts = cookieVal.split(':')
+    if (parts.length !== 4) return false
+    const [tsStr, bucket, fp, sig] = parts
+    if (!tsStr || !bucket || !fp || !sig) return false
     const ts = parseInt(tsStr, 10)
     if (isNaN(ts) || Date.now() - ts * 1000 > POW_OK_TTL_MS || ts * 1000 > Date.now() + 60000) return false
-    const expected = crypto.createHmac('sha256', powSecret).update('sg_ok:' + tsStr).digest('hex')
+    // Lier au bucket IP + UA courants : un cookie d'une autre IP/UA → invalide.
+    if (bucket !== ipBucket(ip) || fp !== uaFp(ua)) return false
+    const expected = crypto.createHmac('sha256', powSecret).update('sg_ok:' + tsStr + ':' + bucket + ':' + fp).digest('hex')
     return safeEqual(sig, expected)
   }
 
@@ -381,7 +421,7 @@ export function createCore(options: ShugoiCoreOptions): ShugoiCore {
       }
       const js = `(function(){
 var P=new URLSearchParams(location.search);
-var salt=P.get('salt')||'', ts=P.get('ts')||'', diff=parseInt(P.get('diff')||'14',10), path=P.get('path')||'/';
+var salt=P.get('salt')||'', ts=P.get('ts')||'', nonce=P.get('nonce')||'', diff=parseInt(P.get('diff')||'14',10), path=P.get('path')||'/';
 // Open redirect (audit #5) : un //evil.com (protocole-relatif) ou un backslash
 // détourneraient le location.replace ci-dessous vers un domaine externe. On n'accepte
 // qu'un chemin relatif commençant par UN SEUL '/', sans backslash ni contrôle.
@@ -394,7 +434,7 @@ var n=0;
 function step(){
   crypto.subtle.digest('SHA-256',enc.encode(salt+':'+n.toString(16))).then(function(buf){
     var h=Array.from(new Uint8Array(buf)).map(function(v){return v.toString(16).padStart(2,'0')}).join('');
-    if(bits(h)>=diff){var base=path;var q=(base.indexOf('?')>=0?'&':'?')+'sg_proof='+ts+':'+n.toString(16);location.replace(base+q)}
+    if(bits(h)>=diff){var base=path;var q=(base.indexOf('?')>=0?'&':'?')+'sg_proof='+ts+':'+nonce+':'+n.toString(16);location.replace(base+q)}
     else{n++;if(n<300000)step()}
   }).catch(function(){location.reload()});
 }
@@ -426,7 +466,7 @@ step();
       //     challenge à chaque utilisateur — seuls les visiteurs sans cookie challengent.
       // Un script doit de toute façon résoudre le PoW une première fois pour obtenir le
       // cookie, puis le vrai verrou reste le render-grant (wlc + raw + mid).
-      const validCookie = !!ctx.sgOk && isSgOkValid(ctx.sgOk)
+      const validCookie = !!ctx.sgOk && isSgOkValid(ctx.sgOk, ctx.ip, ctx.ua)
       // Round 16 (R2) : la preuve est SINGLE-USE (par IP). Une seule résolution ne doit
       // pas permettre de mint des cookies sur plusieurs chemins/sessions. Une preuve
       // valide est CONSOMMÉE à sa 1re utilisation ; un rejeu (sans cookie) → 307.
@@ -447,11 +487,14 @@ step();
         // Le prefix X-Forwarded-Prefix (ex. /express derrière un reverse proxy) est
         // préfixé pour que la redirection reste dans le sous-chemin de la démo.
         const tsNow = Math.floor(Date.now() / 1000)
-        const salt = crypto.createHmac('sha256', powSecret).update(String(tsNow)).digest('hex')
+        // Forteresse : sel RANDOM par requête (nonce 64 bits) — plus de sel déterministe
+        // par seconde (précomputation par lots impossible). La preuve devient ts:nonce:n.
+        const nonce = sgNonce()
+        const salt = crypto.createHmac('sha256', powSecret).update(tsNow + ':' + nonce).digest('hex')
         const prefix = ctx.forwardedPrefix && ctx.forwardedPrefix !== '/' ? ctx.forwardedPrefix.replace(/\/$/, '') : ''
         // Sanitisation open redirect (audit #5) : on ne reflète jamais un path brut.
         const path = safeChallengePath(ctx.path.startsWith('/') ? ctx.path : '/' + ctx.path)
-        const chalUrl = prefix + '/__sg_challenge?ts=' + tsNow + '&salt=' + salt + '&diff=' + POW_DIFF + '&path=' + encodeURIComponent(prefix + path)
+        const chalUrl = prefix + '/__sg_challenge?ts=' + tsNow + '&salt=' + salt + '&nonce=' + nonce + '&diff=' + POW_DIFF + '&path=' + encodeURIComponent(prefix + path)
         log('pow challenge (307):', ctx.ua.slice(0, 40))
         return { block: true, status: 307, contentType: 'text/plain', body: BLOCK_PAGE, headers: { Location: chalUrl } }
       }
@@ -521,9 +564,9 @@ step();
 
   return { csp, cspEnabled, ensureValidated, isAllowlisted, isWhitelistedBot, isTrustedBot, evaluate, log,
     isProofValid: isPowValid,
-    sgOkCookie(proof: string): string | null {
+    sgOkCookie(proof: string, ip: string, ua: string): string | null {
       if (!proof || !isPowValid(proof)) return null
-      return '__sg_ok=' + sgOkCookieValue() + '; Path=/; HttpOnly; SameSite=Lax; Max-Age=' + Math.floor(POW_OK_TTL_MS / 1000) + (process.env.NODE_ENV === 'production' ? '; Secure' : '')
+      return '__sg_ok=' + sgOkCookieValue(ip, ua) + '; Path=/; HttpOnly; SameSite=Lax; Max-Age=' + Math.floor(POW_OK_TTL_MS / 1000) + (process.env.NODE_ENV === 'production' ? '; Secure' : '')
     }
   }
 }

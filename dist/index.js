@@ -395,12 +395,13 @@ async function generateSkeleton(siteKey, token, baseUrl, restrictedAccess, white
   fragments.push("try{if((location.search||'').indexOf('sg_proof=')>=0){var _qs=location.search.replace(/[?&]sg_proof=[^&]*/,'');var _cu=location.pathname+(_qs?_qs:'')+location.hash;history.replaceState(null,'',_cu)}}catch(e){}");
   const _powTs = Math.floor(Date.now() / 1e3);
   const _powSecret = process.env.SHUGOKI_SIGNING_SECRET || process.env.SHUGOKI_SECRET || "";
-  const _powSalt = _powSecret ? crypto.createHmac("sha256", _powSecret).update(String(_powTs)).digest("hex") : "";
+  const _powNonce = typeof crypto.randomBytes === "function" ? crypto.randomBytes(8).toString("hex") : String(Math.floor(Math.random() * 4294967295)).padStart(8, "0") + String(Math.floor(Math.random() * 4294967295)).padStart(8, "0");
+  const _powSalt = _powSecret ? crypto.createHmac("sha256", _powSecret).update(_powTs + ":" + _powNonce).digest("hex") : "";
   const _powDiff = (() => {
     const raw = Number(process.env.SHUGOKI_POW_DIFF || "14");
     return Number.isInteger(raw) && raw >= 8 && raw <= 24 ? raw : 12;
   })();
-  fragments.push("window.__sg_pow=" + JSON.stringify({ ts: _powTs, salt: _powSalt, difficulty: _powDiff }));
+  fragments.push("window.__sg_pow=" + JSON.stringify({ ts: _powTs, nonce: _powNonce, salt: _powSalt, difficulty: _powDiff }));
   const _ntpDrift = (typeof globalThis !== "undefined" ? globalThis.__sg_ntpDrift : 0) || 0;
   const _ntpTime = globalThis.__sg_ntpTime || Date.now() - _ntpDrift;
   const _clockts = clockts || _ntpTime;
@@ -839,15 +840,35 @@ function createCore(options) {
     const bb = Buffer.from(b, "utf8");
     return crypto2.timingSafeEqual(ba, bb);
   }
+  function sgNonce() {
+    return crypto2.randomBytes(8).toString("hex");
+  }
+  function ipBucket(ip) {
+    if (!ip || ip === "unknown") return "0";
+    if (ip.includes(".")) {
+      const m = ip.match(/^(\d+\.\d+\.\d+)(?:\.\d+)?$/);
+      if (m) return m[1];
+      return "0";
+    }
+    if (ip.includes(":")) {
+      const segs = ip.split(":").filter(Boolean);
+      return segs.slice(0, 4).join(".") || "0";
+    }
+    return "0";
+  }
+  function uaFp(ua) {
+    return crypto2.createHash("sha256").update(ua || "").digest("hex").slice(0, 16);
+  }
   function isPowValid(proof) {
     if (!proof || !powSecret) return false;
-    const sep = proof.indexOf(":");
-    if (sep <= 0) return false;
-    const tsStr = proof.slice(0, sep);
-    const sol = proof.slice(sep + 1);
+    const parts = proof.split(":");
+    if (parts.length !== 3) return false;
+    const [tsStr, nonce, sol] = parts;
+    if (!tsStr || !nonce || !sol) return false;
+    if (!/^[0-9a-f]{16}$/.test(nonce)) return false;
     const ts = parseInt(tsStr, 10);
     if (isNaN(ts) || Math.abs(Date.now() - ts * 1e3) > POW_TTL_MS) return false;
-    const salt = crypto2.createHmac("sha256", powSecret).update(tsStr).digest("hex");
+    const salt = crypto2.createHmac("sha256", powSecret).update(tsStr + ":" + nonce).digest("hex");
     const digest = crypto2.createHash("sha256").update(salt + ":" + sol).digest("hex");
     let leading = 0;
     for (let i = 0; i < digest.length; i++) {
@@ -861,20 +882,23 @@ function createCore(options) {
     }
     return leading >= POW_DIFF;
   }
-  function sgOkCookieValue() {
+  function sgOkCookieValue(ip, ua) {
     const ts = Math.floor(Date.now() / 1e3);
-    const sig = crypto2.createHmac("sha256", powSecret).update("sg_ok:" + ts).digest("hex");
-    return ts + ":" + sig;
+    const bucket = ipBucket(ip);
+    const fp = uaFp(ua);
+    const sig = crypto2.createHmac("sha256", powSecret).update("sg_ok:" + ts + ":" + bucket + ":" + fp).digest("hex");
+    return ts + ":" + bucket + ":" + fp + ":" + sig;
   }
-  function isSgOkValid(cookieVal) {
+  function isSgOkValid(cookieVal, ip, ua) {
     if (!powSecret) return false;
-    const sep = cookieVal.indexOf(":");
-    if (sep <= 0) return false;
-    const tsStr = cookieVal.slice(0, sep);
-    const sig = cookieVal.slice(sep + 1);
+    const parts = cookieVal.split(":");
+    if (parts.length !== 4) return false;
+    const [tsStr, bucket, fp, sig] = parts;
+    if (!tsStr || !bucket || !fp || !sig) return false;
     const ts = parseInt(tsStr, 10);
     if (isNaN(ts) || Date.now() - ts * 1e3 > POW_OK_TTL_MS || ts * 1e3 > Date.now() + 6e4) return false;
-    const expected = crypto2.createHmac("sha256", powSecret).update("sg_ok:" + tsStr).digest("hex");
+    if (bucket !== ipBucket(ip) || fp !== uaFp(ua)) return false;
+    const expected = crypto2.createHmac("sha256", powSecret).update("sg_ok:" + tsStr + ":" + bucket + ":" + fp).digest("hex");
     return safeEqual(sig, expected);
   }
   const SG_AUTHORIZED_TTL_MS = 12e4;
@@ -973,7 +997,7 @@ function createCore(options) {
       }
       const js = `(function(){
 var P=new URLSearchParams(location.search);
-var salt=P.get('salt')||'', ts=P.get('ts')||'', diff=parseInt(P.get('diff')||'14',10), path=P.get('path')||'/';
+var salt=P.get('salt')||'', ts=P.get('ts')||'', nonce=P.get('nonce')||'', diff=parseInt(P.get('diff')||'14',10), path=P.get('path')||'/';
 // Open redirect (audit #5) : un //evil.com (protocole-relatif) ou un backslash
 // d\xE9tourneraient le location.replace ci-dessous vers un domaine externe. On n'accepte
 // qu'un chemin relatif commen\xE7ant par UN SEUL '/', sans backslash ni contr\xF4le.
@@ -986,7 +1010,7 @@ var n=0;
 function step(){
   crypto.subtle.digest('SHA-256',enc.encode(salt+':'+n.toString(16))).then(function(buf){
     var h=Array.from(new Uint8Array(buf)).map(function(v){return v.toString(16).padStart(2,'0')}).join('');
-    if(bits(h)>=diff){var base=path;var q=(base.indexOf('?')>=0?'&':'?')+'sg_proof='+ts+':'+n.toString(16);location.replace(base+q)}
+    if(bits(h)>=diff){var base=path;var q=(base.indexOf('?')>=0?'&':'?')+'sg_proof='+ts+':'+nonce+':'+n.toString(16);location.replace(base+q)}
     else{n++;if(n<300000)step()}
   }).catch(function(){location.reload()});
 }
@@ -999,7 +1023,7 @@ step();
     if (isPage && powSecret && ctx.ua) {
       const proof = ctx.sgProof || "";
       const validProof = !!proof && isPowValid(proof);
-      const validCookie = !!ctx.sgOk && isSgOkValid(ctx.sgOk);
+      const validCookie = !!ctx.sgOk && isSgOkValid(ctx.sgOk, ctx.ip, ctx.ua);
       const proofFresh = validProof ? consumeProof(proof, ctx.ip) : false;
       const canProceed = validCookie || proofFresh;
       if (!canProceed) {
@@ -1010,10 +1034,11 @@ step();
           return { block: true, status: 429, contentType: "text/html", body: shieldPage(lmsgs.rateLimitTitle, lmsgs.rateLimitBody("1 min"), lmsgs.rateLimitBadge, ctx.host || "", 60, loc) };
         }
         const tsNow = Math.floor(Date.now() / 1e3);
-        const salt = crypto2.createHmac("sha256", powSecret).update(String(tsNow)).digest("hex");
+        const nonce = sgNonce();
+        const salt = crypto2.createHmac("sha256", powSecret).update(tsNow + ":" + nonce).digest("hex");
         const prefix = ctx.forwardedPrefix && ctx.forwardedPrefix !== "/" ? ctx.forwardedPrefix.replace(/\/$/, "") : "";
         const path = safeChallengePath(ctx.path.startsWith("/") ? ctx.path : "/" + ctx.path);
-        const chalUrl = prefix + "/__sg_challenge?ts=" + tsNow + "&salt=" + salt + "&diff=" + POW_DIFF + "&path=" + encodeURIComponent(prefix + path);
+        const chalUrl = prefix + "/__sg_challenge?ts=" + tsNow + "&salt=" + salt + "&nonce=" + nonce + "&diff=" + POW_DIFF + "&path=" + encodeURIComponent(prefix + path);
         log("pow challenge (307):", ctx.ua.slice(0, 40));
         return { block: true, status: 307, contentType: "text/plain", body: BLOCK_PAGE, headers: { Location: chalUrl } };
       }
@@ -1077,9 +1102,9 @@ step();
     evaluate,
     log,
     isProofValid: isPowValid,
-    sgOkCookie(proof) {
+    sgOkCookie(proof, ip, ua) {
       if (!proof || !isPowValid(proof)) return null;
-      return "__sg_ok=" + sgOkCookieValue() + "; Path=/; HttpOnly; SameSite=Lax; Max-Age=" + Math.floor(POW_OK_TTL_MS / 1e3) + (process.env.NODE_ENV === "production" ? "; Secure" : "");
+      return "__sg_ok=" + sgOkCookieValue(ip, ua) + "; Path=/; HttpOnly; SameSite=Lax; Max-Age=" + Math.floor(POW_OK_TTL_MS / 1e3) + (process.env.NODE_ENV === "production" ? "; Secure" : "");
     }
   };
 }
@@ -1191,7 +1216,7 @@ function createShugoiMiddleware(options) {
       }
       const sgProofQ = req.query && typeof req.query.sg_proof === "string" ? req.query.sg_proof : void 0;
       if (sgProofQ && res.setHeader) {
-        const okCookie = core.sgOkCookie(sgProofQ);
+        const okCookie = core.sgOkCookie(sgProofQ, ip, ua);
         if (okCookie) res.setHeader("Set-Cookie", okCookie);
       }
       const isBot = await core.isTrustedBot(ua, ip);
@@ -1293,7 +1318,7 @@ function createShugoiPlugin(options) {
           return;
         }
         if (typeof request.query?.sg_proof === "string") {
-          const okCookie = core.sgOkCookie(request.query.sg_proof);
+          const okCookie = core.sgOkCookie(request.query.sg_proof, ip, ua);
           if (okCookie) reply.header("Set-Cookie", okCookie);
         }
       } catch (err) {

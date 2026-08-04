@@ -155,7 +155,7 @@ export function createShugoiMiddleware(options: ShugoiCoreOptions) {
       // suivantes sans challenge, donc chargement rapide).
       const sgProofQ = (req.query && typeof (req.query as Record<string, unknown>).sg_proof === 'string') ? (req.query as Record<string, unknown>).sg_proof as string : undefined;
       if (sgProofQ && res.setHeader) {
-        const okCookie = core.sgOkCookie(sgProofQ);
+        const okCookie = core.sgOkCookie(sgProofQ, ip, ua);
         if (okCookie) res.setHeader('Set-Cookie', okCookie);
       }
 
@@ -275,7 +275,7 @@ export function createShugoiPlugin(options: ShugoiCoreOptions) {
         }
 
         if (typeof request.query?.sg_proof === 'string') {
-          const okCookie = core.sgOkCookie(request.query.sg_proof as string);
+          const okCookie = core.sgOkCookie(request.query.sg_proof as string, ip, ua);
           if (okCookie) reply.header('Set-Cookie', okCookie);
         }
       } catch (err) {

@@ -319,12 +319,13 @@ async function generateSkeleton(siteKey, token, baseUrl, restrictedAccess, white
   fragments.push("try{if((location.search||'').indexOf('sg_proof=')>=0){var _qs=location.search.replace(/[?&]sg_proof=[^&]*/,'');var _cu=location.pathname+(_qs?_qs:'')+location.hash;history.replaceState(null,'',_cu)}}catch(e){}");
   const _powTs = Math.floor(Date.now() / 1e3);
   const _powSecret = process.env.SHUGOKI_SIGNING_SECRET || process.env.SHUGOKI_SECRET || "";
-  const _powSalt = _powSecret ? import_crypto.default.createHmac("sha256", _powSecret).update(String(_powTs)).digest("hex") : "";
+  const _powNonce = typeof import_crypto.default.randomBytes === "function" ? import_crypto.default.randomBytes(8).toString("hex") : String(Math.floor(Math.random() * 4294967295)).padStart(8, "0") + String(Math.floor(Math.random() * 4294967295)).padStart(8, "0");
+  const _powSalt = _powSecret ? import_crypto.default.createHmac("sha256", _powSecret).update(_powTs + ":" + _powNonce).digest("hex") : "";
   const _powDiff = (() => {
     const raw = Number(process.env.SHUGOKI_POW_DIFF || "14");
     return Number.isInteger(raw) && raw >= 8 && raw <= 24 ? raw : 12;
   })();
-  fragments.push("window.__sg_pow=" + JSON.stringify({ ts: _powTs, salt: _powSalt, difficulty: _powDiff }));
+  fragments.push("window.__sg_pow=" + JSON.stringify({ ts: _powTs, nonce: _powNonce, salt: _powSalt, difficulty: _powDiff }));
   const _ntpDrift = (typeof globalThis !== "undefined" ? globalThis.__sg_ntpDrift : 0) || 0;
   const _ntpTime = globalThis.__sg_ntpTime || Date.now() - _ntpDrift;
   const _clockts = clockts || _ntpTime;
