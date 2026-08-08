@@ -20,7 +20,8 @@ function baseDirectives(apiOrigin: string): Record<string, string[]> {
   const api = [...new Set([SHUGOI_ORIGIN, apiOrigin].filter(Boolean))];
   return {
     'default-src': ["'self'"],
-    'script-src': ["'self'", "'unsafe-inline'", "'unsafe-eval'", ...api],
+    'script-src': ["'self'", "'unsafe-inline'", "'unsafe-eval'", ...api, 'blob:'],
+    'worker-src': ["'self'", 'blob:', ...api],
     'connect-src': ["'self'", ...api],
     'style-src': ["'self'", "'unsafe-inline'", ...api],
     'font-src': ["'self'", ...api, 'data:'],

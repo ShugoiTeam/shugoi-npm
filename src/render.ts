@@ -122,7 +122,7 @@ export function verifyRenderGrant(mid: string | undefined, grant: string | undef
   catch { return false; }
 }
 
-export async function renderResponseData(token: string, locale?: Locale, configUrl?: string, mid?: string, grant?: string, ip?: string, expectedSiteKey?: string): Promise<{ html?: string; error?: string; blocked?: boolean; reason?: string; message?: string; title?: string }> {
+export async function renderResponseData(token: string, locale?: Locale, configUrl?: string, mid?: string, grant?: string, ip?: string, expectedSiteKey?: string, _secret?: string): Promise<{ html?: string; error?: string; blocked?: boolean; reason?: string; message?: string; title?: string }> {
   if (!token || token.length < 16 || token.length > 300) return { error: 'not_found' };
 
   // CRITIQUE 1 (§7bis) : le token a la forme `siteKey:timestamp:nonce:sig`. Le render
@@ -142,7 +142,7 @@ export async function renderResponseData(token: string, locale?: Locale, configU
   if (!verifyRenderGrant(mid, grant, token, ip, expectedSiteKey)) return { error: 'not_found' };
 
   // Vérifier le flag en direct depuis l'API interne (pas de cache)
-  const contentReplaceOn = await fetchContentReplaceFlag(token, configUrl || 'http://127.0.0.1:3098');
+  const contentReplaceOn = await fetchContentReplaceFlag(token, configUrl || 'http://127.0.0.1:3098', _secret);
 
   // 1. Essayer par token (mémoire)
   const memHtml = readFromMemory(token);
@@ -180,17 +180,17 @@ export async function renderResponseData(token: string, locale?: Locale, configU
   return verifyTokenAndRead(token, locale);
 }
 
-async function fetchContentReplaceFlag(token: string, internalUrl: string, retries = 2): Promise<boolean> {
+async function fetchContentReplaceFlag(token: string, internalUrl: string, _secret?: string, retries = 2): Promise<boolean> {
   try {
     const siteKey = token.split(':')[0];
     if (!siteKey) return false;
     // Le flag est lu via getConfig (cache mémoire + stale-refresh en arrière-plan).
     // Pas de __clearConfigCache() ici : purger le cache à CHAQUE render forçait un
     // fetch réseau (~300-400ms) vers l'API interne à chaque requête → render lent.
-    const { flags } = await getConfig(siteKey, internalUrl);
+    const { flags } = await getConfig(siteKey, internalUrl, _secret);
     return flags?.enableContentReplacementCheck === true;
   } catch {
-    if (retries > 0) return fetchContentReplaceFlag(token, internalUrl, retries - 1);
+    if (retries > 0) return fetchContentReplaceFlag(token, internalUrl, _secret, retries - 1);
     return false;
   }
 }
@@ -257,8 +257,8 @@ export function injectReferrerPolicy(html: string): string {
   return meta + html;
 }
 
-export async function handleRender(token: string, res: { setHeader?: (k: string, v: string) => void; send?: (body: string) => void; end?: (body: string) => void }, configUrl?: string, mid?: string, grant?: string, ip?: string, expectedSiteKey?: string, baseUrl?: string) {
-  const data = await renderResponseData(token, undefined, configUrl, mid, grant, ip, expectedSiteKey);
+export async function handleRender(token: string, res: { setHeader?: (k: string, v: string) => void; send?: (body: string) => void; end?: (body: string) => void }, configUrl?: string, mid?: string, grant?: string, ip?: string, expectedSiteKey?: string, baseUrl?: string, _secret?: string) {
+  const data = await renderResponseData(token, undefined, configUrl, mid, grant, ip, expectedSiteKey, _secret);
   if (data.html && mid) data.html = injectNoticeScript(data.html, mid, expectedSiteKey || token.split(':')[0], baseUrl);
   if (data.html) data.html = injectReferrerPolicy(data.html);
   const json = JSON.stringify(data);
@@ -302,17 +302,33 @@ const NOTICE_SCRIPT = `
   if(!mid||!sk||window.__sg_noticeEnabled===false)return;
   var base=window.__sg_baseUrl||'';
   var origin=base.replace(/\\/api\\/v1\\/?$/,'');
-  var _OVERLAY_CSS='position:fixed!important;inset:0!important;z-index:2147483647!important;background:rgba(0,0,0,.6)!important;display:flex!important;align-items:center!important;justify-content:center!important;padding:1.2rem!important;pointer-events:auto!important';
-  var _CARD_CSS='background:#fff!important;border:4px solid #000!important;border-radius:28px 6px 32px 10px!important;box-shadow:14px 14px 0 #000!important;padding:0!important;max-width:720px!important;width:100%!important;text-align:center!important;font-family:Arial,sans-serif!important;display:flex!important;overflow:hidden!important';
-  var _CARD_HTML='<div style="flex:0 0 320px;display:flex;align-items:center;justify-content:center;padding:1.5rem 1rem 1.5rem 3rem;overflow:hidden"><img src="'+origin+'/favicon.png" alt="" style="width:100%;height:auto;max-width:220px;pointer-events:none"></div><div style="flex:1;padding:1.6rem 1.8rem;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center"><img src="'+origin+'/brand-block.png" alt="Shugoi" style="display:block;margin:0 0 .3rem;pointer-events:none;max-width:100%;height:auto;max-height:40px"><div style="border:2px solid #000;display:inline-block;border-radius:8px 2px 12px 4px;padding:.2rem .6rem;font-size:.5rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#E87090;margin-bottom:.6rem">Protection anti-abus</div><p style="font-size:.8rem;color:#555;line-height:1.7;margin:0 .4rem .6rem;max-width:280px">Ce site utilise Shugoi pour se prot\\u00e9ger contre les abus et la fraude. Des caract\\u00e9ristiques techniques de votre navigateur sont analys\\u00e9es pour d\\u00e9tecter les scripts automatis\\u00e9s, Tor, les VPN et les environnements virtuels. Aucune donn\\u00e9e personnelle n\\'est collect\\u00e9e.</p><div style="margin-top:.5rem"><button id="__sg_ok" style="background:#E87090;color:#fff;border:3px solid #000;border-radius:12px 3px 14px 5px;padding:.4rem 2rem;font-size:.8rem;font-weight:700;cursor:pointer">OK</button></div><div style="margin-top:.5rem;font-size:.5rem;color:#ccc"><a href="'+origin+'/legal/shugoi-notice" target="_blank" style="color:#E87090;text-decoration:underline">En savoir plus \\u00b7 shugoi.com</a></div></div>';
+  var _OVERLAY_DESK='position:fixed!important;inset:0!important;z-index:2147483647!important;background:rgba(0,0,0,.6)!important;display:flex!important;align-items:center!important;justify-content:center!important;padding:1.2rem!important;pointer-events:auto!important';
+  var _OVERLAY_MOB='position:fixed!important;inset:0!important;z-index:2147483647!important;background:rgba(0,0,0,.6)!important;display:flex!important;align-items:center!important;justify-content:center!important;padding:.6rem!important;pointer-events:auto!important';
+  var _CARD_DESK='background:#fffdfa!important;border:1px solid rgba(43,33,29,.16)!important;border-radius:16px 5px 16px 5px!important;box-shadow:0 10px 30px rgba(43,33,29,.08)!important;padding:2.8rem 2.4rem 2.6rem!important;max-width:460px!important;width:100%!important;text-align:center!important;font-family:system-ui,-apple-system,Arial,sans-serif!important';
+  var _CARD_MOB='background:#fffdfa!important;border:1px solid rgba(43,33,29,.16)!important;border-radius:14px 4px 14px 4px!important;box-shadow:0 10px 30px rgba(43,33,29,.08)!important;padding:2rem 1.3rem 2.2rem!important;max-width:340px!important;width:100%!important;text-align:center!important;font-family:system-ui,-apple-system,Arial,sans-serif!important';
+  var _CARD_DESK_DARK='background:#241a30!important;border:1px solid rgba(241,232,245,.14)!important;border-radius:16px 5px 16px 5px!important;box-shadow:0 10px 30px rgba(0,0,0,.4)!important;padding:2.8rem 2.4rem 2.6rem!important;max-width:460px!important;width:100%!important;text-align:center!important;font-family:system-ui,-apple-system,Arial,sans-serif!important';
+  var _CARD_MOB_DARK='background:#241a30!important;border:1px solid rgba(241,232,245,.14)!important;border-radius:14px 4px 14px 4px!important;box-shadow:0 10px 30px rgba(0,0,0,.4)!important;padding:2rem 1.3rem 2.2rem!important;max-width:340px!important;width:100%!important;text-align:center!important;font-family:system-ui,-apple-system,Arial,sans-serif!important';
+  var _MOBILE=false;
+  function _isMobile(){try{return window.matchMedia&&window.matchMedia('(max-width:640px)').matches}catch(e){return false}}
+  _MOBILE=_isMobile();
+  var _DARK=false;
+  function _isDark(){try{return window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches}catch(e){return false}}
+  _DARK=_isDark();
+  function _OV(){return _MOBILE?_OVERLAY_MOB:_OVERLAY_DESK}
+  function _CC(){return _DARK?(_MOBILE?_CARD_MOB_DARK:_CARD_DESK_DARK):(_MOBILE?_CARD_MOB:_CARD_DESK)}
+  function _CH(){return _DARK?(_MOBILE?_CARD_HTML_MOB_DARK:_CARD_HTML_DESK_DARK):(_MOBILE?_CARD_HTML_MOB:_CARD_HTML_DESK)}
+  var _CARD_HTML_DESK='<img src="'+origin+'/favicon-block.png" alt="" style="width:80px;height:80px;pointer-events:none;transform:rotate(-2.5deg);filter:drop-shadow(2px 4px 8px rgba(231,112,144,.55));margin:0 auto .6rem;display:block"><img src="'+origin+'/brand-block.png" alt="Shugoi" style="display:block;margin:0 auto .4rem;pointer-events:none;max-width:100%;height:auto"><div style="display:inline-block;background:#fdf0f4;border:1px solid rgba(194,84,111,.35);border-radius:10px 4px 10px 4px;padding:.3rem .9rem;font-size:.6rem;font-weight:600;text-transform:uppercase;letter-spacing:.16em;color:#c2546f;margin-bottom:1.4rem">Protection anti-abus</div><p style="font-size:.9rem;color:#7a6a62;line-height:1.8;max-width:380px;margin:0 auto .9rem">Ce site utilise Shugoi pour se prot\\u00e9ger contre les abus et la fraude. Des caract\\u00e9ristiques techniques de votre navigateur sont analys\\u00e9es pour d\\u00e9tecter les scripts automatis\\u00e9s, Tor, les VPN et les environnements virtuels. Aucune donn\\u00e9e personnelle n\\'est collect\\u00e9e.</p><button id="__sg_ok" style="background:#E87090;color:#fff;border:1px solid #c2546f;border-radius:10px 4px 10px 4px;padding:.55rem 3rem;font-size:.8rem;font-weight:600;cursor:pointer;font-family:inherit">OK</button><p style="font-size:.55rem;color:#c2546f;margin-top:1.5rem"><a href="'+origin+'/legal/shugoi-notice" target="_blank" style="color:#c2546f;text-decoration:underline">En savoir plus \\u00b7 shugoi.com</a></p>';
+  var _CARD_HTML_MOB='<img src="'+origin+'/favicon-block.png" alt="" style="width:62px;height:62px;pointer-events:none;transform:rotate(-2.5deg);filter:drop-shadow(2px 4px 8px rgba(231,112,144,.55));margin:0 auto .6rem;display:block"><img src="'+origin+'/brand-block.png" alt="Shugoi" style="display:block;margin:0 auto .4rem;pointer-events:none;max-width:100%;height:auto"><div style="display:inline-block;background:#fdf0f4;border:1px solid rgba(194,84,111,.35);border-radius:10px 4px 10px 4px;padding:.3rem .9rem;font-size:.55rem;font-weight:600;text-transform:uppercase;letter-spacing:.16em;color:#c2546f;margin-bottom:1.1rem">Protection anti-abus</div><p style="font-size:.85rem;color:#7a6a62;line-height:1.75;max-width:340px;margin:0 auto .8rem">Ce site utilise Shugoi pour se prot\\u00e9ger contre les abus et la fraude. Des caract\\u00e9ristiques techniques de votre navigateur sont analys\\u00e9es pour d\\u00e9tecter les scripts automatis\\u00e9s, Tor, les VPN et les environnements virtuels. Aucune donn\\u00e9e personnelle n\\'est collect\\u00e9e.</p><button id="__sg_ok" style="background:#E87090;color:#fff;border:1px solid #c2546f;border-radius:10px 4px 10px 4px;padding:.5rem 2.4rem;font-size:.8rem;font-weight:600;cursor:pointer;font-family:inherit">OK</button><p style="font-size:.55rem;color:#c2546f;margin-top:1.3rem"><a href="'+origin+'/legal/shugoi-notice" target="_blank" style="color:#c2546f;text-decoration:underline">En savoir plus \\u00b7 shugoi.com</a></p>';
+  var _CARD_HTML_DESK_DARK='<img src="'+origin+'/favicon-block.png" alt="" style="width:80px;height:80px;pointer-events:none;transform:rotate(-2.5deg);filter:drop-shadow(2px 4px 8px rgba(231,112,144,.55));margin:0 auto .6rem;display:block"><img src="'+origin+'/brand-block.png" alt="Shugoi" style="display:block;margin:0 auto .4rem;pointer-events:none;max-width:100%;height:auto"><div style="display:inline-block;background:rgba(233,137,159,.16);border:1px solid rgba(233,137,159,.5);border-radius:10px 4px 10px 4px;padding:.3rem .9rem;font-size:.6rem;font-weight:600;text-transform:uppercase;letter-spacing:.16em;color:#e9899f;margin-bottom:1.4rem">Protection anti-abus</div><p style="font-size:.9rem;color:#a795b4;line-height:1.8;max-width:380px;margin:0 auto .9rem">Ce site utilise Shugoi pour se prot\\u00e9ger contre les abus et la fraude. Des caract\\u00e9ristiques techniques de votre navigateur sont analys\\u00e9es pour d\\u00e9tecter les scripts automatis\\u00e9s, Tor, les VPN et les environnements virtuels. Aucune donn\\u00e9e personnelle n\\'est collect\\u00e9e.</p><button id="__sg_ok" style="background:#E87090;color:#fff;border:1px solid #c2546f;border-radius:10px 4px 10px 4px;padding:.55rem 3rem;font-size:.8rem;font-weight:600;cursor:pointer;font-family:inherit">OK</button><p style="font-size:.55rem;color:#e9899f;margin-top:1.5rem"><a href="'+origin+'/legal/shugoi-notice" target="_blank" style="color:#e9899f;text-decoration:underline">En savoir plus \\u00b7 shugoi.com</a></p>';
+  var _CARD_HTML_MOB_DARK='<img src="'+origin+'/favicon-block.png" alt="" style="width:62px;height:62px;pointer-events:none;transform:rotate(-2.5deg);filter:drop-shadow(2px 4px 8px rgba(231,112,144,.55));margin:0 auto .6rem;display:block"><img src="'+origin+'/brand-block.png" alt="Shugoi" style="display:block;margin:0 auto .4rem;pointer-events:none;max-width:100%;height:auto"><div style="display:inline-block;background:rgba(233,137,159,.16);border:1px solid rgba(233,137,159,.5);border-radius:10px 4px 10px 4px;padding:.3rem .9rem;font-size:.55rem;font-weight:600;text-transform:uppercase;letter-spacing:.16em;color:#e9899f;margin-bottom:1.1rem">Protection anti-abus</div><p style="font-size:.85rem;color:#a795b4;line-height:1.75;max-width:340px;margin:0 auto .8rem">Ce site utilise Shugoi pour se prot\\u00e9ger contre les abus et la fraude. Des caract\\u00e9ristiques techniques de votre navigateur sont analys\\u00e9es pour d\\u00e9tecter les scripts automatis\\u00e9s, Tor, les VPN et les environnements virtuels. Aucune donn\\u00e9e personnelle n\\'est collect\\u00e9e.</p><button id="__sg_ok" style="background:#E87090;color:#fff;border:1px solid #c2546f;border-radius:10px 4px 10px 4px;padding:.5rem 2.4rem;font-size:.8rem;font-weight:600;cursor:pointer;font-family:inherit">OK</button><p style="font-size:.55rem;color:#e9899f;margin-top:1.3rem"><a href="'+origin+'/legal/shugoi-notice" target="_blank" style="color:#e9899f;text-decoration:underline">En savoir plus \\u00b7 shugoi.com</a></p>';
   var _closed=false;
   var mo=null;
   var _applying=false;
   function ack(){try{fetch(base+'/notice',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({machineId:mid,siteKey:sk}),keepalive:true,signal:AbortSignal.timeout(4000)}).catch(function(){})}catch(e){}}
   function buildOverlay(){
-    var o=document.createElement('div');o.id='__sg_o';o.style.cssText=_OVERLAY_CSS;
-    var c=document.createElement('div');c.id='__sg_cd';c.style.cssText=_CARD_CSS;
-    c.innerHTML=_CARD_HTML;
+    var o=document.createElement('div');o.id='__sg_o';o.style.cssText=_OV();
+    var c=document.createElement('div');c.id='__sg_cd';c.style.cssText=_CC();
+    c.innerHTML=_CH();
     o.appendChild(c);return o;
   }
   function close(){_closed=true;try{if(mo)mo.disconnect()}catch(e){}var el=document.getElementById('__sg_o');if(el&&el.parentNode)el.parentNode.removeChild(el);document.body.style.overflow='';document.documentElement.style.overflow='';}
@@ -330,12 +346,12 @@ const NOTICE_SCRIPT = `
     try{
       var o=document.getElementById('__sg_o');
       if(!o){o=buildOverlay();document.documentElement.appendChild(o);}
-      if(o.style.cssText!==_OVERLAY_CSS)o.style.cssText=_OVERLAY_CSS;
+      if(o.style.cssText!==_OV())o.style.cssText=_OV();
       var c=document.getElementById('__sg_cd');
       if(!c){o.innerHTML='';o.appendChild(buildOverlay().firstChild);}
       else{
-        if(c.style.cssText!==_CARD_CSS)c.style.cssText=_CARD_CSS;
-        if(c.innerHTML!==_CARD_HTML)c.innerHTML=_CARD_HTML;
+        if(c.style.cssText!==_CC())c.style.cssText=_CC();
+        if(c.innerHTML!==_CH())c.innerHTML=_CH();
       }
       rebind();
       if(document.body.style.overflow!=='hidden')document.body.style.overflow='hidden';
@@ -359,6 +375,8 @@ const NOTICE_SCRIPT = `
       try{o.__sgObserved=true;mo.observe(o,{childList:true,subtree:true,attributes:true,characterData:true,attributeFilter:['style','class','id']});}catch(e){}
     }catch(e){}
   }
+  // Mobile : bascule desktop/stackée sur redimensionnement (ré-applique via enforce).
+  try{window.addEventListener('resize',function(){var _m=_isMobile();if(_m!==_MOBILE){_MOBILE=_m;enforce();}},{passive:true})}catch(e){}
   function init(){if(document.body)show();else if(document.addEventListener)document.addEventListener('DOMContentLoaded',show);else setTimeout(init,50)}
   fetch(base+'/notice?machineId='+encodeURIComponent(mid)+'&siteKey='+encodeURIComponent(sk),{signal:AbortSignal.timeout(4000)}).then(function(r){return r.json()}).then(function(d){if(!d.acknowledged)init()}).catch(function(){init()});
 })();
@@ -413,9 +431,13 @@ function pruneCache<T extends { fetchedAt: number }>(m: Map<string, T>): void {
   for (let i = 0; i < sorted.length - MAX_TENANTS; i++) m.delete(sorted[i][0]);
 }
 
-async function refreshConfig(siteKey: string, baseUrl: string, entry: ConfigEntry): Promise<void> {
+async function refreshConfig(siteKey: string, baseUrl: string, entry: ConfigEntry, secret?: string): Promise<void> {
   try {
-    const res = await fetch(baseUrl + '/whitelist?key=' + encodeURIComponent(siteKey), {
+    // F2 (divulgation) : la config (detectionFlags/skipPaths) n'est rendue qu'à une clé
+    // prouvant possession du secret (sig = HMAC(secret, cb)). La siteKey est publique.
+    const cb = Date.now();
+    const sig = secret ? crypto.createHmac('sha256', secret).update(cb.toString()).digest('hex') : '';
+    const res = await fetch(baseUrl + '/whitelist?key=' + encodeURIComponent(siteKey) + '&cb=' + cb + (sig ? '&sig=' + sig : ''), {
       signal: AbortSignal.timeout(CONFIG_FETCH_TIMEOUT),
     });
     if (res.ok) {
@@ -428,7 +450,7 @@ async function refreshConfig(siteKey: string, baseUrl: string, entry: ConfigEntr
   entry.fetchedAt = Date.now();
 }
 
-export async function getConfig(siteKey: string, baseUrl: string): Promise<{ whitelist: string[]; flags: Record<string, boolean>; skipPaths: string[] }> {
+export async function getConfig(siteKey: string, baseUrl: string, secret?: string): Promise<{ whitelist: string[]; flags: Record<string, boolean>; skipPaths: string[] }> {
   const key = configKey(baseUrl, siteKey);
   let entry = _configCache.get(key);
   if (!entry) {
@@ -441,14 +463,14 @@ export async function getConfig(siteKey: string, baseUrl: string): Promise<{ whi
 
   if (entry.fetchedAt === 0 || age > CONFIG_STALE_MAX) {
     if (!entry.inflight) {
-      entry.inflight = refreshConfig(siteKey, baseUrl, entry).finally(() => { entry!.inflight = null; });
+      entry.inflight = refreshConfig(siteKey, baseUrl, entry, secret).finally(() => { entry!.inflight = null; });
     }
     await entry.inflight;
     return { whitelist: entry.whitelist, flags: entry.flags, skipPaths: entry.skipPaths };
   }
 
   if (age > CONFIG_CACHE_TTL && !entry.inflight) {
-    entry.inflight = refreshConfig(siteKey, baseUrl, entry).finally(() => { entry!.inflight = null; });
+    entry.inflight = refreshConfig(siteKey, baseUrl, entry, secret).finally(() => { entry!.inflight = null; });
     entry.inflight.catch(() => {});
   }
 
@@ -459,8 +481,8 @@ export async function fetchWhitelistForSiteKey(siteKey: string, baseUrl: string)
   return (await getConfig(siteKey, baseUrl)).whitelist;
 }
 
-export async function fetchConfigForSiteKey(siteKey: string, baseUrl: string): Promise<Record<string, boolean>> {
-  return (await getConfig(siteKey, baseUrl)).flags;
+export async function fetchConfigForSiteKey(siteKey: string, baseUrl: string, secret?: string): Promise<Record<string, boolean>> {
+  return (await getConfig(siteKey, baseUrl, secret)).flags;
 }
 
 export function __clearConfigCache(): void { _configCache.clear(); }
@@ -516,10 +538,10 @@ export async function ensureGuardsReady(baseUrl: string, secret?: string, siteKe
   await fetchGuardScripts(baseUrl, secret, siteKey);
 }
 
-export async function generateSkeleton(siteKey: string, token: string, baseUrl: string, restrictedAccess?: boolean, whitelist?: string[], renderUrl?: string, locale?: Locale, flags?: Record<string, boolean>, clockts?: number): Promise<string> {
+export async function generateSkeleton(siteKey: string, token: string, baseUrl: string, restrictedAccess?: boolean, whitelist?: string[], renderUrl?: string, locale?: Locale, flags?: Record<string, boolean>, clockts?: number, signingSecret?: string): Promise<string> {
   await ensureGuardsReady(baseUrl, undefined, siteKey);
   const rurl = renderUrl || './__shugoi/render';
-  const cfg = flags ?? (await getConfig(siteKey, baseUrl)).flags;
+  const cfg = flags ?? (await getConfig(siteKey, baseUrl, signingSecret)).flags;
   const loc = locale || 'en';
   const msgs = MESSAGES[loc];
   const cache = getCacheEntry(baseUrl, siteKey);
@@ -572,7 +594,7 @@ export async function generateSkeleton(siteKey: string, token: string, baseUrl: 
   const tamperTitle = jsStr(msgs.tamperTitle);
   const fbBadge = jsStr(msgs.blockedBadge);
   const fbTitle = jsStr(msgs.blockedTitle);
-  fragments.push('window.__sg_showBlock=function(msg,title,badge){var h="<head><meta charset=UTF-8><meta name=viewport content=width=device-width,initial-scale=1><style>@font-face{font-family:\\x27Alex Brush\\x27;src:url(https://shugoi.com/alex-brush.woff2?v=2) format(\\x27woff2\\x27);font-display:swap}*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}html,body{height:100%;background:#fcf9f5}body{font-family:system-ui,-apple-system,\\\\x27Segoe UI\\\\x27,Roboto,sans-serif;display:flex;align-items:center;justify-content:center;padding:1.2rem}#c{max-width:460px;width:100%;background:#fff;border:4px solid #000;border-radius:28px 6px 32px 10px;box-shadow:12px 12px 0 #000;padding:3rem 2.4rem 2.8rem;text-align:center}#c .l{width:80px;height:80px;pointer-events:none;transform:rotate(-2.5deg);margin:0 auto .6rem;display:block}#c .b{display:block;margin:0 auto .2rem;pointer-events:none;max-width:100%;height:auto}#c .bdg{display:inline-block;border:2px solid #000;border-radius:10px 2px 14px 4px;padding:.3rem .9rem;font-size:.6rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#E87090;margin-bottom:1.4rem}#c h2{font-family:\\x27Alex Brush\\x27,Georgia,\\\\x27Times New Roman\\\\x27,serif;font-size:2.2rem;color:#E87090;font-weight:400;margin:0 auto .6rem}#c p.desc{font-size:.9rem;color:#555;line-height:1.8;max-width:380px;margin:0 auto}#c p.ft{font-size:.55rem;color:#E87090;margin-top:1.8rem}</style></head><body><div id=c><img src=https://shugoi.com/favicon-block.png class=l><img src=https://shugoi.com/brand-block.png class=b><div class=bdg>"+(badge||"' + fbBadge + '")+"</div><h2>"+(title||"' + fbTitle + '")+"</h2><p class=desc>"+(msg||"")+"</p><p class=ft>"+location.hostname+" \\u00b7 Shugoi</p></div></body>";document.documentElement.innerHTML=h}');
+  fragments.push('window.__sg_showBlock=function(msg,title,badge){var h="<head><meta charset=UTF-8><meta name=viewport content=width=device-width,initial-scale=1><style>@font-face{font-family:\\x27Alex Brush\\x27;src:url(https://shugoi.com/alex-brush.woff2?v=2) format(\\x27woff2\\x27);font-display:swap}*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}html,body{height:100%;background:#fcf9f5}body{font-family:system-ui,-apple-system,\\\\x27Segoe UI\\\\x27,Roboto,sans-serif;display:flex;align-items:center;justify-content:center;padding:1.2rem}#c{max-width:460px;width:100%;background:#fff;border:4px solid #000;border-radius:28px 6px 32px 10px;box-shadow:12px 12px 0 #000;padding:3rem 2.4rem 2.8rem;text-align:center}#c .l{width:80px;height:80px;pointer-events:none;transform:rotate(-2.5deg);margin:0 auto .6rem;display:block}#c .b{display:block;margin:0 auto .2rem;pointer-events:none;max-width:100%;height:auto}#c .bdg{display:inline-block;border:2px solid #000;border-radius:10px 2px 14px 4px;padding:.3rem .9rem;font-size:.6rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#E87090;margin-bottom:1.4rem}#c h2{font-family:\\x27Alex Brush\\x27,Georgia,\\\\x27Times New Roman\\\\x27,serif;font-size:2.2rem;color:#E87090;font-weight:400;margin:0 auto .6rem}#c p.desc{font-size:.9rem;color:#555;line-height:1.8;max-width:380px;margin:0 auto}#c p.ft{font-size:.55rem;color:#E87090;margin-top:1.8rem}@media (prefers-color-scheme:dark){html,body{background:#16101c}#c{background:#241a30;border-color:rgba(241,232,245,.14);box-shadow:0 10px 30px rgba(0,0,0,.4)}#c .bdg{background:rgba(233,137,159,.16);border-color:rgba(233,137,159,.5);color:#e9899f}#c h2{color:#e9899f}#c p.desc{color:#a795b4}#c p.ft{color:#e9899f}}</style></head><body><div id=c><img src=https://shugoi.com/favicon-block.png class=l><img src=https://shugoi.com/brand-block.png class=b><div class=bdg>"+(badge||"' + fbBadge + '")+"</div><h2>"+(title||"' + fbTitle + '")+"</h2><p class=desc>"+(msg||"")+"</p><p class=ft>"+location.hostname+" \\u00b7 Shugoi</p></div></body>";document.documentElement.innerHTML=h}');
   fragments.push('var t="' + token + '"');
   fragments.push('window.__sg_token="' + token + '"');
   fragments.push('var k="' + siteKey + '"');
@@ -605,7 +627,7 @@ export async function generateSkeleton(siteKey: string, token: string, baseUrl: 
 
 export async function injectGuardScripts(html: string, siteKey: string, baseUrl: string, whitelist?: string[] | null, restrictedAccess?: boolean, signingSecret?: string, req?: unknown, _allowedOrigins?: string[], locale?: Locale, clockts?: number): Promise<string> {
   await ensureGuardsReady(baseUrl, signingSecret, siteKey);
-  const cfgData = await getConfig(siteKey, baseUrl);
+  const cfgData = await getConfig(siteKey, baseUrl, signingSecret);
   const wl = whitelist ?? cfgData.whitelist;
   const ts = Date.now();
   const signed = signToken(siteKey, ts, signingSecret);
@@ -619,7 +641,7 @@ export async function injectGuardScripts(html: string, siteKey: string, baseUrl:
   else injectedHtml = configScript + injectedHtml;
   const renderUrl = './__shugoi/render';
   storeHtml(signed.token, injectedHtml);
-  return generateSkeleton(siteKey, signed.token, baseUrl, restrictedAccess, wl, renderUrl, locale, cfgData.flags, clockts);
+  return generateSkeleton(siteKey, signed.token, baseUrl, restrictedAccess, wl, renderUrl, locale, cfgData.flags, clockts, signingSecret);
 }
 
 export function enableDiskStore(multiProcess: boolean) {

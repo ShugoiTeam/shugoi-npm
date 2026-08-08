@@ -101,6 +101,24 @@ describe('Express integration', () => {
     expect(body).not.toContain('<script>eval(');
   });
 
+  it('bypass le challenge PoW pour les bots whitelistés (og:image / SEO) mais challenge un UA navigateur', async () => {
+    const { createCore } = await import('../../src/core');
+    const prev = process.env.SHUGOKI_SIGNING_SECRET;
+    process.env.SHUGOKI_SIGNING_SECRET = 'test-secret-pow';
+    try {
+      const core = createCore({ siteKey: 'sg_sk_live_test', verifyBots: false, allowlist: [] });
+      const bot = await core.evaluate({ path: '/', ua: 'facebookexternalhit/1.1', ip: '1.2.3.4' });
+      expect(bot).toBeNull();
+      const tw = await core.evaluate({ path: '/', ua: 'Twitterbot/1.0', ip: '1.2.3.4' });
+      expect(tw).toBeNull();
+      const browser = await core.evaluate({ path: '/', ua: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36', ip: '1.2.3.4', secFetchDest: 'document', secFetchMode: 'navigate', acceptLanguage: 'en' });
+      expect(browser?.status).toBe(307);
+    } finally {
+      if (prev === undefined) delete process.env.SHUGOKI_SIGNING_SECRET;
+      else process.env.SHUGOKI_SIGNING_SECRET = prev;
+    }
+  });
+
   it('sets CSP header', async () => {
     const { headers } = await httpGet(`http://127.0.0.1:${port}/`, {
       'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36',

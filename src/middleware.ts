@@ -57,7 +57,7 @@ export function createShugoiMiddleware(options: ShugoiCoreOptions) {
         // CRITIQUE 1 (§7bis) : le render vérifie que le token appartient à CE site
         // (options.siteKey) — un grant émis par un autre site (pyxelze) est refusé ici.
         // baseUrl transmis à la notice (injectée) : __sg_baseUrl est nettoyé par _sgCl.
-        return handleRender(q.token || '', res, internalUrl, q.mid || '', q.grant || '', ip, options.siteKey, baseUrl);
+        return handleRender(q.token || '', res, internalUrl, q.mid || '', q.grant || '', ip, options.siteKey, baseUrl, signingSecret);
       }
 
       // Challenge page : GET/HEAD uniquement (round 13, même normalisation).
@@ -99,7 +99,7 @@ export function createShugoiMiddleware(options: ShugoiCoreOptions) {
       // exposerait toutes les sous-routes sans guard. L'utilisateur liste chaque chemin.
       if (autoInject && options.siteKey) {
         try {
-          const { skipPaths } = await getConfig(options.siteKey, internalUrl);
+          const { skipPaths } = await getConfig(options.siteKey, internalUrl, signingSecret);
           if (skipPaths?.some((p: string) => path === p)) {
             try {
               // @ts-ignore
@@ -159,8 +159,10 @@ export function createShugoiMiddleware(options: ShugoiCoreOptions) {
         if (okCookie) res.setHeader('Set-Cookie', okCookie);
       }
 
-      // Split-render: inject skeleton for HTML pages (skip for allowlisted paths and whitelisted bots)
-      const isBot = await core.isTrustedBot(ua, ip);
+      // Split-render: inject skeleton for HTML pages (skip for allowlisted paths and
+      // whitelisted bots). Les bots (moteurs + partage social) reçoivent le HTML BRUT
+      // (og:image, indexation) — ils ne peuvent pas exécuter le skeleton eval().
+      const isBot = (await core.isTrustedBot(ua, ip)) || core.isWhitelistedBot(ua);
 
       if (autoInject && splitRender && !isBot && !core.isAllowlisted(path)) {
         let injected = false;
@@ -289,6 +291,10 @@ export function createShugoiPlugin(options: ShugoiCoreOptions) {
       const path = request.url.split('?')[0];
       if (path.endsWith('/__shugoi/render') || path.endsWith('/__shugoi/healthcheck')) return payload;
       if (reply.statusCode !== 200) return payload;
+      // Bots (moteurs + partage social) : HTML brut sans skeleton — ils ne peuvent pas
+      // exécuter le skeleton eval() (og:image / indexation).
+      const ua = typeof request.headers?.['user-agent'] === 'string' ? request.headers['user-agent'] : '';
+      if (core.isWhitelistedBot(ua)) return payload;
       const ct = reply.getHeader('content-type');
       if (!ct || String(ct).includes('text/html')) {
         const pluginLocale: Locale = resolveLocale(options.locale, typeof request.headers?.['accept-language'] === 'string' ? request.headers?.['accept-language'] : undefined);

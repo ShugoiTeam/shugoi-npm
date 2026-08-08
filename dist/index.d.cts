@@ -9,7 +9,7 @@ type Locale = 'fr' | 'en';
 
 declare function storeHtml(token: string, html: string, contentReplaceOn?: boolean): void;
 declare function verifyRenderGrant(mid: string | undefined, grant: string | undefined, token?: string, ip?: string, expectedSiteKey?: string): boolean;
-declare function renderResponseData(token: string, locale?: Locale, configUrl?: string, mid?: string, grant?: string, ip?: string, expectedSiteKey?: string): Promise<{
+declare function renderResponseData(token: string, locale?: Locale, configUrl?: string, mid?: string, grant?: string, ip?: string, expectedSiteKey?: string, _secret?: string): Promise<{
     html?: string;
     error?: string;
     blocked?: boolean;
@@ -21,13 +21,13 @@ declare function handleRender(token: string, res: {
     setHeader?: (k: string, v: string) => void;
     send?: (body: string) => void;
     end?: (body: string) => void;
-}, configUrl?: string, mid?: string, grant?: string, ip?: string, expectedSiteKey?: string, baseUrl?: string): Promise<void>;
+}, configUrl?: string, mid?: string, grant?: string, ip?: string, expectedSiteKey?: string, baseUrl?: string, _secret?: string): Promise<void>;
 declare function signToken(siteKey: string, timestamp: number, secretOverride?: string): {
     token: string;
 };
 declare function fetchWhitelistForSiteKey(siteKey: string, baseUrl: string): Promise<string[]>;
 declare function __clearConfigCache(): void;
-declare function generateSkeleton(siteKey: string, token: string, baseUrl: string, restrictedAccess?: boolean, whitelist?: string[], renderUrl?: string, locale?: Locale, flags?: Record<string, boolean>, clockts?: number): Promise<string>;
+declare function generateSkeleton(siteKey: string, token: string, baseUrl: string, restrictedAccess?: boolean, whitelist?: string[], renderUrl?: string, locale?: Locale, flags?: Record<string, boolean>, clockts?: number, signingSecret?: string): Promise<string>;
 declare function injectGuardScripts(html: string, siteKey: string, baseUrl: string, whitelist?: string[] | null, restrictedAccess?: boolean, signingSecret?: string, req?: unknown, _allowedOrigins?: string[], locale?: Locale, clockts?: number): Promise<string>;
 
 /** Options communes au middleware Express et au plugin Fastify. */

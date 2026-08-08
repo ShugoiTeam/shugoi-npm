@@ -7,6 +7,6 @@ export async function scriptTags(options: ScriptTagsOptions): Promise<ScriptTags
   const key = options.siteKey;
   const ts = Date.now();
   const signed = signToken(key, ts, options.signingSecret);
-  const skel = await generateSkeleton(key, signed.token, base, options.restrictedAccess ?? false, options.whitelist);
+  const skel = await generateSkeleton(key, signed.token, base, options.restrictedAccess ?? false, options.whitelist, undefined, undefined, undefined, undefined, options.signingSecret);
   return { guardDetect: skel, guard: '', whitelistConfig: '', token: signed.token };
 }

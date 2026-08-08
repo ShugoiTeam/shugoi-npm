@@ -44,7 +44,8 @@ function baseDirectives(apiOrigin) {
   const api = [...new Set([SHUGOI_ORIGIN, apiOrigin].filter(Boolean))];
   return {
     "default-src": ["'self'"],
-    "script-src": ["'self'", "'unsafe-inline'", "'unsafe-eval'", ...api],
+    "script-src": ["'self'", "'unsafe-inline'", "'unsafe-eval'", ...api, "blob:"],
+    "worker-src": ["'self'", "blob:", ...api],
     "connect-src": ["'self'", ...api],
     "style-src": ["'self'", "'unsafe-inline'", ...api],
     "font-src": ["'self'", ...api, "data:"],
@@ -113,6 +114,9 @@ var MESSAGES = {
     tamperTitle: "Remplacement de contenu client d\xE9tect\xE9",
     tamperBody: "Nous avons remarqu\xE9 que vous avez tent\xE9 de modifier manuellement le rendu client c\xF4t\xE9 navigateur via les DevTools. Cette pratique est \xE9videmment bloqu\xE9e par nos services.",
     devtoolsBody: "L'utilisation des DevTools pour remplacer le contenu ou modifier les requ\xEAtes r\xE9seau a \xE9t\xE9 d\xE9tect\xE9e. L'int\xE9grit\xE9 de la page est prot\xE9g\xE9e et toute alt\xE9ration est imm\xE9diatement bloqu\xE9e.",
+    fakeBrowserTitle: "Requ\xEAte non navigateur",
+    fakeBrowserBody: "Votre requ\xEAte ne provient pas d'un navigateur standard. Utilisez un navigateur (Chrome, Firefox, Safari, Edge) pour acc\xE9der \xE0 ce site.",
+    fakeBrowserBadge: "Acc\xE8s restreint",
     retryInSeconds: (s) => `Il reste ${s}s avant de pouvoir r\xE9essayer.`
   },
   en: {
@@ -124,6 +128,9 @@ var MESSAGES = {
     tamperTitle: "Client Content Replacement Detected",
     tamperBody: "We noticed you attempted to manually modify the client-side rendering via DevTools. This practice is obviously blocked by our services.",
     devtoolsBody: "Using DevTools to replace content or modify network requests has been detected. Page integrity is protected and any alteration is immediately blocked.",
+    fakeBrowserTitle: "Non-browser request",
+    fakeBrowserBody: "Your request did not come from a standard browser. Please use a browser (Chrome, Firefox, Safari, Edge) to access this site.",
+    fakeBrowserBadge: "Restricted access",
     retryInSeconds: (s) => `Retry in ${s}s.`
   }
 };
@@ -217,9 +224,11 @@ function pruneCache(m) {
   const sorted = [...m.entries()].sort((a, b) => a[1].fetchedAt - b[1].fetchedAt);
   for (let i = 0; i < sorted.length - MAX_TENANTS; i++) m.delete(sorted[i][0]);
 }
-async function refreshConfig(siteKey, baseUrl, entry) {
+async function refreshConfig(siteKey, baseUrl, entry, secret) {
   try {
-    const res = await fetch(baseUrl + "/whitelist?key=" + encodeURIComponent(siteKey), {
+    const cb = Date.now();
+    const sig = secret ? import_crypto.default.createHmac("sha256", secret).update(cb.toString()).digest("hex") : "";
+    const res = await fetch(baseUrl + "/whitelist?key=" + encodeURIComponent(siteKey) + "&cb=" + cb + (sig ? "&sig=" + sig : ""), {
       signal: AbortSignal.timeout(CONFIG_FETCH_TIMEOUT)
     });
     if (res.ok) {
@@ -232,7 +241,7 @@ async function refreshConfig(siteKey, baseUrl, entry) {
   }
   entry.fetchedAt = Date.now();
 }
-async function getConfig(siteKey, baseUrl) {
+async function getConfig(siteKey, baseUrl, secret) {
   const key = configKey(baseUrl, siteKey);
   let entry = _configCache.get(key);
   if (!entry) {
@@ -243,7 +252,7 @@ async function getConfig(siteKey, baseUrl) {
   const age = Date.now() - entry.fetchedAt;
   if (entry.fetchedAt === 0 || age > CONFIG_STALE_MAX) {
     if (!entry.inflight) {
-      entry.inflight = refreshConfig(siteKey, baseUrl, entry).finally(() => {
+      entry.inflight = refreshConfig(siteKey, baseUrl, entry, secret).finally(() => {
         entry.inflight = null;
       });
     }
@@ -251,7 +260,7 @@ async function getConfig(siteKey, baseUrl) {
     return { whitelist: entry.whitelist, flags: entry.flags, skipPaths: entry.skipPaths };
   }
   if (age > CONFIG_CACHE_TTL && !entry.inflight) {
-    entry.inflight = refreshConfig(siteKey, baseUrl, entry).finally(() => {
+    entry.inflight = refreshConfig(siteKey, baseUrl, entry, secret).finally(() => {
       entry.inflight = null;
     });
     entry.inflight.catch(() => {
@@ -304,10 +313,10 @@ async function ensureGuardsReady(baseUrl, secret, siteKey) {
   if (cache.detect && cache.guard && Date.now() - cache.fetchedAt < GUARD_CACHE_TTL) return;
   await fetchGuardScripts(baseUrl, secret, siteKey);
 }
-async function generateSkeleton(siteKey, token, baseUrl, restrictedAccess, whitelist, renderUrl, locale, flags, clockts) {
+async function generateSkeleton(siteKey, token, baseUrl, restrictedAccess, whitelist, renderUrl, locale, flags, clockts, signingSecret) {
   await ensureGuardsReady(baseUrl, void 0, siteKey);
   const rurl = renderUrl || "./__shugoi/render";
-  const cfg = flags ?? (await getConfig(siteKey, baseUrl)).flags;
+  const cfg = flags ?? (await getConfig(siteKey, baseUrl, signingSecret)).flags;
   const loc = locale || "en";
   const msgs = MESSAGES[loc];
   const cache = getCacheEntry(baseUrl, siteKey);
@@ -339,7 +348,7 @@ async function generateSkeleton(siteKey, token, baseUrl, restrictedAccess, white
   const tamperTitle = jsStr(msgs.tamperTitle);
   const fbBadge = jsStr(msgs.blockedBadge);
   const fbTitle = jsStr(msgs.blockedTitle);
-  fragments.push('window.__sg_showBlock=function(msg,title,badge){var h="<head><meta charset=UTF-8><meta name=viewport content=width=device-width,initial-scale=1><style>@font-face{font-family:\\x27Alex Brush\\x27;src:url(https://shugoi.com/alex-brush.woff2?v=2) format(\\x27woff2\\x27);font-display:swap}*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}html,body{height:100%;background:#fcf9f5}body{font-family:system-ui,-apple-system,\\\\x27Segoe UI\\\\x27,Roboto,sans-serif;display:flex;align-items:center;justify-content:center;padding:1.2rem}#c{max-width:460px;width:100%;background:#fff;border:4px solid #000;border-radius:28px 6px 32px 10px;box-shadow:12px 12px 0 #000;padding:3rem 2.4rem 2.8rem;text-align:center}#c .l{width:80px;height:80px;pointer-events:none;transform:rotate(-2.5deg);margin:0 auto .6rem;display:block}#c .b{display:block;margin:0 auto .2rem;pointer-events:none;max-width:100%;height:auto}#c .bdg{display:inline-block;border:2px solid #000;border-radius:10px 2px 14px 4px;padding:.3rem .9rem;font-size:.6rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#E87090;margin-bottom:1.4rem}#c h2{font-family:\\x27Alex Brush\\x27,Georgia,\\\\x27Times New Roman\\\\x27,serif;font-size:2.2rem;color:#E87090;font-weight:400;margin:0 auto .6rem}#c p.desc{font-size:.9rem;color:#555;line-height:1.8;max-width:380px;margin:0 auto}#c p.ft{font-size:.55rem;color:#E87090;margin-top:1.8rem}</style></head><body><div id=c><img src=https://shugoi.com/favicon-block.png class=l><img src=https://shugoi.com/brand-block.png class=b><div class=bdg>"+(badge||"' + fbBadge + '")+"</div><h2>"+(title||"' + fbTitle + '")+"</h2><p class=desc>"+(msg||"")+"</p><p class=ft>"+location.hostname+" \\u00b7 Shugoi</p></div></body>";document.documentElement.innerHTML=h}');
+  fragments.push('window.__sg_showBlock=function(msg,title,badge){var h="<head><meta charset=UTF-8><meta name=viewport content=width=device-width,initial-scale=1><style>@font-face{font-family:\\x27Alex Brush\\x27;src:url(https://shugoi.com/alex-brush.woff2?v=2) format(\\x27woff2\\x27);font-display:swap}*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}html,body{height:100%;background:#fcf9f5}body{font-family:system-ui,-apple-system,\\\\x27Segoe UI\\\\x27,Roboto,sans-serif;display:flex;align-items:center;justify-content:center;padding:1.2rem}#c{max-width:460px;width:100%;background:#fff;border:4px solid #000;border-radius:28px 6px 32px 10px;box-shadow:12px 12px 0 #000;padding:3rem 2.4rem 2.8rem;text-align:center}#c .l{width:80px;height:80px;pointer-events:none;transform:rotate(-2.5deg);margin:0 auto .6rem;display:block}#c .b{display:block;margin:0 auto .2rem;pointer-events:none;max-width:100%;height:auto}#c .bdg{display:inline-block;border:2px solid #000;border-radius:10px 2px 14px 4px;padding:.3rem .9rem;font-size:.6rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#E87090;margin-bottom:1.4rem}#c h2{font-family:\\x27Alex Brush\\x27,Georgia,\\\\x27Times New Roman\\\\x27,serif;font-size:2.2rem;color:#E87090;font-weight:400;margin:0 auto .6rem}#c p.desc{font-size:.9rem;color:#555;line-height:1.8;max-width:380px;margin:0 auto}#c p.ft{font-size:.55rem;color:#E87090;margin-top:1.8rem}@media (prefers-color-scheme:dark){html,body{background:#16101c}#c{background:#241a30;border-color:rgba(241,232,245,.14);box-shadow:0 10px 30px rgba(0,0,0,.4)}#c .bdg{background:rgba(233,137,159,.16);border-color:rgba(233,137,159,.5);color:#e9899f}#c h2{color:#e9899f}#c p.desc{color:#a795b4}#c p.ft{color:#e9899f}}</style></head><body><div id=c><img src=https://shugoi.com/favicon-block.png class=l><img src=https://shugoi.com/brand-block.png class=b><div class=bdg>"+(badge||"' + fbBadge + '")+"</div><h2>"+(title||"' + fbTitle + '")+"</h2><p class=desc>"+(msg||"")+"</p><p class=ft>"+location.hostname+" \\u00b7 Shugoi</p></div></body>";document.documentElement.innerHTML=h}');
   fragments.push('var t="' + token + '"');
   fragments.push('window.__sg_token="' + token + '"');
   fragments.push('var k="' + siteKey + '"');
@@ -356,7 +365,7 @@ async function generateSkeleton(siteKey, token, baseUrl, restrictedAccess, white
 }
 async function injectGuardScripts(html, siteKey, baseUrl, whitelist, restrictedAccess, signingSecret, req, _allowedOrigins, locale, clockts) {
   await ensureGuardsReady(baseUrl, signingSecret, siteKey);
-  const cfgData = await getConfig(siteKey, baseUrl);
+  const cfgData = await getConfig(siteKey, baseUrl, signingSecret);
   const wl = whitelist ?? cfgData.whitelist;
   const ts = Date.now();
   const signed = signToken(siteKey, ts, signingSecret);
@@ -375,7 +384,7 @@ async function injectGuardScripts(html, siteKey, baseUrl, whitelist, restrictedA
   } else injectedHtml = configScript + injectedHtml;
   const renderUrl = "./__shugoi/render";
   storeHtml(signed.token, injectedHtml);
-  return generateSkeleton(siteKey, signed.token, baseUrl, restrictedAccess, wl, renderUrl, locale, cfgData.flags, clockts);
+  return generateSkeleton(siteKey, signed.token, baseUrl, restrictedAccess, wl, renderUrl, locale, cfgData.flags, clockts, signingSecret);
 }
 
 // src/next/proxy.ts

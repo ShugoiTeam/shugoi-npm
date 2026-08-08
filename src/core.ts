@@ -98,7 +98,7 @@ export function createCore(options: ShugoiCoreOptions): ShugoiCore {
   const botWhitelist = options.botWhitelist ?? DEFAULT_BOT_WHITELIST
   const baseUrl = options.baseUrl ?? 'https://shugoi.com/api/v1'
   const debug = options.debug ?? false
-  const siteSecret = options.secret
+  const siteSecret = options.signingSecret || options.secret
   const blockStatus = options.blockStatus ?? 403
   const blockPage = options.blockPage ?? null
   const cspEnabled = options.csp ?? true
@@ -459,6 +459,23 @@ step();
     const isPage = !ctx.path.includes('/__shugoi/') && !ctx.path.startsWith('/api/')
 
     if (isPage && powSecret && ctx.ua) {
+      // Divulgation F1 : faux navigateur (UA navigateur mais ni Accept-Language ni
+      // Sec-Fetch-*) → 403 immédiat avec page dédiée, AVANT le challenge (sinon un curl
+      // reçoit le 307 avant ce check). Les navigateurs réels (Chrome/Firefox/Safari, y
+      // compris Tor Browser Firefox-based) envoient toujours ces headers. Le cas "navigateur
+      // réel + Tor" (IP = nœud de sortie, avec Sec-Fetch) reste géré par /wlc → card
+      // "Tor détecté".
+      if (/Mozilla/i.test(ctx.ua) && !(await isTrustedBot(ctx.ua, ctx.ip))) {
+        const sfd = ctx.secFetchDest ?? ''
+        const sfm = ctx.secFetchMode ?? ''
+        const al = ctx.acceptLanguage ?? ''
+        if (!al && !sfd && !sfm) {
+          log('fake browser (Accept-Language + Sec-Fetch absents) → 403 block page:', ctx.ua.slice(0, 40))
+          const bloc = resolveLocale(undefined, ctx.acceptLanguage)
+          const lmsgs = MESSAGES[bloc]
+          return { block: true, status: 403, contentType: 'text/html', body: shieldPage(lmsgs.fakeBrowserTitle, lmsgs.fakeBrowserBody, lmsgs.fakeBrowserBadge, ctx.host || '', 0, bloc) }
+        }
+      }
       const proof = ctx.sgProof || ''
       const validProof = !!proof && isPowValid(proof)
       // Re-audit (résidu #3) : un cookie __sg_ok valide (HMAC serveur, 30 j) saute le
@@ -475,7 +492,15 @@ step();
       // valide est CONSOMMÉE à sa 1re utilisation ; un rejeu (sans cookie) → 307.
       const proofFresh = validProof ? consumeProof(proof) : false
       const canProceed = validCookie || proofFresh
-      if (!canProceed) {
+      if (!canProceed && !isWhitelistedBot(ctx.ua)) {
+        // SEO / aperçus sociaux : un crawler légitime NE PEUT PAS exécuter le PoW JS.
+        // Les bots whitelistés (moteurs de recherche + bots de partage social :
+        // googlebot, bingbot, facebookexternalhit, twitterbot, linkedinbot, discordbot,
+        // whatsapp, telegram…) bypassent le challenge → la page HTML (og:image, contenu
+        // indexable) leur est servie. Le vrai verrou reste le render-grant + la whitelist
+        // (round 16 : la difficulté du PoW n'est pas la barrière — un script le résout
+        // en ~0,15 s ; il ne sert que de premier filtre anti-curl). `verifyBots` conserve
+        // la vérification DNS inverse pour les moteurs (checks F1 / headless).
         // Anti-scraping (audit #6) : on refuse d'émettre le challenge à un IP qui
         // bourrine (solve en série). 429 shield au lieu du 307 — un humain ne le
         // ressent jamais (quota 60/fenêtre), un scraper est ralenti indéfiniment.
@@ -504,7 +529,7 @@ step();
       // sgProof valide → on laisse passer (le middleware posera le cookie).
     }
 
-    const flags = await fetchConfigForSiteKey(options.siteKey, baseUrl)
+    const flags = await fetchConfigForSiteKey(options.siteKey, baseUrl, options.signingSecret || options.secret)
 
     // Le blocage headless est actif par défaut, y compris sans configuration chargée :
     // c'est la protection minimale attendue du produit.
@@ -547,19 +572,6 @@ step();
       log('headless block:', ctx.ua.slice(0, 40))
       fetch(baseUrl + '/event', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ siteKey: options.siteKey, reason: 'headless' }), signal: AbortSignal.timeout(2000) }).catch(() => {})
       return { block: true, status: blockStatus, contentType: 'text/plain', body: BLOCK_PAGE }
-    }
-
-    // Sec-Fetch + Accept-Language check for fake browsers.
-    // NE BLOQUE PLUS en 403 brut (audit Tor) : un navigateur légitime sans Sec-Fetch
-    // (ex. Tor Browser) recevait un 403 texte au lieu de la page de blocage dédiée.
-    // On laisse le guard CLIENT gérer la détection (Tor → card "Tor détecté", etc.).
-    if (headlessEnabled && /Mozilla/i.test(ctx.ua) && !(await isTrustedBot(ctx.ua, ctx.ip))) {
-      const sfd = ctx.secFetchDest ?? ''
-      const sfm = ctx.secFetchMode ?? ''
-      const al = ctx.acceptLanguage ?? ''
-      if (!al || (!sfd && !sfm)) {
-        log('fake browser (Sec-Fetch absent) → challenge client, pas de 403:', ctx.ua.slice(0, 40))
-      }
     }
 
     return null

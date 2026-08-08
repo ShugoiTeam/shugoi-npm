@@ -28,6 +28,9 @@ var init_locales = __esm({
         tamperTitle: "Remplacement de contenu client d\xE9tect\xE9",
         tamperBody: "Nous avons remarqu\xE9 que vous avez tent\xE9 de modifier manuellement le rendu client c\xF4t\xE9 navigateur via les DevTools. Cette pratique est \xE9videmment bloqu\xE9e par nos services.",
         devtoolsBody: "L'utilisation des DevTools pour remplacer le contenu ou modifier les requ\xEAtes r\xE9seau a \xE9t\xE9 d\xE9tect\xE9e. L'int\xE9grit\xE9 de la page est prot\xE9g\xE9e et toute alt\xE9ration est imm\xE9diatement bloqu\xE9e.",
+        fakeBrowserTitle: "Requ\xEAte non navigateur",
+        fakeBrowserBody: "Votre requ\xEAte ne provient pas d'un navigateur standard. Utilisez un navigateur (Chrome, Firefox, Safari, Edge) pour acc\xE9der \xE0 ce site.",
+        fakeBrowserBadge: "Acc\xE8s restreint",
         retryInSeconds: (s) => `Il reste ${s}s avant de pouvoir r\xE9essayer.`
       },
       en: {
@@ -39,6 +42,9 @@ var init_locales = __esm({
         tamperTitle: "Client Content Replacement Detected",
         tamperBody: "We noticed you attempted to manually modify the client-side rendering via DevTools. This practice is obviously blocked by our services.",
         devtoolsBody: "Using DevTools to replace content or modify network requests has been detected. Page integrity is protected and any alteration is immediately blocked.",
+        fakeBrowserTitle: "Non-browser request",
+        fakeBrowserBody: "Your request did not come from a standard browser. Please use a browser (Chrome, Firefox, Safari, Edge) to access this site.",
+        fakeBrowserBadge: "Restricted access",
         retryInSeconds: (s) => `Retry in ${s}s.`
       }
     };
@@ -152,7 +158,7 @@ function verifyRenderGrant(mid, grant, token, ip, expectedSiteKey) {
     return false;
   }
 }
-async function renderResponseData(token, locale, configUrl, mid, grant, ip, expectedSiteKey) {
+async function renderResponseData(token, locale, configUrl, mid, grant, ip, expectedSiteKey, _secret) {
   if (!token || token.length < 16 || token.length > 300) return { error: "not_found" };
   if (expectedSiteKey) {
     const tokSiteKey = token.split(":")[0];
@@ -161,7 +167,7 @@ async function renderResponseData(token, locale, configUrl, mid, grant, ip, expe
   const tokTs = parseInt(token.split(":")[1] || "", 10);
   if (!isNaN(tokTs) && Date.now() - tokTs > TOKEN_TTL) return { error: "not_found" };
   if (!verifyRenderGrant(mid, grant, token, ip, expectedSiteKey)) return { error: "not_found" };
-  const contentReplaceOn = await fetchContentReplaceFlag(token, configUrl || "http://127.0.0.1:3098");
+  const contentReplaceOn = await fetchContentReplaceFlag(token, configUrl || "http://127.0.0.1:3098", _secret);
   const memHtml = readFromMemory(token);
   if (memHtml) {
     if (contentReplaceOn) {
@@ -190,14 +196,14 @@ async function renderResponseData(token, locale, configUrl, mid, grant, ip, expe
   }
   return verifyTokenAndRead(token, locale);
 }
-async function fetchContentReplaceFlag(token, internalUrl, retries = 2) {
+async function fetchContentReplaceFlag(token, internalUrl, _secret, retries = 2) {
   try {
     const siteKey = token.split(":")[0];
     if (!siteKey) return false;
-    const { flags } = await getConfig(siteKey, internalUrl);
+    const { flags } = await getConfig(siteKey, internalUrl, _secret);
     return flags?.enableContentReplacementCheck === true;
   } catch {
-    if (retries > 0) return fetchContentReplaceFlag(token, internalUrl, retries - 1);
+    if (retries > 0) return fetchContentReplaceFlag(token, internalUrl, _secret, retries - 1);
     return false;
   }
 }
@@ -243,8 +249,8 @@ function injectReferrerPolicy(html) {
   }
   return meta + html;
 }
-async function handleRender(token, res, configUrl, mid, grant, ip, expectedSiteKey, baseUrl) {
-  const data = await renderResponseData(token, void 0, configUrl, mid, grant, ip, expectedSiteKey);
+async function handleRender(token, res, configUrl, mid, grant, ip, expectedSiteKey, baseUrl, _secret) {
+  const data = await renderResponseData(token, void 0, configUrl, mid, grant, ip, expectedSiteKey, _secret);
   if (data.html && mid) data.html = injectNoticeScript(data.html, mid, expectedSiteKey || token.split(":")[0], baseUrl);
   if (data.html) data.html = injectReferrerPolicy(data.html);
   const json = JSON.stringify(data);
@@ -286,9 +292,11 @@ function pruneCache(m) {
   const sorted = [...m.entries()].sort((a, b) => a[1].fetchedAt - b[1].fetchedAt);
   for (let i = 0; i < sorted.length - MAX_TENANTS; i++) m.delete(sorted[i][0]);
 }
-async function refreshConfig(siteKey, baseUrl, entry) {
+async function refreshConfig(siteKey, baseUrl, entry, secret) {
   try {
-    const res = await fetch(baseUrl + "/whitelist?key=" + encodeURIComponent(siteKey), {
+    const cb = Date.now();
+    const sig = secret ? crypto.createHmac("sha256", secret).update(cb.toString()).digest("hex") : "";
+    const res = await fetch(baseUrl + "/whitelist?key=" + encodeURIComponent(siteKey) + "&cb=" + cb + (sig ? "&sig=" + sig : ""), {
       signal: AbortSignal.timeout(CONFIG_FETCH_TIMEOUT)
     });
     if (res.ok) {
@@ -301,7 +309,7 @@ async function refreshConfig(siteKey, baseUrl, entry) {
   }
   entry.fetchedAt = Date.now();
 }
-async function getConfig(siteKey, baseUrl) {
+async function getConfig(siteKey, baseUrl, secret) {
   const key = configKey(baseUrl, siteKey);
   let entry = _configCache.get(key);
   if (!entry) {
@@ -312,7 +320,7 @@ async function getConfig(siteKey, baseUrl) {
   const age = Date.now() - entry.fetchedAt;
   if (entry.fetchedAt === 0 || age > CONFIG_STALE_MAX) {
     if (!entry.inflight) {
-      entry.inflight = refreshConfig(siteKey, baseUrl, entry).finally(() => {
+      entry.inflight = refreshConfig(siteKey, baseUrl, entry, secret).finally(() => {
         entry.inflight = null;
       });
     }
@@ -320,7 +328,7 @@ async function getConfig(siteKey, baseUrl) {
     return { whitelist: entry.whitelist, flags: entry.flags, skipPaths: entry.skipPaths };
   }
   if (age > CONFIG_CACHE_TTL && !entry.inflight) {
-    entry.inflight = refreshConfig(siteKey, baseUrl, entry).finally(() => {
+    entry.inflight = refreshConfig(siteKey, baseUrl, entry, secret).finally(() => {
       entry.inflight = null;
     });
     entry.inflight.catch(() => {
@@ -331,8 +339,8 @@ async function getConfig(siteKey, baseUrl) {
 async function fetchWhitelistForSiteKey(siteKey, baseUrl) {
   return (await getConfig(siteKey, baseUrl)).whitelist;
 }
-async function fetchConfigForSiteKey(siteKey, baseUrl) {
-  return (await getConfig(siteKey, baseUrl)).flags;
+async function fetchConfigForSiteKey(siteKey, baseUrl, secret) {
+  return (await getConfig(siteKey, baseUrl, secret)).flags;
 }
 function __clearConfigCache() {
   _configCache.clear();
@@ -380,10 +388,10 @@ async function ensureGuardsReady(baseUrl, secret, siteKey) {
   if (cache.detect && cache.guard && Date.now() - cache.fetchedAt < GUARD_CACHE_TTL) return;
   await fetchGuardScripts(baseUrl, secret, siteKey);
 }
-async function generateSkeleton(siteKey, token, baseUrl, restrictedAccess, whitelist, renderUrl, locale, flags, clockts) {
+async function generateSkeleton(siteKey, token, baseUrl, restrictedAccess, whitelist, renderUrl, locale, flags, clockts, signingSecret) {
   await ensureGuardsReady(baseUrl, void 0, siteKey);
   const rurl = renderUrl || "./__shugoi/render";
-  const cfg = flags ?? (await getConfig(siteKey, baseUrl)).flags;
+  const cfg = flags ?? (await getConfig(siteKey, baseUrl, signingSecret)).flags;
   const loc = locale || "en";
   const msgs = MESSAGES[loc];
   const cache = getCacheEntry(baseUrl, siteKey);
@@ -415,7 +423,7 @@ async function generateSkeleton(siteKey, token, baseUrl, restrictedAccess, white
   const tamperTitle = jsStr(msgs.tamperTitle);
   const fbBadge = jsStr(msgs.blockedBadge);
   const fbTitle = jsStr(msgs.blockedTitle);
-  fragments.push('window.__sg_showBlock=function(msg,title,badge){var h="<head><meta charset=UTF-8><meta name=viewport content=width=device-width,initial-scale=1><style>@font-face{font-family:\\x27Alex Brush\\x27;src:url(https://shugoi.com/alex-brush.woff2?v=2) format(\\x27woff2\\x27);font-display:swap}*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}html,body{height:100%;background:#fcf9f5}body{font-family:system-ui,-apple-system,\\\\x27Segoe UI\\\\x27,Roboto,sans-serif;display:flex;align-items:center;justify-content:center;padding:1.2rem}#c{max-width:460px;width:100%;background:#fff;border:4px solid #000;border-radius:28px 6px 32px 10px;box-shadow:12px 12px 0 #000;padding:3rem 2.4rem 2.8rem;text-align:center}#c .l{width:80px;height:80px;pointer-events:none;transform:rotate(-2.5deg);margin:0 auto .6rem;display:block}#c .b{display:block;margin:0 auto .2rem;pointer-events:none;max-width:100%;height:auto}#c .bdg{display:inline-block;border:2px solid #000;border-radius:10px 2px 14px 4px;padding:.3rem .9rem;font-size:.6rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#E87090;margin-bottom:1.4rem}#c h2{font-family:\\x27Alex Brush\\x27,Georgia,\\\\x27Times New Roman\\\\x27,serif;font-size:2.2rem;color:#E87090;font-weight:400;margin:0 auto .6rem}#c p.desc{font-size:.9rem;color:#555;line-height:1.8;max-width:380px;margin:0 auto}#c p.ft{font-size:.55rem;color:#E87090;margin-top:1.8rem}</style></head><body><div id=c><img src=https://shugoi.com/favicon-block.png class=l><img src=https://shugoi.com/brand-block.png class=b><div class=bdg>"+(badge||"' + fbBadge + '")+"</div><h2>"+(title||"' + fbTitle + '")+"</h2><p class=desc>"+(msg||"")+"</p><p class=ft>"+location.hostname+" \\u00b7 Shugoi</p></div></body>";document.documentElement.innerHTML=h}');
+  fragments.push('window.__sg_showBlock=function(msg,title,badge){var h="<head><meta charset=UTF-8><meta name=viewport content=width=device-width,initial-scale=1><style>@font-face{font-family:\\x27Alex Brush\\x27;src:url(https://shugoi.com/alex-brush.woff2?v=2) format(\\x27woff2\\x27);font-display:swap}*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}html,body{height:100%;background:#fcf9f5}body{font-family:system-ui,-apple-system,\\\\x27Segoe UI\\\\x27,Roboto,sans-serif;display:flex;align-items:center;justify-content:center;padding:1.2rem}#c{max-width:460px;width:100%;background:#fff;border:4px solid #000;border-radius:28px 6px 32px 10px;box-shadow:12px 12px 0 #000;padding:3rem 2.4rem 2.8rem;text-align:center}#c .l{width:80px;height:80px;pointer-events:none;transform:rotate(-2.5deg);margin:0 auto .6rem;display:block}#c .b{display:block;margin:0 auto .2rem;pointer-events:none;max-width:100%;height:auto}#c .bdg{display:inline-block;border:2px solid #000;border-radius:10px 2px 14px 4px;padding:.3rem .9rem;font-size:.6rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#E87090;margin-bottom:1.4rem}#c h2{font-family:\\x27Alex Brush\\x27,Georgia,\\\\x27Times New Roman\\\\x27,serif;font-size:2.2rem;color:#E87090;font-weight:400;margin:0 auto .6rem}#c p.desc{font-size:.9rem;color:#555;line-height:1.8;max-width:380px;margin:0 auto}#c p.ft{font-size:.55rem;color:#E87090;margin-top:1.8rem}@media (prefers-color-scheme:dark){html,body{background:#16101c}#c{background:#241a30;border-color:rgba(241,232,245,.14);box-shadow:0 10px 30px rgba(0,0,0,.4)}#c .bdg{background:rgba(233,137,159,.16);border-color:rgba(233,137,159,.5);color:#e9899f}#c h2{color:#e9899f}#c p.desc{color:#a795b4}#c p.ft{color:#e9899f}}</style></head><body><div id=c><img src=https://shugoi.com/favicon-block.png class=l><img src=https://shugoi.com/brand-block.png class=b><div class=bdg>"+(badge||"' + fbBadge + '")+"</div><h2>"+(title||"' + fbTitle + '")+"</h2><p class=desc>"+(msg||"")+"</p><p class=ft>"+location.hostname+" \\u00b7 Shugoi</p></div></body>";document.documentElement.innerHTML=h}');
   fragments.push('var t="' + token + '"');
   fragments.push('window.__sg_token="' + token + '"');
   fragments.push('var k="' + siteKey + '"');
@@ -432,7 +440,7 @@ async function generateSkeleton(siteKey, token, baseUrl, restrictedAccess, white
 }
 async function injectGuardScripts(html, siteKey, baseUrl, whitelist, restrictedAccess, signingSecret, req, _allowedOrigins, locale, clockts) {
   await ensureGuardsReady(baseUrl, signingSecret, siteKey);
-  const cfgData = await getConfig(siteKey, baseUrl);
+  const cfgData = await getConfig(siteKey, baseUrl, signingSecret);
   const wl = whitelist ?? cfgData.whitelist;
   const ts = Date.now();
   const signed = signToken(siteKey, ts, signingSecret);
@@ -451,7 +459,7 @@ async function injectGuardScripts(html, siteKey, baseUrl, whitelist, restrictedA
   } else injectedHtml = configScript + injectedHtml;
   const renderUrl = "./__shugoi/render";
   storeHtml(signed.token, injectedHtml);
-  return generateSkeleton(siteKey, signed.token, baseUrl, restrictedAccess, wl, renderUrl, locale, cfgData.flags, clockts);
+  return generateSkeleton(siteKey, signed.token, baseUrl, restrictedAccess, wl, renderUrl, locale, cfgData.flags, clockts, signingSecret);
 }
 function enableDiskStore(multiProcess) {
   _diskEnabled = multiProcess;
@@ -490,17 +498,33 @@ var init_render = __esm({
   if(!mid||!sk||window.__sg_noticeEnabled===false)return;
   var base=window.__sg_baseUrl||'';
   var origin=base.replace(/\\/api\\/v1\\/?$/,'');
-  var _OVERLAY_CSS='position:fixed!important;inset:0!important;z-index:2147483647!important;background:rgba(0,0,0,.6)!important;display:flex!important;align-items:center!important;justify-content:center!important;padding:1.2rem!important;pointer-events:auto!important';
-  var _CARD_CSS='background:#fff!important;border:4px solid #000!important;border-radius:28px 6px 32px 10px!important;box-shadow:14px 14px 0 #000!important;padding:0!important;max-width:720px!important;width:100%!important;text-align:center!important;font-family:Arial,sans-serif!important;display:flex!important;overflow:hidden!important';
-  var _CARD_HTML='<div style="flex:0 0 320px;display:flex;align-items:center;justify-content:center;padding:1.5rem 1rem 1.5rem 3rem;overflow:hidden"><img src="'+origin+'/favicon.png" alt="" style="width:100%;height:auto;max-width:220px;pointer-events:none"></div><div style="flex:1;padding:1.6rem 1.8rem;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center"><img src="'+origin+'/brand-block.png" alt="Shugoi" style="display:block;margin:0 0 .3rem;pointer-events:none;max-width:100%;height:auto;max-height:40px"><div style="border:2px solid #000;display:inline-block;border-radius:8px 2px 12px 4px;padding:.2rem .6rem;font-size:.5rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#E87090;margin-bottom:.6rem">Protection anti-abus</div><p style="font-size:.8rem;color:#555;line-height:1.7;margin:0 .4rem .6rem;max-width:280px">Ce site utilise Shugoi pour se prot\\u00e9ger contre les abus et la fraude. Des caract\\u00e9ristiques techniques de votre navigateur sont analys\\u00e9es pour d\\u00e9tecter les scripts automatis\\u00e9s, Tor, les VPN et les environnements virtuels. Aucune donn\\u00e9e personnelle n\\'est collect\\u00e9e.</p><div style="margin-top:.5rem"><button id="__sg_ok" style="background:#E87090;color:#fff;border:3px solid #000;border-radius:12px 3px 14px 5px;padding:.4rem 2rem;font-size:.8rem;font-weight:700;cursor:pointer">OK</button></div><div style="margin-top:.5rem;font-size:.5rem;color:#ccc"><a href="'+origin+'/legal/shugoi-notice" target="_blank" style="color:#E87090;text-decoration:underline">En savoir plus \\u00b7 shugoi.com</a></div></div>';
+  var _OVERLAY_DESK='position:fixed!important;inset:0!important;z-index:2147483647!important;background:rgba(0,0,0,.6)!important;display:flex!important;align-items:center!important;justify-content:center!important;padding:1.2rem!important;pointer-events:auto!important';
+  var _OVERLAY_MOB='position:fixed!important;inset:0!important;z-index:2147483647!important;background:rgba(0,0,0,.6)!important;display:flex!important;align-items:center!important;justify-content:center!important;padding:.6rem!important;pointer-events:auto!important';
+  var _CARD_DESK='background:#fffdfa!important;border:1px solid rgba(43,33,29,.16)!important;border-radius:16px 5px 16px 5px!important;box-shadow:0 10px 30px rgba(43,33,29,.08)!important;padding:2.8rem 2.4rem 2.6rem!important;max-width:460px!important;width:100%!important;text-align:center!important;font-family:system-ui,-apple-system,Arial,sans-serif!important';
+  var _CARD_MOB='background:#fffdfa!important;border:1px solid rgba(43,33,29,.16)!important;border-radius:14px 4px 14px 4px!important;box-shadow:0 10px 30px rgba(43,33,29,.08)!important;padding:2rem 1.3rem 2.2rem!important;max-width:340px!important;width:100%!important;text-align:center!important;font-family:system-ui,-apple-system,Arial,sans-serif!important';
+  var _CARD_DESK_DARK='background:#241a30!important;border:1px solid rgba(241,232,245,.14)!important;border-radius:16px 5px 16px 5px!important;box-shadow:0 10px 30px rgba(0,0,0,.4)!important;padding:2.8rem 2.4rem 2.6rem!important;max-width:460px!important;width:100%!important;text-align:center!important;font-family:system-ui,-apple-system,Arial,sans-serif!important';
+  var _CARD_MOB_DARK='background:#241a30!important;border:1px solid rgba(241,232,245,.14)!important;border-radius:14px 4px 14px 4px!important;box-shadow:0 10px 30px rgba(0,0,0,.4)!important;padding:2rem 1.3rem 2.2rem!important;max-width:340px!important;width:100%!important;text-align:center!important;font-family:system-ui,-apple-system,Arial,sans-serif!important';
+  var _MOBILE=false;
+  function _isMobile(){try{return window.matchMedia&&window.matchMedia('(max-width:640px)').matches}catch(e){return false}}
+  _MOBILE=_isMobile();
+  var _DARK=false;
+  function _isDark(){try{return window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches}catch(e){return false}}
+  _DARK=_isDark();
+  function _OV(){return _MOBILE?_OVERLAY_MOB:_OVERLAY_DESK}
+  function _CC(){return _DARK?(_MOBILE?_CARD_MOB_DARK:_CARD_DESK_DARK):(_MOBILE?_CARD_MOB:_CARD_DESK)}
+  function _CH(){return _DARK?(_MOBILE?_CARD_HTML_MOB_DARK:_CARD_HTML_DESK_DARK):(_MOBILE?_CARD_HTML_MOB:_CARD_HTML_DESK)}
+  var _CARD_HTML_DESK='<img src="'+origin+'/favicon-block.png" alt="" style="width:80px;height:80px;pointer-events:none;transform:rotate(-2.5deg);filter:drop-shadow(2px 4px 8px rgba(231,112,144,.55));margin:0 auto .6rem;display:block"><img src="'+origin+'/brand-block.png" alt="Shugoi" style="display:block;margin:0 auto .4rem;pointer-events:none;max-width:100%;height:auto"><div style="display:inline-block;background:#fdf0f4;border:1px solid rgba(194,84,111,.35);border-radius:10px 4px 10px 4px;padding:.3rem .9rem;font-size:.6rem;font-weight:600;text-transform:uppercase;letter-spacing:.16em;color:#c2546f;margin-bottom:1.4rem">Protection anti-abus</div><p style="font-size:.9rem;color:#7a6a62;line-height:1.8;max-width:380px;margin:0 auto .9rem">Ce site utilise Shugoi pour se prot\\u00e9ger contre les abus et la fraude. Des caract\\u00e9ristiques techniques de votre navigateur sont analys\\u00e9es pour d\\u00e9tecter les scripts automatis\\u00e9s, Tor, les VPN et les environnements virtuels. Aucune donn\\u00e9e personnelle n\\'est collect\\u00e9e.</p><button id="__sg_ok" style="background:#E87090;color:#fff;border:1px solid #c2546f;border-radius:10px 4px 10px 4px;padding:.55rem 3rem;font-size:.8rem;font-weight:600;cursor:pointer;font-family:inherit">OK</button><p style="font-size:.55rem;color:#c2546f;margin-top:1.5rem"><a href="'+origin+'/legal/shugoi-notice" target="_blank" style="color:#c2546f;text-decoration:underline">En savoir plus \\u00b7 shugoi.com</a></p>';
+  var _CARD_HTML_MOB='<img src="'+origin+'/favicon-block.png" alt="" style="width:62px;height:62px;pointer-events:none;transform:rotate(-2.5deg);filter:drop-shadow(2px 4px 8px rgba(231,112,144,.55));margin:0 auto .6rem;display:block"><img src="'+origin+'/brand-block.png" alt="Shugoi" style="display:block;margin:0 auto .4rem;pointer-events:none;max-width:100%;height:auto"><div style="display:inline-block;background:#fdf0f4;border:1px solid rgba(194,84,111,.35);border-radius:10px 4px 10px 4px;padding:.3rem .9rem;font-size:.55rem;font-weight:600;text-transform:uppercase;letter-spacing:.16em;color:#c2546f;margin-bottom:1.1rem">Protection anti-abus</div><p style="font-size:.85rem;color:#7a6a62;line-height:1.75;max-width:340px;margin:0 auto .8rem">Ce site utilise Shugoi pour se prot\\u00e9ger contre les abus et la fraude. Des caract\\u00e9ristiques techniques de votre navigateur sont analys\\u00e9es pour d\\u00e9tecter les scripts automatis\\u00e9s, Tor, les VPN et les environnements virtuels. Aucune donn\\u00e9e personnelle n\\'est collect\\u00e9e.</p><button id="__sg_ok" style="background:#E87090;color:#fff;border:1px solid #c2546f;border-radius:10px 4px 10px 4px;padding:.5rem 2.4rem;font-size:.8rem;font-weight:600;cursor:pointer;font-family:inherit">OK</button><p style="font-size:.55rem;color:#c2546f;margin-top:1.3rem"><a href="'+origin+'/legal/shugoi-notice" target="_blank" style="color:#c2546f;text-decoration:underline">En savoir plus \\u00b7 shugoi.com</a></p>';
+  var _CARD_HTML_DESK_DARK='<img src="'+origin+'/favicon-block.png" alt="" style="width:80px;height:80px;pointer-events:none;transform:rotate(-2.5deg);filter:drop-shadow(2px 4px 8px rgba(231,112,144,.55));margin:0 auto .6rem;display:block"><img src="'+origin+'/brand-block.png" alt="Shugoi" style="display:block;margin:0 auto .4rem;pointer-events:none;max-width:100%;height:auto"><div style="display:inline-block;background:rgba(233,137,159,.16);border:1px solid rgba(233,137,159,.5);border-radius:10px 4px 10px 4px;padding:.3rem .9rem;font-size:.6rem;font-weight:600;text-transform:uppercase;letter-spacing:.16em;color:#e9899f;margin-bottom:1.4rem">Protection anti-abus</div><p style="font-size:.9rem;color:#a795b4;line-height:1.8;max-width:380px;margin:0 auto .9rem">Ce site utilise Shugoi pour se prot\\u00e9ger contre les abus et la fraude. Des caract\\u00e9ristiques techniques de votre navigateur sont analys\\u00e9es pour d\\u00e9tecter les scripts automatis\\u00e9s, Tor, les VPN et les environnements virtuels. Aucune donn\\u00e9e personnelle n\\'est collect\\u00e9e.</p><button id="__sg_ok" style="background:#E87090;color:#fff;border:1px solid #c2546f;border-radius:10px 4px 10px 4px;padding:.55rem 3rem;font-size:.8rem;font-weight:600;cursor:pointer;font-family:inherit">OK</button><p style="font-size:.55rem;color:#e9899f;margin-top:1.5rem"><a href="'+origin+'/legal/shugoi-notice" target="_blank" style="color:#e9899f;text-decoration:underline">En savoir plus \\u00b7 shugoi.com</a></p>';
+  var _CARD_HTML_MOB_DARK='<img src="'+origin+'/favicon-block.png" alt="" style="width:62px;height:62px;pointer-events:none;transform:rotate(-2.5deg);filter:drop-shadow(2px 4px 8px rgba(231,112,144,.55));margin:0 auto .6rem;display:block"><img src="'+origin+'/brand-block.png" alt="Shugoi" style="display:block;margin:0 auto .4rem;pointer-events:none;max-width:100%;height:auto"><div style="display:inline-block;background:rgba(233,137,159,.16);border:1px solid rgba(233,137,159,.5);border-radius:10px 4px 10px 4px;padding:.3rem .9rem;font-size:.55rem;font-weight:600;text-transform:uppercase;letter-spacing:.16em;color:#e9899f;margin-bottom:1.1rem">Protection anti-abus</div><p style="font-size:.85rem;color:#a795b4;line-height:1.75;max-width:340px;margin:0 auto .8rem">Ce site utilise Shugoi pour se prot\\u00e9ger contre les abus et la fraude. Des caract\\u00e9ristiques techniques de votre navigateur sont analys\\u00e9es pour d\\u00e9tecter les scripts automatis\\u00e9s, Tor, les VPN et les environnements virtuels. Aucune donn\\u00e9e personnelle n\\'est collect\\u00e9e.</p><button id="__sg_ok" style="background:#E87090;color:#fff;border:1px solid #c2546f;border-radius:10px 4px 10px 4px;padding:.5rem 2.4rem;font-size:.8rem;font-weight:600;cursor:pointer;font-family:inherit">OK</button><p style="font-size:.55rem;color:#e9899f;margin-top:1.3rem"><a href="'+origin+'/legal/shugoi-notice" target="_blank" style="color:#e9899f;text-decoration:underline">En savoir plus \\u00b7 shugoi.com</a></p>';
   var _closed=false;
   var mo=null;
   var _applying=false;
   function ack(){try{fetch(base+'/notice',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({machineId:mid,siteKey:sk}),keepalive:true,signal:AbortSignal.timeout(4000)}).catch(function(){})}catch(e){}}
   function buildOverlay(){
-    var o=document.createElement('div');o.id='__sg_o';o.style.cssText=_OVERLAY_CSS;
-    var c=document.createElement('div');c.id='__sg_cd';c.style.cssText=_CARD_CSS;
-    c.innerHTML=_CARD_HTML;
+    var o=document.createElement('div');o.id='__sg_o';o.style.cssText=_OV();
+    var c=document.createElement('div');c.id='__sg_cd';c.style.cssText=_CC();
+    c.innerHTML=_CH();
     o.appendChild(c);return o;
   }
   function close(){_closed=true;try{if(mo)mo.disconnect()}catch(e){}var el=document.getElementById('__sg_o');if(el&&el.parentNode)el.parentNode.removeChild(el);document.body.style.overflow='';document.documentElement.style.overflow='';}
@@ -518,12 +542,12 @@ var init_render = __esm({
     try{
       var o=document.getElementById('__sg_o');
       if(!o){o=buildOverlay();document.documentElement.appendChild(o);}
-      if(o.style.cssText!==_OVERLAY_CSS)o.style.cssText=_OVERLAY_CSS;
+      if(o.style.cssText!==_OV())o.style.cssText=_OV();
       var c=document.getElementById('__sg_cd');
       if(!c){o.innerHTML='';o.appendChild(buildOverlay().firstChild);}
       else{
-        if(c.style.cssText!==_CARD_CSS)c.style.cssText=_CARD_CSS;
-        if(c.innerHTML!==_CARD_HTML)c.innerHTML=_CARD_HTML;
+        if(c.style.cssText!==_CC())c.style.cssText=_CC();
+        if(c.innerHTML!==_CH())c.innerHTML=_CH();
       }
       rebind();
       if(document.body.style.overflow!=='hidden')document.body.style.overflow='hidden';
@@ -547,6 +571,8 @@ var init_render = __esm({
       try{o.__sgObserved=true;mo.observe(o,{childList:true,subtree:true,attributes:true,characterData:true,attributeFilter:['style','class','id']});}catch(e){}
     }catch(e){}
   }
+  // Mobile : bascule desktop/stack\xE9e sur redimensionnement (r\xE9-applique via enforce).
+  try{window.addEventListener('resize',function(){var _m=_isMobile();if(_m!==_MOBILE){_MOBILE=_m;enforce();}},{passive:true})}catch(e){}
   function init(){if(document.body)show();else if(document.addEventListener)document.addEventListener('DOMContentLoaded',show);else setTimeout(init,50)}
   fetch(base+'/notice?machineId='+encodeURIComponent(mid)+'&siteKey='+encodeURIComponent(sk),{signal:AbortSignal.timeout(4000)}).then(function(r){return r.json()}).then(function(d){if(!d.acknowledged)init()}).catch(function(){init()});
 })();
@@ -595,7 +621,8 @@ function baseDirectives(apiOrigin) {
   const api = [...new Set([SHUGOI_ORIGIN, apiOrigin].filter(Boolean))];
   return {
     "default-src": ["'self'"],
-    "script-src": ["'self'", "'unsafe-inline'", "'unsafe-eval'", ...api],
+    "script-src": ["'self'", "'unsafe-inline'", "'unsafe-eval'", ...api, "blob:"],
+    "worker-src": ["'self'", "blob:", ...api],
     "connect-src": ["'self'", ...api],
     "style-src": ["'self'", "'unsafe-inline'", ...api],
     "font-src": ["'self'", ...api, "data:"],
@@ -757,7 +784,7 @@ function createCore(options) {
   const botWhitelist = options.botWhitelist ?? DEFAULT_BOT_WHITELIST;
   const baseUrl = options.baseUrl ?? "https://shugoi.com/api/v1";
   const debug = options.debug ?? false;
-  const siteSecret = options.secret;
+  const siteSecret = options.signingSecret || options.secret;
   const blockStatus = options.blockStatus ?? 403;
   const blockPage = options.blockPage ?? null;
   const cspEnabled = options.csp ?? true;
@@ -1020,12 +1047,23 @@ step();
     }
     const isPage = !ctx.path.includes("/__shugoi/") && !ctx.path.startsWith("/api/");
     if (isPage && powSecret && ctx.ua) {
+      if (/Mozilla/i.test(ctx.ua) && !await isTrustedBot(ctx.ua, ctx.ip)) {
+        const sfd = ctx.secFetchDest ?? "";
+        const sfm = ctx.secFetchMode ?? "";
+        const al = ctx.acceptLanguage ?? "";
+        if (!al && !sfd && !sfm) {
+          log("fake browser (Accept-Language + Sec-Fetch absents) \u2192 403 block page:", ctx.ua.slice(0, 40));
+          const bloc = resolveLocale(void 0, ctx.acceptLanguage);
+          const lmsgs = MESSAGES[bloc];
+          return { block: true, status: 403, contentType: "text/html", body: shieldPage(lmsgs.fakeBrowserTitle, lmsgs.fakeBrowserBody, lmsgs.fakeBrowserBadge, ctx.host || "", 0, bloc) };
+        }
+      }
       const proof = ctx.sgProof || "";
       const validProof = !!proof && isPowValid(proof);
       const validCookie = !!ctx.sgOk && isSgOkValid(ctx.sgOk, ctx.ip, ctx.ua);
       const proofFresh = validProof ? consumeProof(proof) : false;
       const canProceed = validCookie || proofFresh;
-      if (!canProceed) {
+      if (!canProceed && !isWhitelistedBot(ctx.ua)) {
         if (!allowChallenge(ctx.ip)) {
           const loc = resolveLocale(void 0, ctx.acceptLanguage);
           const lmsgs = MESSAGES[loc];
@@ -1042,7 +1080,7 @@ step();
         return { block: true, status: 307, contentType: "text/plain", body: BLOCK_PAGE, headers: { Location: chalUrl } };
       }
     }
-    const flags = await fetchConfigForSiteKey(options.siteKey, baseUrl);
+    const flags = await fetchConfigForSiteKey(options.siteKey, baseUrl, options.signingSecret || options.secret);
     const headlessEnabled = flags.enableHeadlessCheck !== false;
     if (flags.enableRateLimit === true) {
       try {
@@ -1080,14 +1118,6 @@ step();
       fetch(baseUrl + "/event", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ siteKey: options.siteKey, reason: "headless" }), signal: AbortSignal.timeout(2e3) }).catch(() => {
       });
       return { block: true, status: blockStatus, contentType: "text/plain", body: BLOCK_PAGE };
-    }
-    if (headlessEnabled && /Mozilla/i.test(ctx.ua) && !await isTrustedBot(ctx.ua, ctx.ip)) {
-      const sfd = ctx.secFetchDest ?? "";
-      const sfm = ctx.secFetchMode ?? "";
-      const al = ctx.acceptLanguage ?? "";
-      if (!al || !sfd && !sfm) {
-        log("fake browser (Sec-Fetch absent) \u2192 challenge client, pas de 403:", ctx.ua.slice(0, 40));
-      }
     }
     return null;
   }
@@ -1135,7 +1165,7 @@ function createShugoiMiddleware(options) {
         const { handleRender: handleRender2 } = await Promise.resolve().then(() => (init_render(), render_exports));
         const q = req.query && req.query || {};
         const ip2 = (typeof req.headers?.["x-forwarded-for"] === "string" ? req.headers["x-forwarded-for"].split(",")[0]?.trim() : void 0) || (typeof req.ip === "string" ? req.ip : "unknown");
-        return handleRender2(q.token || "", res, internalUrl, q.mid || "", q.grant || "", ip2, options.siteKey, baseUrl);
+        return handleRender2(q.token || "", res, internalUrl, q.mid || "", q.grant || "", ip2, options.siteKey, baseUrl, signingSecret);
       }
       if (path === "/__sg_challenge") {
         const m = String(req.method || "GET").toUpperCase();
@@ -1164,7 +1194,7 @@ function createShugoiMiddleware(options) {
       const reqLocale = resolveLocale(options.locale, typeof req.headers?.["accept-language"] === "string" ? req.headers?.["accept-language"] : void 0);
       if (autoInject && options.siteKey) {
         try {
-          const { skipPaths } = await getConfig(options.siteKey, internalUrl);
+          const { skipPaths } = await getConfig(options.siteKey, internalUrl, signingSecret);
           if (skipPaths?.some((p) => path === p)) {
             try {
               const { renderPage } = await import("../../../server/lib/ssr.js");
@@ -1218,7 +1248,7 @@ function createShugoiMiddleware(options) {
         const okCookie = core.sgOkCookie(sgProofQ, ip, ua);
         if (okCookie) res.setHeader("Set-Cookie", okCookie);
       }
-      const isBot = await core.isTrustedBot(ua, ip);
+      const isBot = await core.isTrustedBot(ua, ip) || core.isWhitelistedBot(ua);
       if (autoInject && splitRender && !isBot && !core.isAllowlisted(path)) {
         let injected = false;
         const originalSend = res.send?.bind(res);
@@ -1329,6 +1359,8 @@ function createShugoiPlugin(options) {
       const path = request.url.split("?")[0];
       if (path.endsWith("/__shugoi/render") || path.endsWith("/__shugoi/healthcheck")) return payload;
       if (reply.statusCode !== 200) return payload;
+      const ua = typeof request.headers?.["user-agent"] === "string" ? request.headers["user-agent"] : "";
+      if (core.isWhitelistedBot(ua)) return payload;
       const ct = reply.getHeader("content-type");
       if (!ct || String(ct).includes("text/html")) {
         const pluginLocale = resolveLocale(options.locale, typeof request.headers?.["accept-language"] === "string" ? request.headers?.["accept-language"] : void 0);
@@ -1395,7 +1427,7 @@ async function scriptTags(options) {
   const key = options.siteKey;
   const ts = Date.now();
   const signed = signToken(key, ts, options.signingSecret);
-  const skel = await generateSkeleton(key, signed.token, base, options.restrictedAccess ?? false, options.whitelist);
+  const skel = await generateSkeleton(key, signed.token, base, options.restrictedAccess ?? false, options.whitelist, void 0, void 0, void 0, void 0, options.signingSecret);
   return { guardDetect: skel, guard: "", whitelistConfig: "", token: signed.token };
 }
 
