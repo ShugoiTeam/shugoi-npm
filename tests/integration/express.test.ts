@@ -119,6 +119,40 @@ describe('Express integration', () => {
     }
   });
 
+  it("Discordbot est STRICT (UA + IP vérifiée par reverse-DNS) : un curl qui imite l'UA Discord depuis une IP aléatoire est traité comme un visiteur normal (F1 403), pas bypassé. facebookexternalhit (sans vérif d'IP) reste lenient (UA seul).", async () => {
+    const { createCore } = await import('../../src/core');
+    const prev = process.env.SHUGOKI_SIGNING_SECRET;
+    process.env.SHUGOKI_SIGNING_SECRET = 'test-secret-pow';
+    try {
+      // verifyBots true (défaut) : Discord exige une IP Discord → IP factice = 403
+      const core = createCore({ siteKey: 'sg_sk_live_test', allowlist: [] });
+      const fakeDiscord = await core.evaluate({ path: '/', ua: 'Mozilla/5.0 (compatible; Discordbot/2.0; +https://discordapp.com)', ip: '1.2.3.5' });
+      expect(fakeDiscord?.status).toBe(403);
+      // facebookexternalhit n'est PAS dans VERIFIABLE_BOTS → UA seul suffit → bypass
+      const fb = await core.evaluate({ path: '/', ua: 'facebookexternalhit/1.1', ip: '1.2.3.5' });
+      expect(fb).toBeNull();
+    } finally {
+      if (prev === undefined) delete process.env.SHUGOKI_SIGNING_SECRET;
+      else process.env.SHUGOKI_SIGNING_SECRET = prev;
+    }
+  });
+
+  it("Discordbot avec verifyBots:false (IP non vérifiée par choix) → bypass autorisé (UA whitelisté)", async () => {
+    const { createCore } = await import('../../src/core');
+    const prev = process.env.SHUGOKI_SIGNING_SECRET;
+    process.env.SHUGOKI_SIGNING_SECRET = 'test-secret-pow';
+    try {
+      const core = createCore({ siteKey: 'sg_sk_live_test', verifyBots: false, allowlist: [] });
+      const discord = await core.evaluate({ path: '/', ua: 'Mozilla/5.0 (compatible; Discordbot/2.0; +https://discordapp.com)', ip: '1.2.3.5' });
+      expect(discord).toBeNull();
+      const fakeBrowser = await core.evaluate({ path: '/', ua: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120', ip: '1.2.3.6' });
+      expect(fakeBrowser?.status).toBe(403);
+    } finally {
+      if (prev === undefined) delete process.env.SHUGOKI_SIGNING_SECRET;
+      else process.env.SHUGOKI_SIGNING_SECRET = prev;
+    }
+  });
+
   it('sets CSP header', async () => {
     const { headers } = await httpGet(`http://127.0.0.1:${port}/`, {
       'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36',

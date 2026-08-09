@@ -40,6 +40,8 @@ export interface ShugoiCoreOptions {
    *  officielles (Googlebot, Bingbot…). Défaut : true.
    *  Mettre à false uniquement si le DNS sortant est bloqué sur votre infrastructure. */
   verifyBots?: boolean
+  /** Journaliser les IP des bots whitelistés (diagnostic embeds Discord/Twitter). */
+  logBotIps?: boolean
 }
 
 export interface BlockPageContext {

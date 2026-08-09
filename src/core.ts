@@ -2,7 +2,7 @@ import type { ShugoiCoreOptions, BlockPageContext } from './types'
 import { ensureGuardsReady, fetchConfigForSiteKey } from './render'
 import { buildCsp, originOf } from './csp'
 import { resolveLocale, type Locale, MESSAGES } from './locales'
-import { verifyBotIp } from './verify-bot'
+import { verifyBotIp, VERIFIABLE_BOTS } from './verify-bot'
 import crypto from 'node:crypto'
 
 export const DEFAULT_HEADLESS_PATTERNS = [
@@ -368,10 +368,31 @@ export function createCore(options: ShugoiCoreOptions): ShugoiCore {
   function isWhitelistedBot(ua: string): boolean {
     return botWhitelist.some(p => p.test(ua))
   }
+  // Allowlist IP EMPIRIQUE (env SHUGOKI_BOT_IPS, virgules) : Discord fetch les embeds
+  // depuis des IP Google Cloud (reverse-DNS non Discord) → on autorise par IP observée
+  // dans les logs ("[shugoi] bot_ua ip=…"). Vérif : UA whitelisté + IP dans la liste.
+  const botIpList = new Set((process.env.SHUGOKI_BOT_IPS || '').split(',').map(s => s.trim()).filter(Boolean))
+  // Bypass bot SÉCURISÉ : les bots dont l'IP est VÉRIFIABLE (reverse-DNS : Google, Bing,
+  // Yandex, DuckDuckGo, Apple, Discord…) exigent UA + IP confirmée — un curl qui imite
+  // leur UA depuis une IP aléatoire est traité comme un visiteur normal (F1/challenge).
+  // Les bots sociaux SANS config de vérif d'IP (facebookexternalhit, Twitterbot…)
+  // restent UA-only (compromis assumé, à durcir au fur et à mesure).
+  async function botBypass(ua: string, ip: string): Promise<boolean> {
+    if (!isWhitelistedBot(ua)) return false
+    // Diagnostic : journaliser les IP des bots (Discord, Twitter…) pour construire une
+    // allowlist IP EMPIRIQUE (le reverse-DNS de Discord doit être confirmé — les embeds
+    // peuvent passer par un CDN qui fait varier l'IP). Grep: 'shugoi] bot_ua'.
+    if (options.logBotIps !== false) {
+      console.log('[shugoi] bot_ua ip=' + ip + ' ua=' + String(ua).slice(0, 50))
+    }
+    if (VERIFIABLE_BOTS.some(p => p.test(ua))) return await isTrustedBot(ua, ip)
+    return true
+  }
 
   async function isTrustedBot(ua: string, ip: string): Promise<boolean> {
     if (!isWhitelistedBot(ua)) return false
     if (!verifyBots) return true
+    if (botIpList.has(ip)) return true
     const verified = await verifyBotIp(ua, ip)
     if (verified === null) return false
     return verified
@@ -465,7 +486,13 @@ step();
       // compris Tor Browser Firefox-based) envoient toujours ces headers. Le cas "navigateur
       // réel + Tor" (IP = nœud de sortie, avec Sec-Fetch) reste géré par /wlc → card
       // "Tor détecté".
-      if (/Mozilla/i.test(ctx.ua) && !(await isTrustedBot(ctx.ua, ctx.ip))) {
+      // Le F1 vise les FAUX navigateurs (curl avec un UA navigateur). Un bot WHITELISTÉ
+      // (ex. Discordbot dont l'UA réel est "Mozilla/5.0 (compatible; Discordbot/2.0; …)")
+      // ne doit PAS être bloqué par ce check même sans IP vérifiée : il n'envoie pas de
+      // Sec-Fetch/Accept-Language. Exemption = isWhitelistedBot (même logique que le bypass
+      // challenge). Un curl qui imiterait Discordbot n'y gagne rien : il obtient la page
+      // publique, et l'anti-curl réel (rate-limit + grant + whitelist) reste en place.
+      if (/Mozilla/i.test(ctx.ua) && !(await botBypass(ctx.ua, ctx.ip))) {
         const sfd = ctx.secFetchDest ?? ''
         const sfm = ctx.secFetchMode ?? ''
         const al = ctx.acceptLanguage ?? ''
@@ -492,7 +519,7 @@ step();
       // valide est CONSOMMÉE à sa 1re utilisation ; un rejeu (sans cookie) → 307.
       const proofFresh = validProof ? consumeProof(proof) : false
       const canProceed = validCookie || proofFresh
-      if (!canProceed && !isWhitelistedBot(ctx.ua)) {
+      if (!canProceed && !(await botBypass(ctx.ua, ctx.ip))) {
         // SEO / aperçus sociaux : un crawler légitime NE PEUT PAS exécuter le PoW JS.
         // Les bots whitelistés (moteurs de recherche + bots de partage social :
         // googlebot, bingbot, facebookexternalhit, twitterbot, linkedinbot, discordbot,
@@ -568,7 +595,7 @@ step();
     }
 
     // Headless UA block
-    if (headlessEnabled && ctx.ua && !(await isTrustedBot(ctx.ua, ctx.ip)) && headlessPatterns.some(p => p.test(ctx.ua))) {
+    if (headlessEnabled && ctx.ua && !(await botBypass(ctx.ua, ctx.ip)) && headlessPatterns.some(p => p.test(ctx.ua))) {
       log('headless block:', ctx.ua.slice(0, 40))
       fetch(baseUrl + '/event', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ siteKey: options.siteKey, reason: 'headless' }), signal: AbortSignal.timeout(2000) }).catch(() => {})
       return { block: true, status: blockStatus, contentType: 'text/plain', body: BLOCK_PAGE }

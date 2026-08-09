@@ -7,7 +7,13 @@ const BOT_DOMAINS: Array<{ pattern: RegExp; suffixes: string[] }> = [
   { pattern: /DuckDuckBot/i, suffixes: ['.duckduckgo.com'] },
   { pattern: /YandexBot/i, suffixes: ['.yandex.ru', '.yandex.net', '.yandex.com'] },
   { pattern: /Applebot/i, suffixes: ['.applebot.apple.com'] },
+  // Discord (embeds) : UA réel = "Mozilla/5.0 (compatible; Discordbot/2.0; …)". Le suffixe
+  // reverse-DNS doit être confirmé empiriquement (IP des serveurs Discord). Twitter à venir.
+  { pattern: /Discordbot/i, suffixes: ['.discord.gg', '.discord.com', '.discordapp.com'] },
 ];
+
+/** Bots pour lesquels le bypass exige UA + IP vérifiée (reverse-DNS), pas l'UA seul. */
+export const VERIFIABLE_BOTS: RegExp[] = BOT_DOMAINS.map((b) => b.pattern);
 
 const VERIFY_TTL = 3_600_000;
 const MAX_ENTRIES = 5_000;

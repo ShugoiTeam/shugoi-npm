@@ -687,8 +687,12 @@ var BOT_DOMAINS = [
   { pattern: /Slurp/i, suffixes: [".crawl.yahoo.net"] },
   { pattern: /DuckDuckBot/i, suffixes: [".duckduckgo.com"] },
   { pattern: /YandexBot/i, suffixes: [".yandex.ru", ".yandex.net", ".yandex.com"] },
-  { pattern: /Applebot/i, suffixes: [".applebot.apple.com"] }
+  { pattern: /Applebot/i, suffixes: [".applebot.apple.com"] },
+  // Discord (embeds) : UA réel = "Mozilla/5.0 (compatible; Discordbot/2.0; …)". Le suffixe
+  // reverse-DNS doit être confirmé empiriquement (IP des serveurs Discord). Twitter à venir.
+  { pattern: /Discordbot/i, suffixes: [".discord.gg", ".discord.com", ".discordapp.com"] }
 ];
+var VERIFIABLE_BOTS = BOT_DOMAINS.map((b) => b.pattern);
 var VERIFY_TTL = 36e5;
 var MAX_ENTRIES2 = 5e3;
 var _cache = /* @__PURE__ */ new Map();
@@ -985,9 +989,19 @@ function createCore(options) {
   function isWhitelistedBot(ua) {
     return botWhitelist.some((p) => p.test(ua));
   }
+  const botIpList = new Set((process.env.SHUGOKI_BOT_IPS || "").split(",").map((s) => s.trim()).filter(Boolean));
+  async function botBypass(ua, ip) {
+    if (!isWhitelistedBot(ua)) return false;
+    if (options.logBotIps !== false) {
+      console.log("[shugoi] bot_ua ip=" + ip + " ua=" + String(ua).slice(0, 50));
+    }
+    if (VERIFIABLE_BOTS.some((p) => p.test(ua))) return await isTrustedBot(ua, ip);
+    return true;
+  }
   async function isTrustedBot(ua, ip) {
     if (!isWhitelistedBot(ua)) return false;
     if (!verifyBots) return true;
+    if (botIpList.has(ip)) return true;
     const verified = await verifyBotIp(ua, ip);
     if (verified === null) return false;
     return verified;
@@ -1047,7 +1061,7 @@ step();
     }
     const isPage = !ctx.path.includes("/__shugoi/") && !ctx.path.startsWith("/api/");
     if (isPage && powSecret && ctx.ua) {
-      if (/Mozilla/i.test(ctx.ua) && !await isTrustedBot(ctx.ua, ctx.ip)) {
+      if (/Mozilla/i.test(ctx.ua) && !await botBypass(ctx.ua, ctx.ip)) {
         const sfd = ctx.secFetchDest ?? "";
         const sfm = ctx.secFetchMode ?? "";
         const al = ctx.acceptLanguage ?? "";
@@ -1063,7 +1077,7 @@ step();
       const validCookie = !!ctx.sgOk && isSgOkValid(ctx.sgOk, ctx.ip, ctx.ua);
       const proofFresh = validProof ? consumeProof(proof) : false;
       const canProceed = validCookie || proofFresh;
-      if (!canProceed && !isWhitelistedBot(ctx.ua)) {
+      if (!canProceed && !await botBypass(ctx.ua, ctx.ip)) {
         if (!allowChallenge(ctx.ip)) {
           const loc = resolveLocale(void 0, ctx.acceptLanguage);
           const lmsgs = MESSAGES[loc];
@@ -1113,7 +1127,7 @@ step();
       } catch {
       }
     }
-    if (headlessEnabled && ctx.ua && !await isTrustedBot(ctx.ua, ctx.ip) && headlessPatterns.some((p) => p.test(ctx.ua))) {
+    if (headlessEnabled && ctx.ua && !await botBypass(ctx.ua, ctx.ip) && headlessPatterns.some((p) => p.test(ctx.ua))) {
       log("headless block:", ctx.ua.slice(0, 40));
       fetch(baseUrl + "/event", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ siteKey: options.siteKey, reason: "headless" }), signal: AbortSignal.timeout(2e3) }).catch(() => {
       });
