@@ -4,6 +4,23 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.4.30] - 2026-08-09
+
+### Performance
+- Bounded the in-memory render cache and its disk cleanup to keep long-running
+  processes stable under sustained traffic.
+- Reworked Next.js token storage around deterministic paths and bounded guard
+  state, avoiding repeated directory-wide searches.
+- Removed source maps from the published package, reducing its unpacked size by
+  more than 60%.
+
+### Fixed
+- Kept fallback rendering strictly scoped to the requesting site so cached HTML
+  can never cross tenant boundaries.
+- Added an explicit `renderSkipPath` integration point instead of importing
+  private application SSR files.
+- Enabled strict unused-code checks and removed dead compatibility paths.
+
 ## [0.4.29] - 2026-08-09
 
 ### Added
