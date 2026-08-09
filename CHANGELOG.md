@@ -4,6 +4,44 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.4.29] - 2026-08-09
+
+### Added
+- **Allowlist IP empirique `SHUGOKI_BOT_IPS`** (env, virgules) : les embeds Discord
+  fetch depuis des IP Google Cloud (reverse-DNS non Discord) → on autorise les IP
+  observées dans les logs `[shugoi] bot_ua ip=…`. Vérif : UA whitelisté + IP dans la liste.
+
+## [0.4.28] - 2026-08-09
+
+### Added
+- **Journalisation des IP des bots whitelistés** (`logBotIps`, actif par défaut) :
+  chaque requête bot logue `[shugoi] bot_ua ip=… ua=…` pour construire une allowlist
+  IP empirique (Discord, Twitter…).
+
+## [0.4.27] - 2026-08-09
+
+### Security
+- **Bots STRICT (UA + IP vérifiée)** : les bots dont l'IP est vérifiable par
+  reverse-DNS (Google, Bing, Slurp, DuckDuckGo, Yandex, Apple, Discord) exigent une
+  IP confirmée pour le bypass (F1 + challenge). Un curl qui imite l'UA Discord depuis
+  une IP aléatoire est traité comme un visiteur normal (403), pas bypassé.
+- `facebookexternalhit` / `Twitterbot` restent lenient (UA seul), à durcir ensuite.
+
+## [0.4.26] - 2026-08-09
+
+### Fixed
+- **F1 (anti-faux-navigateur) exempte les bots whitelistés** : l'UA réel de Discord
+  est `Mozilla/5.0 (compatible; Discordbot/2.0; …)` → il contient "Mozilla" et était
+  403 (pas de Sec-Fetch). Les embeds Discord lisent maintenant les og:meta.
+
+## [0.4.25] - 2026-08-08
+
+### Added
+- **Bypass challenge pour les bots whitelistés (SEO / embeds)** : les crawlers
+  (Googlebot, facebookexternalhit, Twitterbot, LinkedInBot, Discordbot…) reçoivent le
+  HTML brut (og:image, indexation) au lieu du skeleton split-render qu'ils ne peuvent
+  pas exécuter. Le vrai verrou reste le render-grant + la whitelist.
+
 ## [0.4.2] - 2026-08-02
 
 ### Fixed
