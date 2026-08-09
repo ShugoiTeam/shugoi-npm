@@ -135,6 +135,26 @@ describe('CH-05 pas d\'oracle token (réponses uniformes)', () => {
 });
 
 describe('§7bis CRITIQUE 1 — grant cross-site (siteKey lié)', () => {
+  it("ne retourne jamais le HTML d'un autre site quand le token n'est plus stocké", async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ whitelistedMachines: [], detectionFlags: { enableContentReplacementCheck: false } }),
+    }));
+    __clearConfigCache();
+    const siteA = 'sg_sk_live_isolated_a';
+    const siteB = 'sg_sk_live_isolated_b';
+    const tokenA = signToken(siteA, Date.now()).token;
+    const tokenB = signToken(siteB, Date.now()).token;
+    storeHtml(tokenB, '<html>tenant-b</html>', false);
+    const grantA = makeGrant(mid, tokenA, '1.2.3.4', siteA);
+
+    const result = await renderResponseData(tokenA, undefined, undefined, mid, grantA, '1.2.3.4', siteA);
+
+    expect(result.html).toBeUndefined();
+    expect(result.error).toBe('not_found');
+    vi.unstubAllGlobals();
+  });
+
   it('refuse un grant émis par un autre site (siteKey du grant != site)', async () => {
     const { signToken, storeHtml, renderResponseData } = await import('../src/render');
     // Token du site "shugoi"...

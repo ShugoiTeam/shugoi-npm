@@ -204,4 +204,3 @@ function applyObfuscation(code, seed) {
   applyObfuscation,
   stripTrace
 });
-//# sourceMappingURL=obfuscate.cjs.map

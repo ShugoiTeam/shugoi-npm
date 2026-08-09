@@ -1,10 +1,13 @@
-// @ts-nocheck
 import crypto, { createHash } from 'crypto';
 import { writeFileSync, readFileSync, existsSync, unlinkSync, mkdirSync, readdirSync, chmodSync, statSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { MESSAGES, type Locale } from './locales';
-import { stripTrace } from './obfuscate';
+
+const runtimeGlobal = globalThis as typeof globalThis & {
+  __sg_ntpDrift?: number;
+  __sg_ntpTime?: number;
+};
 
 // ── Token storage ──
 const TOKEN_DIR = join(tmpdir(), 'shugoi-render-' + (process.getuid?.() ?? 'x'));
@@ -14,12 +17,13 @@ const MAX_TOTAL_BYTES = 64 * 1024 * 1024;
 const MAX_TOKEN_READS = 1;
 
 
-interface StoredEntry { html: string; expiresAt: number; reads: number }
+interface StoredEntry { html: string; expiresAt: number; reads: number; contentReplaceOn?: boolean }
 const _memoryStore = new Map<string, StoredEntry>();
 const _siteCache = new Map<string, string>();
 
 let _diskEnabled = false;
 let _totalBytes = 0;
+let _diskCleanupStarted = false;
 
 if (!existsSync(TOKEN_DIR)) {
   try { mkdirSync(TOKEN_DIR, { recursive: true, mode: 0o700 }); } catch {}
@@ -31,6 +35,8 @@ function tokenFileName(token: string): string {
 }
 
 function startDiskCleanup() {
+  if (_diskCleanupStarted) return;
+  _diskCleanupStarted = true;
   setInterval(() => {
     try {
       for (const f of readdirSync(TOKEN_DIR)) {
@@ -75,6 +81,17 @@ export function storeHtml(token: string, html: string, contentReplaceOn?: boolea
   }
   _memoryStore.set(token, { html, expiresAt: Date.now() + TOKEN_TTL, reads: 0, contentReplaceOn });
   _totalBytes += size;
+  const separator = token.indexOf(':');
+  if (separator > 0) {
+    const siteKey = token.slice(0, separator);
+    _siteCache.delete(siteKey);
+    _siteCache.set(siteKey, html);
+    while (_siteCache.size > MAX_TENANTS) {
+      const oldest = _siteCache.keys().next();
+      if (oldest.done) break;
+      _siteCache.delete(oldest.value);
+    }
+  }
 }
 
 function readFromMemory(token: string): string | null {
@@ -161,14 +178,7 @@ export async function renderResponseData(token: string, locale?: Locale, configU
   // peu importe si le token est en mémoire ou pas
   if (!contentReplaceOn) {
     const siteKey = token.split(':')[0];
-    let siteHtml = _siteCache.get(siteKey);
-    // Si _siteCache est vide (bug module), récupérer depuis n'importe quelle entrée mémoire
-    if (!siteHtml) {
-      for (const [, entry] of _memoryStore) {
-        siteHtml = entry.html;
-        if (siteHtml) break;
-      }
-    }
+    const siteHtml = _siteCache.get(siteKey);
     if (siteHtml) return { html: siteHtml };
   }
 
@@ -195,7 +205,7 @@ async function fetchContentReplaceFlag(token: string, internalUrl: string, _secr
   }
 }
 
-function verifyTokenAndRead(token: string, locale?: Locale): { html?: string; error?: string; blocked?: boolean; reason?: string; message?: string; title?: string } {
+function verifyTokenAndRead(token: string, _locale?: Locale): { html?: string; error?: string; blocked?: boolean; reason?: string; message?: string; title?: string } {
   const parts = token.split(':');
   if (parts.length !== 4 || parts[3].length !== 64) {
     return { error: 'not_found' };
@@ -501,6 +511,7 @@ function getCacheEntry(baseUrl: string, siteKey: string): GuardCacheEntry {
   const key = cacheKey(baseUrl, siteKey);
   if (!_guardCaches.has(key)) {
     _guardCaches.set(key, { detect: null, guard: null, fetching: false, queue: [], fetchedAt: 0 });
+    pruneCache(_guardCaches);
   }
   return _guardCaches.get(key)!;
 }
@@ -519,7 +530,6 @@ async function fetchGuardScripts(baseUrl: string, secret?: string, siteKey?: str
     ]);
     const rawDetect = await dRes.text();
     const rawGuard = await gRes.text();
-    const seed = cb.toString(36);
     cache.detect = rawDetect;
     cache.guard = rawGuard;
     cache.fetchedAt = Date.now();
@@ -538,7 +548,7 @@ export async function ensureGuardsReady(baseUrl: string, secret?: string, siteKe
   await fetchGuardScripts(baseUrl, secret, siteKey);
 }
 
-export async function generateSkeleton(siteKey: string, token: string, baseUrl: string, restrictedAccess?: boolean, whitelist?: string[], renderUrl?: string, locale?: Locale, flags?: Record<string, boolean>, clockts?: number, signingSecret?: string): Promise<string> {
+export async function generateSkeleton(siteKey: string, token: string, baseUrl: string, restrictedAccess?: boolean, _whitelist?: string[], renderUrl?: string, locale?: Locale, flags?: Record<string, boolean>, clockts?: number, signingSecret?: string): Promise<string> {
   await ensureGuardsReady(baseUrl, undefined, siteKey);
   const rurl = renderUrl || './__shugoi/render';
   const cfg = flags ?? (await getConfig(siteKey, baseUrl, signingSecret)).flags;
@@ -575,8 +585,8 @@ export async function generateSkeleton(siteKey: string, token: string, baseUrl: 
     return Number.isInteger(raw) && raw >= 8 && raw <= 24 ? raw : 12;
   })();
   fragments.push('window.__sg_pow=' + JSON.stringify({ ts: _powTs, nonce: _powNonce, salt: _powSalt, difficulty: _powDiff }));
-  const _ntpDrift = (typeof globalThis !== 'undefined' ? globalThis.__sg_ntpDrift : 0) || 0;
-  const _ntpTime = globalThis.__sg_ntpTime || (Date.now() - _ntpDrift);
+  const _ntpDrift = runtimeGlobal.__sg_ntpDrift || 0;
+  const _ntpTime = runtimeGlobal.__sg_ntpTime || (Date.now() - _ntpDrift);
   const _clockts = clockts || _ntpTime;
   fragments.push('window.__sg_ntp=' + _ntpTime);
   fragments.push('window.__sg_serverTime=' + _clockts);
@@ -625,7 +635,7 @@ export async function generateSkeleton(siteKey: string, token: string, baseUrl: 
   return '<script>' + bootCode + '</script>';
 }
 
-export async function injectGuardScripts(html: string, siteKey: string, baseUrl: string, whitelist?: string[] | null, restrictedAccess?: boolean, signingSecret?: string, req?: unknown, _allowedOrigins?: string[], locale?: Locale, clockts?: number): Promise<string> {
+export async function injectGuardScripts(html: string, siteKey: string, baseUrl: string, whitelist?: string[] | null, restrictedAccess?: boolean, signingSecret?: string, _req?: unknown, _allowedOrigins?: string[], locale?: Locale, clockts?: number): Promise<string> {
   await ensureGuardsReady(baseUrl, signingSecret, siteKey);
   const cfgData = await getConfig(siteKey, baseUrl, signingSecret);
   const wl = whitelist ?? cfgData.whitelist;

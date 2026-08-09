@@ -1,11 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createShugoiMiddleware } from '../src/middleware';
-import type { ShugoiOptions } from '../src/types';
+import { __clearConfigCache } from '../src/render';
+import type { ShugoiCoreOptions } from '../src/types';
 
 describe('createShugoiMiddleware', () => {
-  beforeEach(() => { vi.restoreAllMocks(); });
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    __clearConfigCache();
+  });
 
-  const validOptions: ShugoiOptions = {
+  const validOptions: ShugoiCoreOptions = {
     siteKey: 'sg_sk_live_xxx',
   };
 
@@ -129,6 +133,28 @@ describe('createShugoiMiddleware', () => {
     const next = vi.fn();
     await mw(req, res, next);
     expect(next).toHaveBeenCalled();
+  });
+
+  it('rend un skipPath via le renderer fourni sans dépendre du projet hôte', async () => {
+    globalThis.fetch = vi.fn().mockImplementation((url: string) => {
+      if (url.includes('guard-detect') || url.includes('guard?')) {
+        return Promise.resolve({ ok: true, text: async () => '(function(){})()' });
+      }
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({ whitelistedMachines: [], detectionFlags: {}, skipPaths: ['/docs'] }),
+      });
+    });
+    const renderSkipPath = vi.fn().mockResolvedValue('<html><body>docs</body></html>');
+    const mw = createShugoiMiddleware({ ...validOptions, renderSkipPath });
+    const { req, res } = mockReqRes({}, '/docs');
+    const next = vi.fn();
+
+    await mw(req, res, next);
+
+    expect(renderSkipPath).toHaveBeenCalledWith('/docs');
+    expect(res._body).toBe('<html><body>docs</body></html>');
+    expect(next).not.toHaveBeenCalled();
   });
 
   it('does not modify HTML when autoInject is false', async () => {

@@ -27,8 +27,8 @@ declare function signToken(siteKey: string, timestamp: number, secretOverride?: 
 };
 declare function fetchWhitelistForSiteKey(siteKey: string, baseUrl: string): Promise<string[]>;
 declare function __clearConfigCache(): void;
-declare function generateSkeleton(siteKey: string, token: string, baseUrl: string, restrictedAccess?: boolean, whitelist?: string[], renderUrl?: string, locale?: Locale, flags?: Record<string, boolean>, clockts?: number, signingSecret?: string): Promise<string>;
-declare function injectGuardScripts(html: string, siteKey: string, baseUrl: string, whitelist?: string[] | null, restrictedAccess?: boolean, signingSecret?: string, req?: unknown, _allowedOrigins?: string[], locale?: Locale, clockts?: number): Promise<string>;
+declare function generateSkeleton(siteKey: string, token: string, baseUrl: string, restrictedAccess?: boolean, _whitelist?: string[], renderUrl?: string, locale?: Locale, flags?: Record<string, boolean>, clockts?: number, signingSecret?: string): Promise<string>;
+declare function injectGuardScripts(html: string, siteKey: string, baseUrl: string, whitelist?: string[] | null, restrictedAccess?: boolean, signingSecret?: string, _req?: unknown, _allowedOrigins?: string[], locale?: Locale, clockts?: number): Promise<string>;
 
 /** Options communes au middleware Express et au plugin Fastify. */
 interface ShugoiCoreOptions {
@@ -74,6 +74,7 @@ interface ShugoiCoreOptions {
     verifyBots?: boolean;
     /** Journaliser les IP des bots whitelistés (diagnostic embeds Discord/Twitter). */
     logBotIps?: boolean;
+    renderSkipPath?: (path: string) => string | Promise<string>;
 }
 interface BlockPageContext {
     reason: 'rate_limit' | 'headless' | 'content_replacement' | 'restricted';

@@ -1,20 +1,13 @@
 import { NextResponse } from "next/server.js";
 import type { NextRequest } from "next/server.js";
-import { readFileSync, existsSync, writeFileSync, mkdirSync, readdirSync, unlinkSync } from "node:fs";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
 import crypto from "node:crypto";
 import { verifyRenderGrant } from "../render";
+import { loadLocalGuards } from "./guard-cache";
+import { createDiskHtmlStore } from "./token-store";
 
-// ── Config ──
-const TOKEN_DIR = join(tmpdir(), "shugoi-render");
-const TOKEN_TTL = 120000;
-if (!existsSync(TOKEN_DIR)) try { mkdirSync(TOKEN_DIR, { recursive: true }); } catch {}
+const tokenStore = createDiskHtmlStore();
 setInterval(() => {
-  try { for (const f of readdirSync(TOKEN_DIR)) {
-    const p = join(TOKEN_DIR, f);
-    if (Date.now() - parseInt(f.split("_")[0] || "0") > TOKEN_TTL) try { unlinkSync(p); } catch {}
-  }} catch {}
+  tokenStore.cleanup();
 }, 30000).unref();
 
 export interface ShugoiNextOptions {
@@ -58,24 +51,6 @@ function signToken(siteKey: string, timestamp: number, secretOverride?: string) 
   const payload = [siteKey, timestamp, nonce].join(":");
   const sig = crypto.createHmac("sha256", secret).update(payload).digest("hex");
   return { token: payload + ":" + sig };
-}
-
-function loadAssets(root: string): Record<string, string> {
-  try {
-    return JSON.parse(readFileSync(join(root, "lib", "guard-assets.json"), "utf-8"));
-  } catch { return {}; }
-}
-
-function loadGuardSource(root: string, name: string, assets: Record<string, string>): string {
-  try {
-    const p = join(root, "scripts", name);
-    if (!existsSync(p)) return "";
-    let code = readFileSync(p, "utf-8");
-    if (assets.favicon) code = code.replaceAll("__SG_FAVICON__", assets.favicon);
-    if (assets.brand) code = code.replaceAll("__SG_BRAND_IMG__", assets.brand);
-    if (assets.title_tor) code = code.replaceAll("__SG_TITLE_TOR__", assets.title_tor);
-    return code;
-  } catch { return ""; }
 }
 
 let _httpGuardCache: { detect: string | null; guard: string | null; fetchedAt: number } = { detect: null, guard: null, fetchedAt: 0 };
@@ -122,15 +97,8 @@ export function renderResponseData(token: string, mid?: string, grant?: string, 
   if (expectedSiteKey && token.split(':')[0] !== expectedSiteKey) return { error: "not_found" };
   // Parité avec l'adapter Express (NP-01) : sans grant valide (lié au siteKey), pas de HTML.
   if (!verifyRenderGrant(mid, grant, token, ip, expectedSiteKey)) return { error: "not_found" };
-  const suffix = token.slice(-16);
-  try {
-    for (const f of readdirSync(TOKEN_DIR)) {
-      if (f.endsWith(suffix)) {
-        const html = readFileSync(join(TOKEN_DIR, f), "utf-8");
-        return { html };
-      }
-    }
-  } catch {}
+  const html = tokenStore.get(token);
+  if (html) return { html };
   return { blocked: true };
 }
 
@@ -174,10 +142,9 @@ export function createShugoiNextMiddleware(options: ShugoiNextOptions) {
       let detectCode = "";
       let guardCode = "";
 
-      // 1. Try disk first
-      const assets = loadAssets(root);
-      detectCode = loadGuardSource(root, "guard-detect.src.js", assets);
-      guardCode = loadGuardSource(root, "guard.src.js", assets);
+      const localGuards = loadLocalGuards(root);
+      detectCode = localGuards?.detect ?? "";
+      guardCode = localGuards?.guard ?? "";
 
       // 2. Fallback: HTTP
       if (!detectCode || !guardCode) {
@@ -208,7 +175,7 @@ export function createShugoiNextMiddleware(options: ShugoiNextOptions) {
 
       if (internalFetch.ok) {
         const originalHtml = await internalFetch.text();
-        writeFileSync(join(TOKEN_DIR, ts + "_" + signed.token.slice(-16)), originalHtml, "utf-8");
+        tokenStore.put(signed.token, originalHtml);
       }
 
       const skeleton = generateBootcode(siteKey, cfg, detectCode, guardCode);

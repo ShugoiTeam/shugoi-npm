@@ -42,6 +42,7 @@ export interface ShugoiCoreOptions {
   verifyBots?: boolean
   /** Journaliser les IP des bots whitelistés (diagnostic embeds Discord/Twitter). */
   logBotIps?: boolean
+  renderSkipPath?: (path: string) => string | Promise<string>
 }
 
 export interface BlockPageContext {

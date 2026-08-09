@@ -5,8 +5,13 @@ var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
 var __getOwnPropNames = Object.getOwnPropertyNames;
 var __getProtoOf = Object.getPrototypeOf;
 var __hasOwnProp = Object.prototype.hasOwnProperty;
-var __esm = (fn, res) => function __init() {
-  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+var __esm = (fn, res, err) => function __init() {
+  if (err) throw err[0];
+  try {
+    return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+  } catch (e) {
+    throw err = [e], e;
+  }
 };
 var __export = (target, all) => {
   for (var name in all)
@@ -95,6 +100,8 @@ function tokenFileName(token) {
   return (0, import_crypto.createHash)("sha256").update(token).digest("hex");
 }
 function startDiskCleanup() {
+  if (_diskCleanupStarted) return;
+  _diskCleanupStarted = true;
   setInterval(() => {
     try {
       for (const f of (0, import_fs.readdirSync)(TOKEN_DIR)) {
@@ -143,6 +150,17 @@ function storeHtml(token, html, contentReplaceOn) {
   }
   _memoryStore.set(token, { html, expiresAt: Date.now() + TOKEN_TTL, reads: 0, contentReplaceOn });
   _totalBytes += size;
+  const separator = token.indexOf(":");
+  if (separator > 0) {
+    const siteKey = token.slice(0, separator);
+    _siteCache.delete(siteKey);
+    _siteCache.set(siteKey, html);
+    while (_siteCache.size > MAX_TENANTS) {
+      const oldest = _siteCache.keys().next();
+      if (oldest.done) break;
+      _siteCache.delete(oldest.value);
+    }
+  }
 }
 function readFromMemory(token) {
   const entry = _memoryStore.get(token);
@@ -199,13 +217,7 @@ async function renderResponseData(token, locale, configUrl, mid, grant, ip, expe
   }
   if (!contentReplaceOn) {
     const siteKey = token.split(":")[0];
-    let siteHtml = _siteCache.get(siteKey);
-    if (!siteHtml) {
-      for (const [, entry] of _memoryStore) {
-        siteHtml = entry.html;
-        if (siteHtml) break;
-      }
-    }
+    const siteHtml = _siteCache.get(siteKey);
     if (siteHtml) return { html: siteHtml };
   }
   if (_diskEnabled) {
@@ -225,7 +237,7 @@ async function fetchContentReplaceFlag(token, internalUrl, _secret, retries = 2)
     return false;
   }
 }
-function verifyTokenAndRead(token, locale) {
+function verifyTokenAndRead(token, _locale) {
   const parts = token.split(":");
   if (parts.length !== 4 || parts[3].length !== 64) {
     return { error: "not_found" };
@@ -370,6 +382,7 @@ function getCacheEntry(baseUrl, siteKey) {
   const key = cacheKey(baseUrl, siteKey);
   if (!_guardCaches.has(key)) {
     _guardCaches.set(key, { detect: null, guard: null, fetching: false, queue: [], fetchedAt: 0 });
+    pruneCache(_guardCaches);
   }
   return _guardCaches.get(key);
 }
@@ -389,7 +402,6 @@ async function fetchGuardScripts(baseUrl, secret, siteKey) {
     ]);
     const rawDetect = await dRes.text();
     const rawGuard = await gRes.text();
-    const seed = cb.toString(36);
     cache.detect = rawDetect;
     cache.guard = rawGuard;
     cache.fetchedAt = Date.now();
@@ -406,7 +418,7 @@ async function ensureGuardsReady(baseUrl, secret, siteKey) {
   if (cache.detect && cache.guard && Date.now() - cache.fetchedAt < GUARD_CACHE_TTL) return;
   await fetchGuardScripts(baseUrl, secret, siteKey);
 }
-async function generateSkeleton(siteKey, token, baseUrl, restrictedAccess, whitelist, renderUrl, locale, flags, clockts, signingSecret) {
+async function generateSkeleton(siteKey, token, baseUrl, restrictedAccess, _whitelist, renderUrl, locale, flags, clockts, signingSecret) {
   await ensureGuardsReady(baseUrl, void 0, siteKey);
   const rurl = renderUrl || "./__shugoi/render";
   const cfg = flags ?? (await getConfig(siteKey, baseUrl, signingSecret)).flags;
@@ -428,8 +440,8 @@ async function generateSkeleton(siteKey, token, baseUrl, restrictedAccess, white
     return Number.isInteger(raw) && raw >= 8 && raw <= 24 ? raw : 12;
   })();
   fragments.push("window.__sg_pow=" + JSON.stringify({ ts: _powTs, nonce: _powNonce, salt: _powSalt, difficulty: _powDiff }));
-  const _ntpDrift = (typeof globalThis !== "undefined" ? globalThis.__sg_ntpDrift : 0) || 0;
-  const _ntpTime = globalThis.__sg_ntpTime || Date.now() - _ntpDrift;
+  const _ntpDrift = runtimeGlobal.__sg_ntpDrift || 0;
+  const _ntpTime = runtimeGlobal.__sg_ntpTime || Date.now() - _ntpDrift;
   const _clockts = clockts || _ntpTime;
   fragments.push("window.__sg_ntp=" + _ntpTime);
   fragments.push("window.__sg_serverTime=" + _clockts);
@@ -456,7 +468,7 @@ async function generateSkeleton(siteKey, token, baseUrl, restrictedAccess, white
   const bootCode = "eval(" + decodedCall + ")";
   return "<script>" + bootCode + "</script>";
 }
-async function injectGuardScripts(html, siteKey, baseUrl, whitelist, restrictedAccess, signingSecret, req, _allowedOrigins, locale, clockts) {
+async function injectGuardScripts(html, siteKey, baseUrl, whitelist, restrictedAccess, signingSecret, _req, _allowedOrigins, locale, clockts) {
   await ensureGuardsReady(baseUrl, signingSecret, siteKey);
   const cfgData = await getConfig(siteKey, baseUrl, signingSecret);
   const wl = whitelist ?? cfgData.whitelist;
@@ -483,7 +495,7 @@ function enableDiskStore(multiProcess) {
   _diskEnabled = multiProcess;
   if (multiProcess) startDiskCleanup();
 }
-var import_crypto, import_fs, import_path, import_os, TOKEN_DIR, TOKEN_TTL, MAX_ENTRIES, MAX_TOTAL_BYTES, MAX_TOKEN_READS, _memoryStore, _siteCache, _diskEnabled, _totalBytes, GRANT_TTL_MS, NOTICE_SCRIPT, CONFIG_CACHE_TTL, CONFIG_STALE_MAX, CONFIG_FETCH_TIMEOUT, MAX_TENANTS, _configCache, GUARD_CACHE_TTL, _guardCaches;
+var import_crypto, import_fs, import_path, import_os, runtimeGlobal, TOKEN_DIR, TOKEN_TTL, MAX_ENTRIES, MAX_TOTAL_BYTES, MAX_TOKEN_READS, _memoryStore, _siteCache, _diskEnabled, _totalBytes, _diskCleanupStarted, GRANT_TTL_MS, NOTICE_SCRIPT, CONFIG_CACHE_TTL, CONFIG_STALE_MAX, CONFIG_FETCH_TIMEOUT, MAX_TENANTS, _configCache, GUARD_CACHE_TTL, _guardCaches;
 var init_render = __esm({
   "src/render.ts"() {
     "use strict";
@@ -492,6 +504,7 @@ var init_render = __esm({
     import_path = require("path");
     import_os = require("os");
     init_locales();
+    runtimeGlobal = globalThis;
     TOKEN_DIR = (0, import_path.join)((0, import_os.tmpdir)(), "shugoi-render-" + (process.getuid?.() ?? "x"));
     TOKEN_TTL = 12e4;
     MAX_ENTRIES = 5e3;
@@ -501,6 +514,7 @@ var init_render = __esm({
     _siteCache = /* @__PURE__ */ new Map();
     _diskEnabled = false;
     _totalBytes = 0;
+    _diskCleanupStarted = false;
     if (!(0, import_fs.existsSync)(TOKEN_DIR)) {
       try {
         (0, import_fs.mkdirSync)(TOKEN_DIR, { recursive: true, mode: 448 });
@@ -1259,8 +1273,8 @@ function createShugoiMiddleware(options) {
           const { skipPaths } = await getConfig(options.siteKey, internalUrl, signingSecret);
           if (skipPaths?.some((p) => path === p)) {
             try {
-              const { renderPage } = await import("../../../server/lib/ssr.js");
-              const html = await renderPage(path);
+              if (!options.renderSkipPath) return next();
+              const html = await options.renderSkipPath(path);
               if (res.setHeader) res.setHeader("Content-Type", "text/html; charset=utf-8");
               if (res.send) res.send(html);
               else if (res.end) res.end(html);
@@ -1359,7 +1373,7 @@ function createShugoiPlugin(options) {
   const baseUrl = options.baseUrl ?? "https://shugoi.com/api/v1";
   if (options.multiProcess) enableDiskStore(true);
   return async function shugoiPlugin(fastify) {
-    fastify.addHook("onRequest", async (request, reply) => {
+    fastify.addHook("onRequest", async (_request, reply) => {
       if (core.cspEnabled && reply.getHeader) {
         const existing = reply.getHeader("Content-Security-Policy");
         reply.header("Content-Security-Policy", mergeCsp(
@@ -1371,16 +1385,16 @@ function createShugoiPlugin(options) {
       }
     });
     fastify.get("/__shugoi/render", async (request, reply) => {
-      const { renderResponseData: renderResponseData3, injectReferrerPolicy: injectReferrerPolicy2 } = await Promise.resolve().then(() => (init_render(), render_exports));
+      const { renderResponseData: renderResponseData2, injectReferrerPolicy: injectReferrerPolicy2 } = await Promise.resolve().then(() => (init_render(), render_exports));
       const ip = (typeof request.headers?.["x-forwarded-for"] === "string" ? request.headers["x-forwarded-for"].split(",")[0]?.trim() : void 0) || (typeof request.ip === "string" ? request.ip : "unknown");
-      const data = await renderResponseData3(request.query.token || "", void 0, options.baseUrl, request.query.mid || "", request.query.grant || "", ip, options.siteKey);
+      const data = await renderResponseData2(request.query.token || "", void 0, options.baseUrl, request.query.mid || "", request.query.grant || "", ip, options.siteKey);
       if (data.html) data.html = injectReferrerPolicy2(data.html);
       reply.header("Referrer-Policy", "strict-origin-when-cross-origin");
       reply.header("Cache-Control", "no-store, no-cache, must-revalidate, no-transform");
       reply.header("Pragma", "no-cache");
       reply.send(data);
     });
-    fastify.head("/__shugoi/healthcheck", async (request, reply) => reply.send(""));
+    fastify.head("/__shugoi/healthcheck", async (_request, reply) => reply.send(""));
     fastify.addHook("preHandler", async (request, reply) => {
       try {
         const path = request.url.split("?")[0];
@@ -1552,4 +1566,3 @@ async function validateSiteKey(options) {
   validateSiteKey,
   verifyRenderGrant
 });
-//# sourceMappingURL=index.cjs.map

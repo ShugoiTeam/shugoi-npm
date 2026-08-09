@@ -1,8 +1,8 @@
 import type { ShugoiCoreOptions } from './types'
-import { injectGuardScripts, ensureGuardsReady, enableDiskStore, getConfig, storeHtml, signToken, renderResponseData } from './render'
+import { injectGuardScripts, enableDiskStore, getConfig } from './render'
 
 import { mergeCsp } from './csp'
-import { createCore, DEFAULT_HEADLESS_PATTERNS, BLOCK_PAGE, DEFAULT_BOT_WHITELIST } from './core'
+import { createCore } from './core'
 import { resolveLocale, type Locale } from './locales'
 
 interface MinimalRequest {
@@ -102,9 +102,8 @@ export function createShugoiMiddleware(options: ShugoiCoreOptions) {
           const { skipPaths } = await getConfig(options.siteKey, internalUrl, signingSecret);
           if (skipPaths?.some((p: string) => path === p)) {
             try {
-              // @ts-ignore
-              const { renderPage } = await import('../../../server/lib/ssr.js');
-              const html = await renderPage(path);
+              if (!options.renderSkipPath) return next();
+              const html = await options.renderSkipPath(path);
               if (res.setHeader) res.setHeader('Content-Type', 'text/html; charset=utf-8');
               if (res.send) res.send(html);
               else if (res.end) res.end(html);
@@ -213,7 +212,7 @@ export function createShugoiPlugin(options: ShugoiCoreOptions) {
 
   return async function shugoiPlugin(fastify: any) {
     // CSP onRequest hook
-    fastify.addHook('onRequest', async (request: any, reply: any) => {
+    fastify.addHook('onRequest', async (_request: any, reply: any) => {
       if (core.cspEnabled && reply.getHeader) {
         const existing = reply.getHeader('Content-Security-Policy');
         reply.header('Content-Security-Policy', mergeCsp(
@@ -242,7 +241,7 @@ export function createShugoiPlugin(options: ShugoiCoreOptions) {
       reply.send(data);
     });
 
-    fastify.head('/__shugoi/healthcheck', async (request: any, reply: any) => reply.send(''));
+    fastify.head('/__shugoi/healthcheck', async (_request: any, reply: any) => reply.send(''));
 
     // PreHandler: evaluation pipeline
     fastify.addHook('preHandler', async (request: any, reply: any) => {

@@ -1,4 +1,4 @@
-import type { ShugoiCoreOptions, BlockPageContext } from './types'
+import type { ShugoiCoreOptions } from './types'
 import { ensureGuardsReady, fetchConfigForSiteKey } from './render'
 import { buildCsp, originOf } from './csp'
 import { resolveLocale, type Locale, MESSAGES } from './locales'
