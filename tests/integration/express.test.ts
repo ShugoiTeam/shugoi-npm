@@ -80,8 +80,8 @@ describe('Express integration', () => {
       'sec-fetch-mode': 'navigate',
       'accept-language': 'fr-FR,fr;q=0.9',
     });
-    // Split render: returns skeleton with eval, not the original HTML
-    expect(body).toContain('<script>eval(');
+    expect(body).toContain('<script>window.__sg_siteKey=');
+    expect(body).not.toContain('eval(');
     expect(body).not.toContain('OK');
   });
 
@@ -98,7 +98,7 @@ describe('Express integration', () => {
     });
     // Googlebot bypasses headless blocking AND split-render (SEO)
     expect(body).toContain('OK');
-    expect(body).not.toContain('<script>eval(');
+    expect(body).not.toContain('<script>window.__sg_siteKey=');
   });
 
   it('bypass le challenge PoW pour les bots whitelistés (og:image / SEO) mais challenge un UA navigateur', async () => {
@@ -160,7 +160,8 @@ describe('Express integration', () => {
       'sec-fetch-mode': 'navigate',
     });
     const csp = headers['content-security-policy'] as string;
-    expect(csp).toContain("script-src 'self' 'unsafe-inline' 'unsafe-eval' https://shugoi.com");
+    expect(csp).toContain("script-src 'self' 'unsafe-inline' https://shugoi.com");
+    expect(csp).not.toContain('unsafe-eval');
     expect(csp).toContain("connect-src 'self' https://shugoi.com");
     expect(csp).toContain("object-src 'none'");
     expect(csp).toContain("base-uri 'self'");

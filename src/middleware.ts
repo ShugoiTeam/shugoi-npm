@@ -160,7 +160,7 @@ export function createShugoiMiddleware(options: ShugoiCoreOptions) {
 
       // Split-render: inject skeleton for HTML pages (skip for allowlisted paths and
       // whitelisted bots). Les bots (moteurs + partage social) reçoivent le HTML BRUT
-      // (og:image, indexation) — ils ne peuvent pas exécuter le skeleton eval().
+      // (og:image, indexation) — ils ne peuvent pas exécuter le skeleton JavaScript.
       const isBot = (await core.isTrustedBot(ua, ip)) || core.isWhitelistedBot(ua);
 
       if (autoInject && splitRender && !isBot && !core.isAllowlisted(path)) {
@@ -291,7 +291,7 @@ export function createShugoiPlugin(options: ShugoiCoreOptions) {
       if (path.endsWith('/__shugoi/render') || path.endsWith('/__shugoi/healthcheck')) return payload;
       if (reply.statusCode !== 200) return payload;
       // Bots (moteurs + partage social) : HTML brut sans skeleton — ils ne peuvent pas
-      // exécuter le skeleton eval() (og:image / indexation).
+      // exécuter le skeleton JavaScript (og:image / indexation).
       const ua = typeof request.headers?.['user-agent'] === 'string' ? request.headers['user-agent'] : '';
       if (core.isWhitelistedBot(ua)) return payload;
       const ct = reply.getHeader('content-type');

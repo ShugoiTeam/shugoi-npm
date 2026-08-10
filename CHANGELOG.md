@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Security
+- Removed dynamic JavaScript evaluation from Express, Next.js, and manual bootstraps.
+- Removed `unsafe-eval` and executable `blob:` URLs from the default script policy.
+
+### Performance
+- Emit the bootstrap directly instead of expanding every source character into a
+  four-byte Unicode tag, substantially reducing skeleton response size and parse work.
+
 ## [0.4.30] - 2026-08-09
 
 ### Performance

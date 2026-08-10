@@ -39,7 +39,7 @@ describe('SEO — Googlebot receives original HTML', () => {
 
     // Googlebot should get the original HTML, not the skeleton
     expect(sentBody).toContain('<h1>OK</h1>');
-    expect(sentBody).not.toContain('<script>eval(');
+    expect(sentBody).not.toContain('<script>window.__sg_siteKey=');
   });
 
   it('regular browser with Mozilla UA still gets skeleton', async () => {
@@ -72,6 +72,7 @@ describe('SEO — Googlebot receives original HTML', () => {
 
     // Regular browser should get skeleton
     expect(sentBody).not.toContain('<h1>OK</h1>');
-    expect(sentBody).toContain('<script>eval(');
+    expect(sentBody).toContain('<script>window.__sg_siteKey=');
+    expect(sentBody).not.toContain('eval(');
   });
 });

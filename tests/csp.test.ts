@@ -5,7 +5,8 @@ describe('buildCsp', () => {
   it('returns default CSP string', () => {
     const csp = buildCsp({ siteKey: 'sg_sk_live_xxx' });
     expect(csp).toContain("default-src 'self'");
-    expect(csp).toContain("script-src 'self' 'unsafe-inline' 'unsafe-eval' https://shugoi.com");
+    expect(csp).toContain("script-src 'self' 'unsafe-inline' https://shugoi.com");
+    expect(csp).not.toContain('unsafe-eval');
     expect(csp).toContain("connect-src 'self' https://shugoi.com");
   });
 
@@ -33,14 +34,14 @@ describe('buildCsp', () => {
     expect(scriptSrc).toContain('https://shugoi.com');
   });
 
-  it('removes unsafe-eval when splitRender is false', () => {
+  it('does not require unsafe-eval when splitRender is false', () => {
     const csp = buildCsp({ siteKey: 'sg_sk_live_xxx', splitRender: false });
     expect(csp).not.toContain('unsafe-eval');
   });
 
-  it('keeps unsafe-eval when splitRender is true (default)', () => {
+  it('does not require unsafe-eval when splitRender is enabled', () => {
     const csp = buildCsp({ siteKey: 'sg_sk_live_xxx' });
-    expect(csp).toContain('unsafe-eval');
+    expect(csp).not.toContain('unsafe-eval');
   });
 });
 

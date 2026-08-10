@@ -84,11 +84,7 @@ function generateBootcode(siteKey: string, config: string, detectCode: string, g
     ';window.__sg_config=' + config +
     ';try{' + detectCode + '}catch(e){window.__sg_blocked=true}' +
     ';try{' + guardCode + '}catch(e){window.__sg_blocked=true}';
-  let enc = "";
-  for (let i = 0; i < combined.length; i++) {
-    enc += String.fromCodePoint(917504 + combined.charCodeAt(i));
-  }
-  return '<script>eval([...\'' + enc + '\'].map(function(x){return String.fromCodePoint(x.codePointAt(0)-917504)}).join(\'\'))</script>';
+  return '<script>' + combined.replace(/<\/(script|style)/gi, '<\\/$1') + '</script>';
 }
 
 export function renderResponseData(token: string, mid?: string, grant?: string, ip?: string, expectedSiteKey?: string): { html?: string; blocked?: boolean; error?: string } {

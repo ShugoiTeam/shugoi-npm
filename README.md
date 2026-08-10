@@ -128,7 +128,7 @@ All options are available for both `createShugoiMiddleware` and `createShugoiPlu
 | `blockStatus` | `number` | `403` | HTTP status code for block pages |
 | `locale` | `'fr' \| 'en'` | auto (Accept-Language) | Language for blocking pages |
 | `blockPage` | `(ctx) => string` | — | Full override: custom blocking page HTML |
-| `splitRender` | `boolean` | `true` | Set to `false` to disable skeleton/eval injection |
+| `splitRender` | `boolean` | `true` | Set to `false` to disable skeleton injection |
 | `multiProcess` | `boolean` | `false` | Enable disk-based HTML storage (required for PM2 cluster) |
 
 ---
@@ -136,13 +136,13 @@ All options are available for both `createShugoiMiddleware` and `createShugoiPlu
 ## Split-Render: What It Implies
 
 By default (`splitRender: true`), Shugoi replaces the HTML body with a minimal skeleton that:
-1. Runs guard detection scripts (`eval()`)
+1. Runs the guard detection script
 2. Identifies the machine fingerprint
 3. Verifies it against the whitelist
 4. Only then loads the real page content via `fetch()` + `document.write()`
 
 This means:
-- **`unsafe-eval`** is required in your CSP. Set `splitRender: false` to remove it.
+- **`unsafe-eval` is not required.** The bootstrap is emitted as ordinary JavaScript.
 - **Bots get the original HTML**, not the skeleton (Googlebot, Bingbot, etc. — they exit before injection). No SEO impact.
 - **First paint is the skeleton**, not your actual content. The real page loads ~100-300ms after.
 - **Without JavaScript**, the page stays blank (skeleton). This is by design — it blocks non-JS scrapers, with the exception of verified search engine bots (Googlebot, Bingbot…) which receive the original HTML (see `verifyBots` option).
@@ -159,7 +159,6 @@ The split-render mechanism uses `document.open()` + `document.write()` + `docume
 | `DOMContentLoaded` fires twice | Libraries listening for this event may initialize twice. |
 | History API / client-side routing can break | An SPA that initializes in the skeleton and is then replaced loses its state. |
 | Browser extensions see the skeleton first | Some extensions don't re-apply their modifications to the replacement document. |
-| `unsafe-eval` is required | The skeleton uses `eval()` to decode its bootstrap payload. |
 
 ### Should you disable split-render?
 
@@ -167,7 +166,7 @@ The split-render mechanism uses `document.open()` + `document.write()` + `docume
 |---|---|
 | Server-rendered site, classic pages | Keep enabled. This is the blocking mode. |
 | SPA (React, Vue, Svelte) with client routing | **Test first.** The skeleton is replaced after SPA init: state may be lost. |
-| Strict CSP without `unsafe-eval` | Disable: `splitRender: false`. |
+| Strict CSP without inline scripts | Disable split-render or provide your own nonce-based CSP. |
 | First-paint-critical site (e-commerce, content) | Disable, or accept 100-300ms delay. |
 | Internal app behind authentication | Disable: anti-scraper protection is unnecessary. |
 
@@ -183,7 +182,7 @@ Default directives injected:
 
 ```
 default-src 'self';
-script-src 'self' 'unsafe-inline' 'unsafe-eval' https://shugoi.com;
+script-src 'self' 'unsafe-inline' https://shugoi.com;
 connect-src 'self' https://shugoi.com;
 style-src 'self' 'unsafe-inline' https://shugoi.com;
 font-src 'self' https://shugoi.com data:;

@@ -4,7 +4,7 @@ function baseDirectives(apiOrigin) {
   const api = [...new Set([SHUGOI_ORIGIN, apiOrigin].filter(Boolean))];
   return {
     "default-src": ["'self'"],
-    "script-src": ["'self'", "'unsafe-inline'", "'unsafe-eval'", ...api, "blob:"],
+    "script-src": ["'self'", "'unsafe-inline'", ...api],
     "worker-src": ["'self'", "blob:", ...api],
     "connect-src": ["'self'", ...api],
     "style-src": ["'self'", "'unsafe-inline'", ...api],
@@ -24,9 +24,6 @@ function buildCsp(options) {
     for (const [key, values] of Object.entries(options.extraDirectives)) {
       merged[key] = [.../* @__PURE__ */ new Set([...merged[key] ?? [], ...values])];
     }
-  }
-  if (options.splitRender === false && merged["script-src"]) {
-    merged["script-src"] = merged["script-src"].filter((v) => v !== "'unsafe-eval'");
   }
   return Object.entries(merged).map(([key, values]) => `${key} ${values.join(" ")}`).join("; ");
 }
@@ -322,18 +319,14 @@ async function generateSkeleton(siteKey, token, baseUrl, restrictedAccess, _whit
   const fbBadge = jsStr(msgs.blockedBadge);
   const fbTitle = jsStr(msgs.blockedTitle);
   fragments.push('window.__sg_showBlock=function(msg,title,badge){var h="<head><meta charset=UTF-8><meta name=viewport content=width=device-width,initial-scale=1><style>@font-face{font-family:\\x27Alex Brush\\x27;src:url(https://shugoi.com/alex-brush.woff2?v=2) format(\\x27woff2\\x27);font-display:swap}*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}html,body{height:100%;background:#fcf9f5}body{font-family:system-ui,-apple-system,\\\\x27Segoe UI\\\\x27,Roboto,sans-serif;display:flex;align-items:center;justify-content:center;padding:1.2rem}#c{max-width:460px;width:100%;background:#fff;border:4px solid #000;border-radius:28px 6px 32px 10px;box-shadow:12px 12px 0 #000;padding:3rem 2.4rem 2.8rem;text-align:center}#c .l{width:80px;height:80px;pointer-events:none;transform:rotate(-2.5deg);margin:0 auto .6rem;display:block}#c .b{display:block;margin:0 auto .2rem;pointer-events:none;max-width:100%;height:auto}#c .bdg{display:inline-block;border:2px solid #000;border-radius:10px 2px 14px 4px;padding:.3rem .9rem;font-size:.6rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#E87090;margin-bottom:1.4rem}#c h2{font-family:\\x27Alex Brush\\x27,Georgia,\\\\x27Times New Roman\\\\x27,serif;font-size:2.2rem;color:#E87090;font-weight:400;margin:0 auto .6rem}#c p.desc{font-size:.9rem;color:#555;line-height:1.8;max-width:380px;margin:0 auto}#c p.ft{font-size:.55rem;color:#E87090;margin-top:1.8rem}@media (prefers-color-scheme:dark){html,body{background:#16101c}#c{background:#241a30;border-color:rgba(241,232,245,.14);box-shadow:0 10px 30px rgba(0,0,0,.4)}#c .bdg{background:rgba(233,137,159,.16);border-color:rgba(233,137,159,.5);color:#e9899f}#c h2{color:#e9899f}#c p.desc{color:#a795b4}#c p.ft{color:#e9899f}}</style></head><body><div id=c><img src=https://shugoi.com/favicon-block.png class=l><img src=https://shugoi.com/brand-block.png class=b><div class=bdg>"+(badge||"' + fbBadge + '")+"</div><h2>"+(title||"' + fbTitle + '")+"</h2><p class=desc>"+(msg||"")+"</p><p class=ft>"+location.hostname+" \\u00b7 Shugoi</p></div></body>";document.documentElement.innerHTML=h}');
-  fragments.push('var t="' + token + '"');
-  fragments.push('window.__sg_token="' + token + '"');
-  fragments.push('var k="' + siteKey + '"');
-  fragments.push('var b="' + baseUrl + '"');
-  fragments.push('var r="' + rurl + '"');
+  fragments.push("var t=" + JSON.stringify(token));
+  fragments.push("window.__sg_token=" + JSON.stringify(token));
+  fragments.push("var k=" + JSON.stringify(siteKey));
+  fragments.push("var b=" + JSON.stringify(baseUrl));
+  fragments.push("var r=" + JSON.stringify(rurl));
   fragments.push('var _gw=function(cb){if(window.__sg_guardsReady||window.__sg_blocked)cb();else setTimeout(function(){_gw(cb)},100)};function rd(p,n){if(window.__sg_blocked)return;if(!document.body)return setTimeout(function(){rd(p,n)},50);if(n>6){if((window.__sg_config||{}).enableContentReplacementCheck===true)window.__sg_showBlock&&window.__sg_showBlock("' + devtoolsMsg + '","' + tamperTitle + '");return}var _g=(window.__sg_grant||"");if(_g){p=p+("&grant="+encodeURIComponent(_g))}var _m=(window.__sg_detectMid||window.__sg_mid||"");if(_m){p=p+("&mid="+encodeURIComponent(_m))}fetch(p).then(function(x){return x.json()}).then(function(d){if(window.__sg_blocked)return;if(!document.body)return setTimeout(function(){rd(p,n+1)},50);if(d.html){document.open("text/html");document.write(d.html);document.close();window.scrollTo(0,0)}if(d.blocked){window.__sg_showBlock&&window.__sg_showBlock(d.message,d.title)}if(d.error){if((window.__sg_config||{}).enableContentReplacementCheck===true)window.__sg_showBlock&&window.__sg_showBlock("' + devtoolsMsg + '","' + tamperTitle + '")}else if(!d.html&&!d.blocked){setTimeout(function(){rd(p,n+1)},300)}}).catch(function(){setTimeout(function(){rd(p,n+1)},300)})}');
   fragments.push('function _sgCl(){try{for(var _i in window){if(_i.indexOf("__sg")===0){window[_i]=null;delete window[_i]}}window._sgLogCP=function(){};window.midHex=function(){};window.rd=function(){};window._gw=function(){};window.applyDecision=function(){};window._D=function(){};window.z=function(f){return f()}}catch(_e){}}_gw(function(){rd(r+"?token="+t,0);setTimeout(_sgCl,1500)})');
-  const combinedCode = fragments.join(";");
-  let encStr = "";
-  for (let i = 0; i < combinedCode.length; i++) encStr += String.fromCodePoint(917504 + combinedCode.charCodeAt(i));
-  const decodedCall = "[...'" + encStr + "'].map(x=>String.fromCodePoint(x.codePointAt(0)-917504)).join('')";
-  const bootCode = "eval(" + decodedCall + ")";
+  const bootCode = fragments.join(";").replace(/<\/(script|style)/gi, "<\\/$1");
   return "<script>" + bootCode + "</script>";
 }
 async function injectGuardScripts(html, siteKey, baseUrl, whitelist, restrictedAccess, signingSecret, _req, _allowedOrigins, locale, clockts) {
@@ -610,11 +603,7 @@ async function fetchGuardsHttp(baseUrl, siteKey, signingSecret) {
 }
 function generateBootcode(siteKey, config, detectCode, guardCode) {
   const combined = "window.__sg_siteKey=" + JSON.stringify(siteKey) + ";window.__sg_config=" + config + ";try{" + detectCode + "}catch(e){window.__sg_blocked=true};try{" + guardCode + "}catch(e){window.__sg_blocked=true}";
-  let enc = "";
-  for (let i = 0; i < combined.length; i++) {
-    enc += String.fromCodePoint(917504 + combined.charCodeAt(i));
-  }
-  return "<script>eval([...'" + enc + "'].map(function(x){return String.fromCodePoint(x.codePointAt(0)-917504)}).join(''))</script>";
+  return "<script>" + combined.replace(/<\/(script|style)/gi, "<\\/$1") + "</script>";
 }
 function renderResponseData(token, mid, grant, ip, expectedSiteKey) {
   if (!token || token.length < 16 || token.length > 300) return { error: "not_found" };
@@ -706,11 +695,7 @@ async function generateGuardHtml({ siteKey, enableWhitelist = true, enableVmChec
     if (!guards) return '<script>console.warn("Shugoi guards not found")</script>';
     const cfg = JSON.stringify({ enableWhitelist, enableVmCheck, enableTorCheck: true, enableHeadlessCheck: true, enableAntiDetectCheck: true, enableContentReplacementCheck: false });
     const combined = "window.__sg_siteKey=" + JSON.stringify(siteKey) + ";window.__sg_config=" + cfg + ";try{" + guards.detect + "}catch(e){window.__sg_blocked=true};try{" + guards.guard + "}catch(e){window.__sg_blocked=true}";
-    let enc = "";
-    for (let i = 0; i < combined.length; i++) {
-      enc += String.fromCodePoint(917504 + combined.charCodeAt(i));
-    }
-    return "<script>eval([...'" + enc + "'].map(function(x){return String.fromCodePoint(x.codePointAt(0)-917504)}).join(''))</script>";
+    return "<script>" + combined.replace(/<\/(script|style)/gi, "<\\/$1") + "</script>";
   } catch {
     return '<script>console.warn("Shugoi guard generation failed")</script>';
   }

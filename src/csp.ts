@@ -20,7 +20,7 @@ function baseDirectives(apiOrigin: string): Record<string, string[]> {
   const api = [...new Set([SHUGOI_ORIGIN, apiOrigin].filter(Boolean))];
   return {
     'default-src': ["'self'"],
-    'script-src': ["'self'", "'unsafe-inline'", "'unsafe-eval'", ...api, 'blob:'],
+    'script-src': ["'self'", "'unsafe-inline'", ...api],
     'worker-src': ["'self'", 'blob:', ...api],
     'connect-src': ["'self'", ...api],
     'style-src': ["'self'", "'unsafe-inline'", ...api],
@@ -42,10 +42,6 @@ export function buildCsp(options: CspOptions): string {
     for (const [key, values] of Object.entries(options.extraDirectives)) {
       merged[key] = [...new Set([...(merged[key] ?? []), ...values])];
     }
-  }
-
-  if (options.splitRender === false && merged['script-src']) {
-    merged['script-src'] = merged['script-src'].filter((v) => v !== "'unsafe-eval'");
   }
 
   return Object.entries(merged)

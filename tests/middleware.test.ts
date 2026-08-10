@@ -96,7 +96,8 @@ describe('createShugoiMiddleware', () => {
     expect(next).toHaveBeenCalled();
     const html = '<!DOCTYPE html><html><head></head><body><h1>OK</h1></body></html>';
     await res.send(html);
-    expect(sentBody).toContain('<script>eval(');
+    expect(sentBody).toContain('<script>window.__sg_siteKey=');
+    expect(sentBody).not.toContain('eval(');
     expect(sentBody).not.toContain('<h1>OK</h1>');
   });
 
@@ -174,7 +175,7 @@ describe('createShugoiMiddleware', () => {
     const html = '<!DOCTYPE html><html><head></head><body><h1>OK</h1></body></html>';
     res.send(html);
     expect(sentBody).toContain('<h1>OK</h1>');
-    expect(sentBody).not.toContain('<script>eval(');
+    expect(sentBody).not.toContain('<script>window.__sg_siteKey=');
   });
 
   it('sets CSP header on response', async () => {
@@ -233,7 +234,7 @@ describe('createShugoiMiddleware', () => {
     const html = '<!DOCTYPE html><html><head></head><body><h1>OK</h1></body></html>';
     res.send(html);
     expect(sentBody).toContain('<h1>OK</h1>');
-    expect(sentBody).not.toContain('<script>eval(');
+    expect(sentBody).not.toContain('<script>window.__sg_siteKey=');
   });
 
   it('res.end without args works (synchronous bypass)', async () => {
@@ -296,7 +297,8 @@ describe('createShugoiMiddleware', () => {
     (res as any).end(html, 'utf-8', () => { callbackCalled = true; });
     // Wait for promise resolution
     await new Promise(r => setTimeout(r, 100));
-    expect(endBody).toContain('<script>eval(');
+    expect(endBody).toContain('<script>window.__sg_siteKey=');
+    expect(endBody).not.toContain('eval(');
     expect(callbackCalled).toBe(true);
   });
 });

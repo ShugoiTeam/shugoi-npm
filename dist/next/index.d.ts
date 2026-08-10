@@ -66,7 +66,6 @@ interface ShugoiGuardProps {
     enableWhitelist?: boolean;
     enableVmCheck?: boolean;
 }
-/** Generate the Shugoi guard script tag HTML (eval bootcode) */
 declare function generateGuardHtml({ siteKey, enableWhitelist, enableVmCheck }: ShugoiGuardProps): Promise<string>;
 
 declare const SHUGOI_MATCHER = "/((?!_next/static|_next/image|favicon.ico).*)";
