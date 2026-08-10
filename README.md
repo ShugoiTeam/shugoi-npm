@@ -88,7 +88,7 @@ php artisan shugoi:setup
 
 ### Documentation
 
-See the [shugoi-php package](https://github.com/RoxasYTB/shugoi-php) for full documentation, configuration reference, Blade directives, Artisan commands, and non-Laravel PSR-15 usage.
+See the [shugoi-php package](https://github.com/ShugoiTeam/shugoi-php) for full documentation, configuration reference, Blade directives, Artisan commands, and non-Laravel PSR-15 usage.
 
 ### Vanilla Node.js
 
