@@ -8,6 +8,7 @@ describe('buildCsp', () => {
     expect(csp).toContain("script-src 'self' 'unsafe-inline' https://shugoi.com");
     expect(csp).not.toContain('unsafe-eval');
     expect(csp).toContain("connect-src 'self' https://shugoi.com");
+    expect(csp).toContain("frame-src 'self' chrome-extension: moz-extension: safari-web-extension:");
   });
 
   it('includes custom directives from options (union)', () => {

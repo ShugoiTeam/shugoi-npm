@@ -685,6 +685,7 @@ function baseDirectives(apiOrigin) {
     "style-src": ["'self'", "'unsafe-inline'", ...api],
     "font-src": ["'self'", ...api, "data:"],
     "img-src": ["'self'", ...api, "data:", "blob:"],
+    "frame-src": ["'self'", "chrome-extension:", "moz-extension:", "safari-web-extension:"],
     "frame-ancestors": ["'self'"],
     "object-src": ["'none'"],
     "base-uri": ["'self'"],
