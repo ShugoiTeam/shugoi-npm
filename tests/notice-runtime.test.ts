@@ -4,6 +4,17 @@ import { join } from "node:path";
 
 const SRC = join(__dirname, "..", "src", "render.ts");
 
+interface MockElement {
+  style: Record<string, string>;
+  id: string;
+  innerHTML: string;
+  cssText: string;
+  appendChild: (child: MockElement) => MockElement;
+  parentNode: MockElement | null;
+}
+
+type RuntimeGlobal = object | string | number | Function;
+
 // Récupère le contenu du template NOTICE_SCRIPT et le rend comme le ferait render.ts,
 // puis retire le wrapper <script></script> pour obtenir le JS réellement injecté.
 function getNoticeJs(): string {
@@ -28,13 +39,18 @@ describe("notice (consentement) — exécution réelle", () => {
     for (const mobile of [false, true]) {
       let resizeCb: (() => void) | null = null;
       function mkEl() {
-        const el: any = { style: {}, id: "", innerHTML: "", cssText: "" };
-        el.appendChild = (c: any) => c;
-        el.parentNode = null;
+        const el: MockElement = {
+          style: {},
+          id: "",
+          innerHTML: "",
+          cssText: "",
+          appendChild: (child: MockElement) => child,
+          parentNode: null,
+        };
         return el;
       }
       const docEl = mkEl();
-      const globals: Record<string, unknown> = {
+      const globals: Record<string, RuntimeGlobal> = {
         window: {
           __sg_mid: "mid", __sg_siteKey: "sk", __sg_baseUrl: "https://site.com/api/v1",
           matchMedia: () => ({ matches: mobile }),
