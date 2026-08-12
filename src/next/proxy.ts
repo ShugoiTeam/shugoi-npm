@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server.js";
 import type { NextRequest } from "next/server.js";
 import { injectGuardScripts } from "../render";
+import { BLOCK_PAGE } from "../block-page";
 
 export interface ShugoiProxyOptions {
   siteKey: string;
   allowlist?: string[];
   whitelist?: string[];
   headlessPatterns?: RegExp[];
-  /** Internal URL to fetch page content (e.g. "http://127.0.0.1:3009") */
   target?: string;
 }
 
@@ -27,7 +27,6 @@ export function createShugoiProxy(options: ShugoiProxyOptions) {
     const path = request.nextUrl.pathname;
     const accept = request.headers.get("accept") || "";
 
-    // Prevent recursion on internal sub-requests
     if (request.headers.get("x-shugoi-internal") === "1")
       return NextResponse.next();
 
@@ -38,23 +37,9 @@ export function createShugoiProxy(options: ShugoiProxyOptions) {
 
     const ua = request.headers.get("user-agent") || "";
     if (headless.some((p) => p.test(ua))) {
-      const block = [
-        "+---------------------------------------------+",
-        "|           BLOCKED BY SHUGOI                 |",
-        "+---------------------------------------------+",
-        "|  Bots, scrapers and headless clients        |",
-        "|  are blocked by Shugoi protection.          |",
-        "|                                             |",
-        "|  Use a standard browser to access           |",
-        "|  this site.                                 |",
-        "|                                             |",
-        "|  - contact: support@shugoi.com -            |",
-        "+---------------------------------------------+",
-      ].join('\n') + '\n';
-      return new NextResponse(block, { status: 403 });
+      return new NextResponse(BLOCK_PAGE, { status: 403 });
     }
 
-    // Split-render: inject guard skeleton for HTML pages
     if (!accept.includes("text/html")) return NextResponse.next();
 
     try {
