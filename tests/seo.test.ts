@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { createShugoiMiddleware } from '../src/middleware';
+import { createShugoiMiddleware, type MinimalRequest } from '../src/middleware';
 
 describe('SEO — Googlebot receives original HTML', () => {
   beforeEach(() => { vi.restoreAllMocks(); });
@@ -20,7 +20,7 @@ describe('SEO — Googlebot receives original HTML', () => {
     const req = {
       headers: { 'user-agent': 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)' },
       path: '/',
-    } as any;
+    } satisfies MinimalRequest;
     const res = {
       setHeader: vi.fn(),
       getHeader: vi.fn().mockReturnValue('text/html'),
@@ -54,7 +54,7 @@ describe('SEO — Googlebot receives original HTML', () => {
         'accept-language': 'fr-FR,fr;q=0.9',
       },
       path: '/',
-    } as any;
+    } satisfies MinimalRequest;
     const res = {
       setHeader: vi.fn(),
       getHeader: vi.fn().mockReturnValue('text/html'),

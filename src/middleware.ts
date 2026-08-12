@@ -5,13 +5,13 @@ import { mergeCsp } from './csp'
 import { createCore } from './core'
 import { resolveLocale, type Locale } from './locales'
 
-interface MinimalRequest {
+export interface MinimalRequest {
   path?: string; url?: string; ip?: string; method?: string;
   headers?: Record<string, string | string[] | undefined>;
   query?: JsonObject;
 }
 type ResponseBody = string | Uint8Array | JsonValue;
-interface MinimalResponse {
+export interface MinimalResponse {
   setHeader?(k: string, v: string): void;
   getHeader?(k: string): string | number | string[] | undefined;
   status?(code: number): MinimalResponse;
