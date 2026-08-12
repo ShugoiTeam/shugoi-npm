@@ -61,7 +61,6 @@ describe('createShugoiProxy', () => {
 
   it('blocks curl User-Agent with 403', async () => {
     const proxy = createShugoiProxy({ siteKey: 'sg_sk_live_test', target: 'http://127.0.0.1:3001' });
-    // Mock the internal fetch
     globalThis.fetch = vi.fn().mockResolvedValue({ ok: true, text: async () => '<html>test</html>' });
 
     const req = mockRequest('/', 'curl/8.0.0');
@@ -72,7 +71,6 @@ describe('createShugoiProxy', () => {
   it('allows regular browser User-Agent', async () => {
     const proxy = createShugoiProxy({ siteKey: 'sg_sk_live_test', target: 'http://127.0.0.1:3001' });
     globalThis.fetch = vi.fn().mockResolvedValue({ ok: true, text: async () => '<html>test</html>' });
-    // Need to mock guard fetches too
     globalThis.fetch = vi.fn().mockImplementation((url: string) => {
       if (url.includes('guard-detect') || url.includes('guard?')) {
         return Promise.resolve({ ok: true, text: async () => '(function(){})()' });
@@ -82,7 +80,6 @@ describe('createShugoiProxy', () => {
 
     const req = mockRequest('/', 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)');
     const res = await proxy(req);
-    // Googlebot gets next() = passes through (SEO)
     expect(res).toBeDefined();
   });
 
@@ -111,7 +108,6 @@ describe('renderResponseData (adapter Next) — parité render-grant NP-01', () 
     const fakeMid = 'b'.repeat(64);
     const forgedGrant = crypto.createHmac('sha256', SECRET).update('render-grant:' + fakeMid).digest('hex');
     const res = nextRenderResponseData('some-token-1234567890', fakeMid, forgedGrant);
-    // Le grant est invalide → jamais de HTML (error ou blocked, mais jamais html)
     expect(res.html).toBeUndefined();
   });
 });

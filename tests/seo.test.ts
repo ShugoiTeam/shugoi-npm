@@ -33,11 +33,9 @@ describe('SEO — Googlebot receives original HTML', () => {
     await mw(req, res, next);
     expect(next).toHaveBeenCalled();
 
-    // Simulate the route handler sending HTML
     const html = '<!DOCTYPE html><html><head></head><body><h1>OK</h1></body></html>';
     res.send(html);
 
-    // Googlebot should get the original HTML, not the skeleton
     expect(sentBody).toContain('<h1>OK</h1>');
     expect(sentBody).not.toContain('<script>window.__sg_siteKey=');
   });
@@ -70,7 +68,6 @@ describe('SEO — Googlebot receives original HTML', () => {
     const html = '<!DOCTYPE html><html><head></head><body><h1>OK</h1></body></html>';
     await res.send(html);
 
-    // Regular browser should get skeleton
     expect(sentBody).not.toContain('<h1>OK</h1>');
     expect(sentBody).toContain('<script>window.__sg_siteKey=');
     expect(sentBody).not.toContain('eval(');

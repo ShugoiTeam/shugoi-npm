@@ -71,7 +71,6 @@ describe('createShugoiMiddleware', () => {
     });
     const next = vi.fn();
     await mw(req, res, next);
-    // Plus de 403 BLOCKED BY SHUGOI : le guard client gère la détection (Tor → card)
     expect(res._body).not.toContain('BLOCKED BY SHUGOI');
   });
 
@@ -304,7 +303,6 @@ describe('skipPath matching (audit passe 8 §3.1)', () => {
   it('le middleware fait un MATCH EXACT (pas de prefix-match /docs/anything)', () => {
     const { readFileSync } = require('node:fs');
     const src = readFileSync(require('node:path').join(process.cwd(), 'src', 'middleware.ts'), 'utf-8');
-    // Le skipPath `/docs` ne couvre plus `/docs/anything`
     expect(src).toMatch(/path === p/);
     expect(src).not.toMatch(/path\.startsWith\(p \+ '\/'\)/);
   });
@@ -314,11 +312,9 @@ describe('307 challenge minimal (anti-curl/view-source)', () => {
   it('le 307 challenge a un body = tableau ASCII seul, PAS de HTML/JS', () => {
     const { readFileSync } = require('node:fs');
     const src = readFileSync(require('node:path').join(process.cwd(), 'src', 'core.ts'), 'utf-8');
-    // 307 + body = BLOCK_PAGE brut (text/plain), sans <pre> ni <script> inline
     expect(src).toContain('status: 307');
     expect(src).toContain('body: BLOCK_PAGE');
     expect(src).toContain('contentType: \'text/plain\'');
-    // redirection vers le challenge
     expect(src).toContain("ctx.path === '/__sg_challenge'");
   });
 
@@ -333,11 +329,9 @@ describe('307 challenge minimal (anti-curl/view-source)', () => {
   it('la page /__sg_challenge : tableau en commentaire + JS PoW INLINE (pas de <pre>, pas de script src externe)', () => {
     const { readFileSync } = require('node:fs');
     const src = readFileSync(require('node:path').join(process.cwd(), 'src', 'core.ts'), 'utf-8');
-    // La page challenge : tableau en commentaire <!-- --> + <script> inline (économie de round-trip)
     expect(src).toContain("ctx.path === '/__sg_challenge'");
     expect(src).toContain("'<!--\\n' + BLOCK_PAGE");
     expect(src).toContain('<script>');
-    // Plus de <pre>, plus de script src externe
     expect(src.indexOf('<pre>')).toBe(-1);
     expect(src.indexOf('__sg_challenge.js')).toBe(-1);
   });
@@ -348,9 +342,6 @@ describe('307 challenge minimal (anti-curl/view-source)', () => {
     expect(src).toContain('sg_ok:');
     expect(src).toContain('isSgOkValid');
     expect(src).toContain('timingSafeEqual');
-    // Round 2 : un cookie __sg_ok VALIDE (HMAC serveur) saute le pre-flight PoW — mais
-    // un cookie invalide/absent déclenche toujours le challenge (307).
-    // Round 16 (R2) : la preuve est single-use (consumeProof).
     expect(src).toContain('const canProceed = validCookie || proofFresh');
     expect(src).toContain('function consumeProof');
   });

@@ -1,9 +1,13 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { applyObfuscation } from "../src/obfuscate";
 
-const GUARD_DIR = "/home/yohan/Bureau/Projets/Shugoi/shugoi.com/scripts";
+const GUARD_DIR = resolve(
+  dirname(fileURLToPath(import.meta.url)),
+  "../../shugoi-platform/shugoi.com/scripts",
+);
 const SOURCES = ["guard.src.js", "guard-detect.src.js"];
 
 function isParseable(code: string): { ok: boolean; error?: string } {
@@ -33,8 +37,6 @@ describe.skipIf(!available)("intégrité des guards", () => {
 
     it(`${file} : l'obfuscation ne laisse aucun marqueur de développement`, () => {
       const out = applyObfuscation(src, "seed");
-      // console. et localStorage sont des strings LÉGITIMES du mode debug (sg_probe_debug)
-      // — pas des marqueurs de dev. On vérifie l'absence des marqueurs de développement purs.
       for (const marker of ["_sgLogCP", "_SG_TRACE", "_sgErr", "debugger", "TODO", "FIXME"]) {
         expect(out, `marqueur "${marker}" présent`).not.toContain(marker);
       }
@@ -53,8 +55,6 @@ describe.skipIf(!available)("intégrité des guards", () => {
     });
 
     it(`${file} : n'écrit pas de données sensibles dans le stockage du navigateur`, () => {
-      // Le guard LIT localStorage.__sg_probe_debug (toggle debug) mais n'y stocke AUCUNE
-      // donnée de fingerprint / machineId / session. Aucune écriture persistante.
       expect(src).not.toContain("sessionStorage");
       expect(src).not.toContain("document.cookie");
     });

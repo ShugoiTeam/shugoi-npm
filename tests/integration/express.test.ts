@@ -25,7 +25,6 @@ describe('Express integration', () => {
   let port: number;
 
   beforeAll(async () => {
-    // Mock Shugoi API + guard script fetches
     globalThis.fetch = vi.fn().mockImplementation((url: string) => {
       if (url.includes('guard-detect') || url.includes('guard?')) {
         return Promise.resolve({
@@ -71,7 +70,6 @@ describe('Express integration', () => {
     const { body } = await httpGet(`http://127.0.0.1:${port}/`, {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
     });
-    // Plus de 403 BLOCKED BY SHUGOI : le guard client gère la détection (Tor → card)
     expect(body).not.toContain('BLOCKED BY SHUGOI');
   });
 
@@ -98,7 +96,6 @@ describe('Express integration', () => {
     const { body } = await httpGet(`http://127.0.0.1:${port}/`, {
       'User-Agent': 'Googlebot/2.1 (+http://www.google.com/bot.html)',
     });
-    // Googlebot bypasses headless blocking AND split-render (SEO)
     expect(body).toContain('OK');
     expect(body).not.toContain('<script>window.__sg_siteKey=');
   });
@@ -126,11 +123,9 @@ describe('Express integration', () => {
     const prev = process.env.SHUGOKI_SIGNING_SECRET;
     process.env.SHUGOKI_SIGNING_SECRET = 'test-secret-pow';
     try {
-      // verifyBots true (défaut) : Discord exige une IP Discord → IP factice = 403
       const core = createCore({ siteKey: 'sg_sk_live_test', allowlist: [] });
       const fakeDiscord = await core.evaluate({ path: '/', ua: 'Mozilla/5.0 (compatible; Discordbot/2.0; +https://discordapp.com)', ip: '1.2.3.5' });
       expect(fakeDiscord?.status).toBe(403);
-      // facebookexternalhit n'est PAS dans VERIFIABLE_BOTS → UA seul suffit → bypass
       const fb = await core.evaluate({ path: '/', ua: 'facebookexternalhit/1.1', ip: '1.2.3.5' });
       expect(fb).toBeNull();
     } finally {

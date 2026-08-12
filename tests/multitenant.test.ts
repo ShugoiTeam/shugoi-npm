@@ -35,7 +35,6 @@ describe('Multi-tenant cache isolation', () => {
     let flagsA: Record<string, boolean> = {};
     let flagsB: Record<string, boolean> = {};
 
-    // Intercept the getFlags calls by observing fetch URLs
     const origFetch = globalThis.fetch;
     globalThis.fetch = vi.fn().mockImplementation((url: string) => {
       const urlStr = String(url);
@@ -53,13 +52,10 @@ describe('Multi-tenant cache isolation', () => {
       return Promise.resolve({ ok: true, json: async () => ({ allowed: true }) });
     });
 
-    // Make requests through each middleware
     const req = { headers: {}, path: '/page-a' };
     await mwA(req, resA, () => {});
     await mwB(req, resB, () => {});
 
-    // Both should have called next (meaning they passed through, not blocked)
-    // This test verifies the middleware doesn't crash with different siteKeys
     expect(true).toBe(true); // smoke test passes
   });
 });

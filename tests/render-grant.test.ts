@@ -52,7 +52,6 @@ describe('CH-01 rejeu cross-IP', () => {
     const signed = signToken(SITE_KEY, Date.now());
     storeHtml(signed.token, '<html>x</html>');
     const grant = makeGrant(mid, signed.token, '1.2.3.4');
-    // Rejoué depuis une IP différente
     expect((await renderResponseData(signed.token, undefined, undefined, mid, grant, '5.6.7.8', SITE_KEY)).error).toBe('not_found');
   });
 });
@@ -63,7 +62,6 @@ describe('CH-02 rejeu cross-token', () => {
     const tokenB = signToken(SITE_KEY, Date.now()).token;
     storeHtml(tokenB, '<html>y</html>');
     const grantForA = makeGrant(mid, tokenA, '1.2.3.4');
-    // Rejoué sur token B avec un grant fait pour A
     expect((await renderResponseData(tokenB, undefined, undefined, mid, grantForA, '1.2.3.4', SITE_KEY)).error).toBe('not_found');
   });
 });
@@ -108,7 +106,6 @@ describe('CH-07 multi-lecture du token (contentReplaceOn)', () => {
       ok: true,
       json: async () => ({ whitelistedMachines: [], detectionFlags: { enableContentReplacementCheck: false } }),
     }));
-    // config fraîche : le cache a peut-être déjà la valeur true du test précédent
     __clearConfigCache();
     const signed = signToken(SITE_KEY, Date.now());
     storeHtml(signed.token, '<html>public</html>', false);
@@ -157,10 +154,8 @@ describe('§7bis CRITIQUE 1 — grant cross-site (siteKey lié)', () => {
 
   it('refuse un grant émis par un autre site (siteKey du grant != site)', async () => {
     const { signToken, storeHtml, renderResponseData } = await import('../src/render');
-    // Token du site "shugoi"...
     const token = signToken('sg_sk_live_shugoi', Date.now()).token;
     storeHtml(token, '<html>x</html>');
-    // ...mais grant signé avec le siteKey "pyxelze" (whitelist off) → refus
     const grant = makeGrant(mid, token, '1.2.3.4', 'sg_sk_live_pyxelze');
     const res = await renderResponseData(token, undefined, undefined, mid, grant, '1.2.3.4', 'sg_sk_live_shugoi');
     expect(res.error).toBe('not_found');
@@ -189,7 +184,6 @@ describe('passe 8 — expiration du token (verifyTokenAndRead)', () => {
   it('refuse un token signé mais daté au-delà du TTL (store disque rejoué)', async () => {
     const { signToken, storeHtml, renderResponseData } = await import('../src/render');
     const SITE = 'sg_sk_live_render_grant_test';
-    // Token vieux de 3 min (au-delà du TOKEN_TTL=120s)
     const old = Date.now() - 180_000;
     const signed = signToken(SITE, old);
     storeHtml(signed.token, '<html>expired-token</html>');
@@ -239,7 +233,6 @@ describe('nettoyage sg_proof de l URL (audit)', () => {
     expect(src).toContain("'sg_proof='");
     expect(src).toContain('history.replaceState');
     expect(src).toContain('location.pathname');
-    // conserve le query restant (sg_probe_debug) et retire uniquement sg_proof
     expect(src).toContain("sg_proof=[^&]*");
     expect(src).toContain("_qs?_qs:");
   });

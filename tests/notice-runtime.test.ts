@@ -15,8 +15,6 @@ interface MockElement {
 
 type RuntimeGlobal = object | string | number | Function;
 
-// Récupère le contenu du template NOTICE_SCRIPT et le rend comme le ferait render.ts,
-// puis retire le wrapper <script></script> pour obtenir le JS réellement injecté.
 function getNoticeJs(): string {
   const src = readFileSync(SRC, "utf-8");
   const i = src.indexOf("const NOTICE_SCRIPT");
@@ -31,7 +29,6 @@ describe("notice (consentement) — exécution réelle", () => {
   it("le script notice s'exécute sans ReferenceError (desktop + mobile) et enforce() passe", () => {
     const jsStr = getNoticeJs();
 
-    // Le bug précédent : _CH() référençait _CARD_HTML_DESK jamais déclaré (var restée _CARD_HTML).
     expect(jsStr).toMatch(/_CARD_HTML_DESK=/);
     expect(jsStr).toMatch(/_CARD_HTML_MOB=/);
     expect(/_CARD_HTML(?!_DESK|_MOB)/.test(jsStr)).toBe(false);
