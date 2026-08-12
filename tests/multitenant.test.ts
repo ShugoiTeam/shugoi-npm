@@ -1,10 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createShugoiMiddleware } from '../src/middleware';
+import type { JsonObject } from '../src/types';
 
 describe('Multi-tenant cache isolation', () => {
   beforeEach(() => { vi.restoreAllMocks(); });
 
-  function mockFetch(responses: Record<string, unknown>) {
+  function mockFetch(responses: Record<string, JsonObject>) {
     globalThis.fetch = vi.fn().mockImplementation((url: string) => {
       for (const [key, data] of Object.entries(responses)) {
         if (url.includes(key)) {
