@@ -6,6 +6,7 @@ import { verifyBotIp, VERIFIABLE_BOTS } from './verify-bot'
 import { BLOCK_PAGE } from './block-page'
 import { ipBucket, safeChallengePath, safeEqual, uaFingerprint } from './security-utils'
 import { createPowNonce, verifyPow } from './pow-utils'
+import { ChallengeLimiter } from './challenge-limiter'
 export { BLOCK_PAGE } from './block-page'
 import crypto from 'node:crypto'
 
@@ -127,32 +128,7 @@ export function createCore(options: ShugoiCoreOptions): ShugoiCore {
     return Number.isInteger(raw) && raw > 0 ? raw * 1000 : 60_000;
   })();
   const CHALLENGE_MAX_BLOCK_MS = 15 * 60 * 1000;
-  const _challengeLimits = new Map<string, { count: number; windowStart: number; blockedUntil: number }>();
-  setInterval(() => {
-    const now = Date.now();
-    for (const [k, e] of _challengeLimits) {
-      if (now > e.blockedUntil && now - e.windowStart > CHALLENGE_WINDOW_MS * 2) _challengeLimits.delete(k);
-    }
-  }, CHALLENGE_WINDOW_MS).unref();
-
-  function allowChallenge(ip: string): boolean {
-    if (!ip || ip === 'unknown') return true;
-    const now = Date.now();
-    let e = _challengeLimits.get(ip);
-    if (!e || now - e.windowStart >= CHALLENGE_WINDOW_MS) {
-      _challengeLimits.set(ip, { count: 1, windowStart: now, blockedUntil: 0 });
-      return true;
-    }
-    e.count++;
-    if (e.blockedUntil > now) return false;
-    if (e.count > CHALLENGE_LIMIT) {
-      const backoffMs = Math.min(60_000 * Math.pow(2, Math.min(e.count - CHALLENGE_LIMIT, 10)), CHALLENGE_MAX_BLOCK_MS);
-      e.blockedUntil = now + backoffMs;
-      e.count = 0;
-      return false;
-    }
-    return true;
-  }
+  const challengeLimiter = new ChallengeLimiter({ limit: CHALLENGE_LIMIT, windowMs: CHALLENGE_WINDOW_MS, maxBlockMs: CHALLENGE_MAX_BLOCK_MS })
 
   const _usedProofs = new Map<string, number>();
   setInterval(() => {
@@ -298,7 +274,7 @@ export function createCore(options: ShugoiCoreOptions): ShugoiCore {
     if (isAllowlisted(ctx.path)) return null
 
     if (ctx.path === '/__sg_challenge') {
-      if (!allowChallenge(ctx.ip)) {
+       if (!challengeLimiter.allow(ctx.ip)) {
         const loc = resolveLocale(undefined, ctx.acceptLanguage)
         const lmsgs = MESSAGES[loc]
         return { block: true, status: 429, contentType: 'text/html', body: shieldPage(lmsgs.rateLimitTitle, lmsgs.rateLimitBody('1 min'), lmsgs.rateLimitBadge, ctx.host || '', 60, loc) }
@@ -343,7 +319,7 @@ step();
       const proofFresh = validProof ? consumeProof(proof) : false
       const canProceed = validCookie || proofFresh
       if (!canProceed && !(await botBypass(ctx.ua, ctx.ip))) {
-        if (!allowChallenge(ctx.ip)) {
+         if (!challengeLimiter.allow(ctx.ip)) {
           const loc = resolveLocale(undefined, ctx.acceptLanguage)
           const lmsgs = MESSAGES[loc]
           log('challenge rate-limited:', ctx.ip.slice(0, 24), ctx.ua.slice(0, 40))
