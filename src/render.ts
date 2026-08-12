@@ -115,14 +115,15 @@ const GRANT_TTL_MS = 60_000;
 
 export function verifyRenderGrant(mid: string | undefined, grant: string | undefined, token?: string, ip?: string, expectedSiteKey?: string): boolean {
   const gSecret = process.env.SHUGOKI_SIGNING_SECRET || process.env.SHUGOKI_SECRET;
-  if (!gSecret) return true
+  if (!gSecret) return false;
   if (!grant || !mid || !/^[a-f0-9]{64}$/.test(mid)) return false;
   const sep = grant.indexOf(':');
   if (sep < 0) return false;
   const ts = grant.slice(0, sep);
   const sig = grant.slice(sep + 1);
   const tsSec = parseInt(ts, 36);
-  if (isNaN(tsSec) || Date.now() - tsSec * 1000 > GRANT_TTL_MS) return false;
+  const age = Date.now() - tsSec * 1000;
+  if (isNaN(tsSec) || age > GRANT_TTL_MS || age < -5000) return false;
   if (!expectedSiteKey) return false;
   const payload = 'render-grant:' + [expectedSiteKey, mid, token || '', ip || '', ts].join(':');
   const exp = crypto.createHmac('sha256', gSecret).update(payload).digest('hex');

@@ -79,6 +79,11 @@ describe('CH-03 expiration du grant', () => {
     expect(verifyRenderGrant(mid, makeGrant(mid, 't', '1.2.3.4'), 't', '1.2.3.4', SITE_KEY)).toBe(true);
     expect(verifyRenderGrant(mid, makeGrant(mid, 't', '1.2.3.4', SITE_KEY, Date.now() - 180_000), 't', '1.2.3.4', SITE_KEY)).toBe(false);
   });
+
+  it('refuse un grant daté dans le futur', () => {
+    const future = makeGrant(mid, 't', '1.2.3.4', SITE_KEY, Date.now() + 30_000);
+    expect(verifyRenderGrant(mid, future, 't', '1.2.3.4', SITE_KEY)).toBe(false);
+  });
 });
 
 describe('CH-07 multi-lecture du token (contentReplaceOn)', () => {
