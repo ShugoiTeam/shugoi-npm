@@ -22,7 +22,7 @@ type NextHeaders = NextHeaderRule[] | (() => Promise<NextHeaderRule[]> | NextHea
 
 interface NextConfigShape {
   headers?: NextHeaders;
-  [key: string]: JsonValue | NextHeaders | undefined;
+  [key: string]: JsonValue | NextHeaders;
 }
 
 export function withShugoi(
