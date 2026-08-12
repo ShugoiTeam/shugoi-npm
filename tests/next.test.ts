@@ -56,7 +56,7 @@ describe('createShugoiProxy', () => {
         },
       },
       url: 'http://localhost:3000' + path,
-    } as any;
+    } satisfies Parameters<ReturnType<typeof createShugoiProxy>>[0];
   }
 
   it('blocks curl User-Agent with 403', async () => {

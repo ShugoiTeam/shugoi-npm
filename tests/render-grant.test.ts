@@ -207,8 +207,8 @@ describe('notice injectée dans le render (audit — popup après split-render)'
     storeHtml(signed.token, '<html><body><div id=app>x</div></body></html>');
     const grant = makeGrant(mid, signed.token, '1.2.3.4');
     let sentBody = '';
-    const res = { setHeader: () => {}, send: (b: string) => { sentBody = b; } };
-    await handleRender(signed.token, res as any, undefined, mid, grant, '1.2.3.4', SITE);
+    const res = { setHeader: () => {}, send: (b: string) => { sentBody = b; } } satisfies Parameters<typeof handleRender>[1];
+    await handleRender(signed.token, res, undefined, mid, grant, '1.2.3.4', SITE);
     const parsed = JSON.parse(sentBody);
     expect(parsed.html).toContain('__sg_noticeEnabled');
     expect(parsed.html).toContain('__sg_ok');
@@ -222,8 +222,8 @@ describe('notice injectée dans le render (audit — popup après split-render)'
     storeHtml(signed.token, '<html><body><div>z</div></body></html>');
     const grant = makeGrant(mid, signed.token, '1.2.3.4');
     let sentBody = '';
-    const res = { setHeader: () => {}, send: (b: string) => { sentBody = b; } };
-    await handleRender(signed.token, res as any, undefined, mid, grant, '1.2.3.4', SITE);
+    const res = { setHeader: () => {}, send: (b: string) => { sentBody = b; } } satisfies Parameters<typeof handleRender>[1];
+    await handleRender(signed.token, res, undefined, mid, grant, '1.2.3.4', SITE);
     const parsed = JSON.parse(sentBody);
     const idxScript = parsed.html.indexOf('__sg_ok');
     const idxBodyClose = parsed.html.indexOf('</body>');
