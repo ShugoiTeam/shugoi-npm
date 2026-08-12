@@ -64,10 +64,7 @@ export function createShugoiMiddleware(options: ShugoiCoreOptions) {
     try {
       const path = (req.path ?? req.url ?? '/').split('?')[0] ?? '/';
 
-      // Render endpoint — handled by middleware adapter
       if (path.endsWith('/__shugoi/render')) {
-        // Round 13 : restreindre à GET/HEAD (le client fetch en GET). POST/PUT/DELETE
-        // renvoyaient un 200 sans effet d'état — surface réduite, méthode normalisée.
         const m = String((req.method || 'GET')).toUpperCase();
         if (m !== 'GET' && m !== 'HEAD') {
           if (res.status) res.status(405);
@@ -82,13 +79,9 @@ export function createShugoiMiddleware(options: ShugoiCoreOptions) {
         const ip = (typeof req.headers?.['x-forwarded-for'] === 'string'
           ? req.headers['x-forwarded-for'].split(',')[0]?.trim()
           : undefined) || (typeof req.ip === 'string' ? req.ip : 'unknown');
-        // CRITIQUE 1 (§7bis) : le render vérifie que le token appartient à CE site
-        // (options.siteKey) — un grant émis par un autre site (pyxelze) est refusé ici.
-        // baseUrl transmis à la notice (injectée) : __sg_baseUrl est nettoyé par _sgCl.
         return handleRender(q.token || '', res, internalUrl, q.mid || '', q.grant || '', ip, options.siteKey, baseUrl, signingSecret);
       }
 
-      // Challenge page : GET/HEAD uniquement (round 13, même normalisation).
       if (path === '/__sg_challenge') {
         const m = String((req.method || 'GET')).toUpperCase();
         if (m !== 'GET' && m !== 'HEAD') {
@@ -101,7 +94,6 @@ export function createShugoiMiddleware(options: ShugoiCoreOptions) {
         }
       }
 
-      // CSP: merge with existing header
       if (core.cspEnabled && res.setHeader) {
         if (res.getHeader) {
           const existing = res.getHeader('Content-Security-Policy');
@@ -114,17 +106,12 @@ export function createShugoiMiddleware(options: ShugoiCoreOptions) {
         }
       }
 
-      // Delegate evaluation to core
       const ua = (typeof req.headers?.['user-agent'] === 'string' ? req.headers['user-agent'] : '') || '';
       const ip = (typeof req.headers?.['x-forwarded-for'] === 'string'
         ? req.headers['x-forwarded-for'].split(',')[0]?.trim()
         : undefined) || (typeof req.ip === 'string' ? req.ip : 'unknown');
       const reqLocale: Locale = resolveLocale(options.locale, typeof req.headers?.['accept-language'] === 'string' ? req.headers?.['accept-language'] : undefined);
 
-      // SkipPaths check BEFORE detection — ces routes contournent toute protection.
-      // Audit passe 8 (§3.1) : MATCH EXACT uniquement (plus de prefix-match). Un skipPath
-      // `/docs` ne couvre PAS `/docs/anything` — sinon un skipPath large (`/api`, `/`)
-      // exposerait toutes les sous-routes sans guard. L'utilisateur liste chaque chemin.
       if (autoInject && options.siteKey) {
         try {
           const { skipPaths } = await getConfig(options.siteKey, internalUrl, signingSecret);
@@ -178,17 +165,12 @@ export function createShugoiMiddleware(options: ShugoiCoreOptions) {
         return;
       }
 
-      // PoW validé → pose le cookie __sg_ok sur la réponse du skeleton (navigations
-      // suivantes sans challenge, donc chargement rapide).
       const sgProofQ = typeof req.query?.sg_proof === 'string' ? req.query.sg_proof : undefined;
       if (sgProofQ && res.setHeader) {
         const okCookie = core.sgOkCookie(sgProofQ, ip, ua);
         if (okCookie) res.setHeader('Set-Cookie', okCookie);
       }
 
-      // Split-render: inject skeleton for HTML pages (skip for allowlisted paths and
-      // whitelisted bots). Les bots (moteurs + partage social) reçoivent le HTML BRUT
-      // (og:image, indexation) — ils ne peuvent pas exécuter le skeleton JavaScript.
       const isBot = (await core.isTrustedBot(ua, ip)) || core.isWhitelistedBot(ua);
 
       if (autoInject && splitRender && !isBot && !core.isAllowlisted(path)) {
