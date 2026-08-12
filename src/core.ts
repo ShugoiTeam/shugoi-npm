@@ -5,6 +5,7 @@ import { resolveLocale, type Locale, MESSAGES } from './locales'
 import { verifyBotIp, VERIFIABLE_BOTS } from './verify-bot'
 import { BLOCK_PAGE } from './block-page'
 import { ipBucket, safeChallengePath, safeEqual, uaFingerprint } from './security-utils'
+import { createPowNonce, verifyPow } from './pow-utils'
 export { BLOCK_PAGE } from './block-page'
 import crypto from 'node:crypto'
 
@@ -166,32 +167,7 @@ export function createCore(options: ShugoiCoreOptions): ShugoiCore {
     return true;
   }
 
-  function sgNonce(): string {
-    return crypto.randomBytes(8).toString('hex')
-  }
-
-  function isPowValid(proof: string): boolean {
-    if (!proof || !powSecret) return false
-    const parts = proof.split(':')
-    if (parts.length !== 3) return false
-    const [tsStr, nonce, sol] = parts
-    if (!tsStr || !nonce || !sol) return false
-    if (!/^[0-9a-f]{16}$/.test(nonce)) return false
-    const ts = parseInt(tsStr, 10)
-    if (isNaN(ts) || Math.abs(Date.now() - ts * 1000) > POW_TTL_MS) return false
-    const salt = crypto.createHmac('sha256', powSecret).update(tsStr + ':' + nonce).digest('hex')
-    const digest = crypto.createHash('sha256').update(salt + ':' + sol).digest('hex')
-    let leading = 0
-    for (let i = 0; i < digest.length; i++) {
-      const nibble = digest[i]
-      if (nibble === undefined) continue
-      const nib = parseInt(nibble, 16)
-      if (nib === 0) { leading += 4; continue }
-      leading += (nib & 8) ? 0 : (nib & 4) ? 1 : (nib & 2) ? 2 : 3
-      break
-    }
-    return leading >= POW_DIFF
-  }
+  const isPowValid = (proof: string): boolean => verifyPow(proof, { secret: powSecret, difficulty: POW_DIFF, ttlMs: POW_TTL_MS })
 
   function sgOkCookieValue(ip: string, ua: string): string {
     const ts = Math.floor(Date.now() / 1000)
@@ -374,7 +350,7 @@ step();
           return { block: true, status: 429, contentType: 'text/html', body: shieldPage(lmsgs.rateLimitTitle, lmsgs.rateLimitBody('1 min'), lmsgs.rateLimitBadge, ctx.host || '', 60, loc) }
         }
         const tsNow = Math.floor(Date.now() / 1000)
-        const nonce = sgNonce()
+        const nonce = createPowNonce()
         const salt = crypto.createHmac('sha256', powSecret).update(tsNow + ':' + nonce).digest('hex')
         const prefix = ctx.forwardedPrefix && ctx.forwardedPrefix !== '/' ? ctx.forwardedPrefix.replace(/\/$/, '') : ''
         const path = safeChallengePath(ctx.path.startsWith('/') ? ctx.path : '/' + ctx.path)
