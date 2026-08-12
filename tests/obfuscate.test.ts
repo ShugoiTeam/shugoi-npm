@@ -1,7 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { applyObfuscation, stripTrace } from "../src/obfuscate";
 
-function run(code: string): unknown {
+type EvaluatedValue = string | number | boolean | null | object
+
+function run(code: string): EvaluatedValue {
   const fn = new Function("var out; " + code + "; return out;");
   return fn();
 }
