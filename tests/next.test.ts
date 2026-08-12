@@ -7,11 +7,12 @@ describe('withShugoi', () => {
   it('adds a headers function to config', () => {
     const result = withShugoi({ siteKey: 'sg_sk_live_xxx' }, {});
     expect(result).toHaveProperty('headers');
-    expect(typeof (result as any).headers).toBe('function');
+    expect(typeof result.headers).toBe('function');
   });
 
   it('returns CSP header from headers()', async () => {
-    const result = withShugoi({ siteKey: 'sg_sk_live_xxx' }, {}) as any;
+    const result = withShugoi({ siteKey: 'sg_sk_live_xxx' }, {});
+    if (typeof result.headers !== 'function') throw new Error('headers must be callable');
     const headers = await result.headers();
     expect(headers).toHaveLength(1);
     expect(headers[0].source).toBe('/(.*)');
@@ -29,8 +30,9 @@ describe('withShugoi', () => {
       async headers() {
         return [{ source: '/api/(.*)', headers: [{ key: 'X-Custom', value: 'val' }] }];
       },
-    }) as any;
+    });
 
+    if (typeof result.headers !== 'function') throw new Error('headers must be callable');
     const headers = await result.headers();
     expect(headers).toHaveLength(2);
     expect(headers[0].source).toBe('/api/(.*)');
