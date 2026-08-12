@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.4.31] - 2026-08-12
+
+### Security
+- Keep render grants valid when a client changes network address during a request.
+- Continue binding grants to the site, machine signal, token and expiration.
+
 ### Maintenance
 - Isolated cookie security, proof replay storage and challenge limiting into typed modules.
 - Added exact block-page adapter tests and runtime cleanup hooks.
