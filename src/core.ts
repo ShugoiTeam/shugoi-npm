@@ -4,9 +4,10 @@ import { buildCsp, originOf } from './csp'
 import { resolveLocale, type Locale, MESSAGES } from './locales'
 import { verifyBotIp, VERIFIABLE_BOTS } from './verify-bot'
 import { BLOCK_PAGE } from './block-page'
-import { ipBucket, safeChallengePath, safeEqual, uaFingerprint } from './security-utils'
+import { safeChallengePath } from './security-utils'
 import { createPowNonce, verifyPow } from './pow-utils'
 import { ChallengeLimiter } from './challenge-limiter'
+import { createOkCookieValue, isAuthorizedCookieValid, isOkCookieValid } from './cookie-security'
 export { BLOCK_PAGE } from './block-page'
 import crypto from 'node:crypto'
 
@@ -145,39 +146,10 @@ export function createCore(options: ShugoiCoreOptions): ShugoiCore {
 
   const isPowValid = (proof: string): boolean => verifyPow(proof, { secret: powSecret, difficulty: POW_DIFF, ttlMs: POW_TTL_MS })
 
-  function sgOkCookieValue(ip: string, ua: string): string {
-    const ts = Math.floor(Date.now() / 1000)
-    const bucket = ipBucket(ip)
-    const fp = uaFingerprint(ua)
-    const sig = crypto.createHmac('sha256', powSecret).update('sg_ok:' + ts + ':' + bucket + ':' + fp).digest('hex')
-    return ts + ':' + bucket + ':' + fp + ':' + sig
-  }
-
-  function isSgOkValid(cookieVal: string, ip: string, ua: string): boolean {
-    if (!powSecret) return false
-    const parts = cookieVal.split(':')
-    if (parts.length !== 4) return false
-    const [tsStr, bucket, fp, sig] = parts
-    if (!tsStr || !bucket || !fp || !sig) return false
-    const ts = parseInt(tsStr, 10)
-    if (isNaN(ts) || Date.now() - ts * 1000 > POW_OK_TTL_MS || ts * 1000 > Date.now() + 60000) return false
-    if (bucket !== ipBucket(ip) || fp !== uaFingerprint(ua)) return false
-    const expected = crypto.createHmac('sha256', powSecret).update('sg_ok:' + tsStr + ':' + bucket + ':' + fp).digest('hex')
-    return safeEqual(sig, expected)
-  }
-
-  const SG_AUTHORIZED_TTL_MS = 120_000;
-  function isSgAuthorizedValid(cookieVal: string): boolean {
-    if (!powSecret) return false
-    const sep = cookieVal.indexOf(':')
-    if (sep <= 0) return false
-    const tsStr = cookieVal.slice(0, sep)
-    const sig = cookieVal.slice(sep + 1)
-    const ts = parseInt(tsStr, 10)
-    if (isNaN(ts) || Date.now() - ts * 1000 > SG_AUTHORIZED_TTL_MS || ts * 1000 > Date.now() + 60000) return false
-    const expected = crypto.createHmac('sha256', powSecret).update('sg_authorized:' + tsStr).digest('hex')
-    return safeEqual(sig, expected)
-  }
+  const cookieSecurity = { secret: powSecret, okTtlMs: POW_OK_TTL_MS, authorizedTtlMs: 120_000 }
+  const sgOkCookieValue = (ip: string, ua: string): string => createOkCookieValue(ip, ua, cookieSecurity)
+  const isSgOkValid = (value: string, ip: string, ua: string): boolean => isOkCookieValid(value, ip, ua, cookieSecurity)
+  const isSgAuthorizedValid = (value: string): boolean => isAuthorizedCookieValid(value, cookieSecurity)
 
   const validationPromise: Promise<void> = (async () => {
     if (siteSecret && baseUrl) {

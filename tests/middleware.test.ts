@@ -339,10 +339,11 @@ describe('307 challenge minimal (anti-curl/view-source)', () => {
   it('le cookie __sg_ok est signé HMAC (posé après PoW valide)', () => {
     const { readFileSync } = require('node:fs');
     const src = readFileSync(require('node:path').join(process.cwd(), 'src', 'core.ts'), 'utf-8');
-    expect(src).toContain('sg_ok:');
     expect(src).toContain('isSgOkValid');
     const security = readFileSync(require('node:path').join(process.cwd(), 'src', 'security-utils.ts'), 'utf-8');
     expect(security).toContain('timingSafeEqual');
+    const cookies = readFileSync(require('node:path').join(process.cwd(), 'src', 'cookie-security.ts'), 'utf-8');
+    expect(cookies).toContain('sg_ok:');
     expect(src).toContain('const canProceed = validCookie || proofFresh');
     expect(src).toContain('function consumeProof');
   });
@@ -381,7 +382,8 @@ describe('protection des assets à contenu (audit extraction bundle)', () => {
     expect(src).toContain('(js|css)');
     expect(src).toContain('/\\/assets\\/');
     expect(src).toContain('isSgAuthorizedValid');
-    expect(src).toContain('sg_authorized:');
+    const cookies = readFileSync(require('node:path').join(process.cwd(), 'src', 'cookie-security.ts'), 'utf-8');
+    expect(cookies).toContain('sg_authorized:');
   });
 
   it('handleRender pose le cookie __sg_authorized après render réussi', () => {
