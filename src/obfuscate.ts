@@ -146,15 +146,10 @@ function removeFunction(code: string, name: string): string {
 
 export function stripTrace(code: string): string {
   let r = code;
-  // Remove function definitions FIRST (before calls, to avoid the call-removal
-  // regex eating the function name+params inside the definition).
-  // _sgLogCP has nested braces, _sgErr is single-brace.
   r = removeFunction(r, '_sgLogCP');
   r = removeFunction(r, '_sgErr');
-  // Remove calls
   r = r.replace(/_sgLogCP\(\s*\d+\s*\)\s*[;,]?/g, '');
   r = r.replace(/_sgErr\(\s*(['"][^'"]*['"]|[A-Za-z_$][\w$]*)\s*,\s*(['"][^'"]*['"]|[A-Za-z_$][\w$]*)\s*\)\s*[;,]?/g, '');
-  // Remove declarations
   r = r.replace(/var\s+_SG_TRACE\s*=\s*(?:true|false)\s*;\s*/g, '');
   r = r.replace(/var\s+_sgCP\s*=\s*[^;]*;\s*/g, '');
   r = r.replace(/;\s*;/g, ';');

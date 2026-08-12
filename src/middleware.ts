@@ -221,7 +221,6 @@ export function createShugoiPlugin(options: ShugoiCoreOptions) {
   if (options.multiProcess) enableDiskStore(true);
 
   return async function shugoiPlugin(fastify: FastifyLike) {
-    // CSP onRequest hook
     fastify.addHook('onRequest', async (...args: FastifyHookArguments) => {
       const reply = args[1];
       if (core.cspEnabled && reply.getHeader) {
@@ -235,18 +234,14 @@ export function createShugoiPlugin(options: ShugoiCoreOptions) {
       }
     });
 
-    // Render endpoint
     fastify.get('/__shugoi/render', async (request: FastifyRequestLike, reply: FastifyReplyLike) => {
       const { renderResponseData, injectReferrerPolicy } = await import('./render');
       const ip = (typeof request.headers?.['x-forwarded-for'] === 'string'
         ? request.headers['x-forwarded-for'].split(',')[0]?.trim()
         : undefined) || (typeof request.ip === 'string' ? request.ip : 'unknown');
       const data = await renderResponseData(request.query.token || '', undefined, options.baseUrl, request.query.mid || '', request.query.grant || '', ip, options.siteKey);
-      // Anti-leak du grant : strict-origin-when-cross-origin (pas no-referrer — casserait
-      // les embeds YouTube 153 ; le grant n'est plus dans l'URL de la page après document.write).
       if (data.html) data.html = injectReferrerPolicy(data.html);
       reply.header('Referrer-Policy', 'strict-origin-when-cross-origin');
-      // Contenu protégé : jamais mis en cache (round 6 — CDN bypass).
       reply.header('Cache-Control', 'no-store, no-cache, must-revalidate, no-transform');
       reply.header('Pragma', 'no-cache');
       reply.send(data);
@@ -254,7 +249,6 @@ export function createShugoiPlugin(options: ShugoiCoreOptions) {
 
     fastify.head('/__shugoi/healthcheck', async (_request: FastifyRequestLike, reply: FastifyReplyLike) => reply.send(''));
 
-    // PreHandler: evaluation pipeline
     fastify.addHook('preHandler', async (...args: FastifyHookArguments) => {
       const request = args[0];
       const reply = args[1];
@@ -297,7 +291,6 @@ export function createShugoiPlugin(options: ShugoiCoreOptions) {
       }
     });
 
-    // onSend: split-render injection
     fastify.addHook('onSend', async (...args: FastifyHookArguments) => {
       const request = args[0];
       const reply = args[1];
@@ -306,8 +299,6 @@ export function createShugoiPlugin(options: ShugoiCoreOptions) {
       const path = request.url.split('?')[0] ?? '/';
       if (path.endsWith('/__shugoi/render') || path.endsWith('/__shugoi/healthcheck')) return payload;
       if (reply.statusCode !== 200) return payload;
-      // Bots (moteurs + partage social) : HTML brut sans skeleton — ils ne peuvent pas
-      // exécuter le skeleton JavaScript (og:image / indexation).
       const ua = typeof request.headers?.['user-agent'] === 'string' ? request.headers['user-agent'] : '';
       if (core.isWhitelistedBot(ua)) return payload;
       const ct = reply.getHeader?.('content-type');

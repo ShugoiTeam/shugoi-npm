@@ -223,12 +223,6 @@ function verifyTokenAndRead(token: string, _locale?: Locale): { html?: string; e
   return { error: 'not_found' };
 }
 
-// Anti-leak du grant (re-audit 2026-08-03, résidu #2) : le render est appelé avec
-// `token` (+ éventuellement `grant`/`mid`) en query string. APRÈS document.write, l'URL
-// de la page est l'URL d'origine (le grant n'y est plus) → un referrer strict-origin
-// suffit : cross-origin → seul l'ORIGINE est envoyée (jamais le grant, jamais le chemin).
-// ⚠️ NE PAS utiliser no-referrer : ça casse les embeds YouTube (erreur 153 —
-// "embedder identity missing referrer", YouTube exige un Referrer pour valider l'embedder).
 export function injectReferrerPolicy(html: string): string {
   const meta = '<meta name="referrer" content="strict-origin-when-cross-origin">';
   if (html.includes('<head>')) return html.replace('<head>', '<head>' + meta);
@@ -245,19 +239,9 @@ export async function handleRender(token: string, res: { setHeader?: (k: string,
   if (data.html) data.html = injectReferrerPolicy(data.html);
   const json = JSON.stringify(data);
   if (res.setHeader) res.setHeader('Content-Type', 'application/json');
-  // Anti-leak du grant : strict-origin-when-cross-origin (pas no-referrer — casserait
-  // les embeds YouTube 153). Cross-origin → origin seule, jamais le grant.
   if (res.setHeader) res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
-  // Contenu protégé : JAMAIS mis en cache (round 6, angle cache headers). Un CDN (ex.
-  // Cloudflare) ou un proxy qui mettrait en cache la réponse render la servirait sans
-  // le grant → le contenu whitelisté fuiterait. no-store sur la réponse ET no-transform
-  // (évite qu'un CDN réécrive le HTML rendu).
   if (res.setHeader) res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, no-transform');
   if (res.setHeader) res.setHeader('Pragma', 'no-cache');
-  // Audits : pose un cookie d'autorisation __sg_authorized quand le render réussit
-  // (grant valide + HTML servi). Ce cookie permet ensuite de charger les assets
-  // protégés (/assets/*.js) — sans lui, un téléchargement direct du bundle est refusé.
-  // Signé avec SHUGOKI_SIGNING_SECRET (jamais exposé), TTL court = durée de session.
   if (data.html && res.setHeader) {
     const authSecret = process.env.SHUGOKI_SIGNING_SECRET || process.env.SHUGOKI_SECRET;
     if (authSecret) {
@@ -271,11 +255,6 @@ export async function handleRender(token: string, res: { setHeader?: (k: string,
   else if (res.end) res.end(json);
 }
 
-// Notice de consentement injectée DANS le HTML rendu (après le split-render).
-// L'ack est UNIQUEMENT serveur (lié au machineId) : la popup vérifie /notice côté
-// client et s'affiche seulement si le machineId n'a pas déjà acké. Au clic OK, elle
-// POST /notice puis se ferme. Injectée ici (dans le render) plutôt que dans le skeleton
-// car document.write du render détruirait une popup posée avant.
 const NOTICE_SCRIPT = `
 <script>
 (function(){
@@ -316,12 +295,6 @@ const NOTICE_SCRIPT = `
   function close(){_closed=true;try{if(mo)mo.disconnect()}catch(e){}var el=document.getElementById('__sg_o');if(el&&el.parentNode)el.parentNode.removeChild(el);document.body.style.overflow='';document.documentElement.style.overflow='';}
   function okHandler(){ack();close();}
   function rebind(){var b=document.getElementById('__sg_ok');if(b)b.onclick=okHandler;}
-  // Anti-bypass 100% MUTATION OBSERVER (aucun setInterval).
-  // CRITIQUE anti-freeze : le flag _applying + mo.takeRecords() cassent la boucle MO —
-  // nos propres modifications (style/innerHTML re-appliqués) ne re-déclenchent PAS le MO
-  // (le navigateur normalise cssText/innerHTML, donc la comparaison échoue toujours et
-  // on ré-appliquerait à l'infini). takeRecords() vide la file des mutations que NOS
-  // changements ont générée → une seule passe par altération réelle, jamais de gel.
   function enforce(){
     if(_closed||_applying)return;
     _applying=true;
@@ -357,7 +330,6 @@ const NOTICE_SCRIPT = `
       try{o.__sgObserved=true;mo.observe(o,{childList:true,subtree:true,attributes:true,characterData:true,attributeFilter:['style','class','id']});}catch(e){}
     }catch(e){}
   }
-  // Mobile : bascule desktop/stackée sur redimensionnement (ré-applique via enforce).
   try{window.addEventListener('resize',function(){var _m=_isMobile();if(_m!==_MOBILE){_MOBILE=_m;enforce();}},{passive:true})}catch(e){}
   function init(){if(document.body)show();else if(document.addEventListener)document.addEventListener('DOMContentLoaded',show);else setTimeout(init,50)}
   fetch(base+'/notice?machineId='+encodeURIComponent(mid)+'&siteKey='+encodeURIComponent(sk),{signal:AbortSignal.timeout(4000)}).then(function(r){return r.json()}).then(function(d){if(!d.acknowledged)init()}).catch(function(){init()});
@@ -369,15 +341,12 @@ function injectNoticeScript(html: string, mid: string, siteKey: string, baseUrl?
   const inject = NOTICE_SCRIPT
     .replace('var mid=window.__sg_mid||\'\';', 'var mid=' + JSON.stringify(mid) + '||\'\';')
     .replace('var sk=window.__sg_siteKey||\'\';', 'var sk=' + JSON.stringify(siteKey) + '||\'\';')
-    // base INJECTÉE (ne pas dépendre de window.__sg_baseUrl : nettoyé par _sgCl après 1,5s →
-    // sinon la notice appelle /notice relatif → page d'éval → l'ack ne passe jamais)
     .replace('var base=window.__sg_baseUrl||\'\';', 'var base=' + JSON.stringify(baseVal) + '||window.__sg_baseUrl||\'\';')
     .replace('window.__sg_noticeEnabled', 'window.__sg_noticeEnabled');
   if (html.includes('</body>')) return html.replace('</body>', inject + '</body>');
   return html + inject;
 }
 
-// ── Signing ──
 export function signToken(siteKey: string, timestamp: number, secretOverride?: string): { token: string } {
   const secret = secretOverride || process.env.SHUGOKI_SIGNING_SECRET || process.env.SHUGOKI_SECRET;
   if (!secret) return { token: '' };
@@ -387,7 +356,6 @@ export function signToken(siteKey: string, timestamp: number, secretOverride?: s
   return { token: payload + ':' + sig };
 }
 
-// ── Config cache (whitelist + detection flags) ──
 const CONFIG_CACHE_TTL = 30_000;
 const CONFIG_STALE_MAX = 600_000;
 const CONFIG_FETCH_TIMEOUT = 2_000;
@@ -418,8 +386,6 @@ function pruneCache<T extends { fetchedAt: number }>(m: Map<string, T>): void {
 
 async function refreshConfig(siteKey: string, baseUrl: string, entry: ConfigEntry, secret?: string): Promise<void> {
   try {
-    // F2 (divulgation) : la config (detectionFlags/skipPaths) n'est rendue qu'à une clé
-    // prouvant possession du secret (sig = HMAC(secret, cb)). La siteKey est publique.
     const cb = Date.now();
     const sig = secret ? crypto.createHmac('sha256', secret).update(cb.toString()).digest('hex') : '';
     const res = await fetch(baseUrl + '/whitelist?key=' + encodeURIComponent(siteKey) + '&cb=' + cb + (sig ? '&sig=' + sig : ''), {
@@ -472,7 +438,6 @@ export async function fetchConfigForSiteKey(siteKey: string, baseUrl: string, se
 
 export function __clearConfigCache(): void { _configCache.clear(); }
 
-// ── Guard cache ──
 const GUARD_CACHE_TTL = 300_000;
 
 interface GuardCacheEntry { detect: string | null; guard: string | null; fetching: boolean; queue: Array<() => void>; fetchedAt: number }
@@ -534,27 +499,12 @@ export async function generateSkeleton(siteKey: string, token: string, baseUrl: 
   fragments.push('window.__sg_siteKey=' + JSON.stringify(siteKey));
   fragments.push('window.__sg_baseUrl=' + JSON.stringify(baseUrl));
   fragments.push('window.__sg_config=' + JSON.stringify(cfg));
-  // Mode debug (audit #8) : piloté UNIQUEMENT par le serveur. En production ce flag
-  // est toujours false → le guard n'active jamais ses traces via ?sg_probe_debug=1
-  // ou localStorage. (Nom volontairement différent de "debug" pour ne pas exposer
-  // un toggle générique que l'attaquant chercherait.)
   fragments.push('window.__sg_diagEnabled=' + (process.env.NODE_ENV === 'production' ? 'false' : 'true'));
-  // Nettoie l'URL : retire ?sg_proof de la barre d'adresse (le PoW a été validé serveur).
-  // history.replaceState ne recharge pas — le skeleton reste affiché, l'URL devient propre.
-  // Conserve le reste du query (ex. ?sg_probe_debug=1), retire uniquement sg_proof.
   fragments.push("try{if((location.search||'').indexOf('sg_proof=')>=0){var _qs=location.search.replace(/[?&]sg_proof=[^&]*/,'');var _cu=location.pathname+(_qs?_qs:'')+location.hash;history.replaceState(null,'',_cu)}}catch(e){}");
-  // Challenge PoW anti-curl (audit) : sel = HMAC(secret, ts + ':' + nonce). Le guard le
-  // résout en JS et l'envoie au wlc (pow=ts:nonce:solution). curl n'exécute pas le JS →
-  // pas de grant. Forteresse : nonce aléatoire 64 bits PAR requête (plus de sel
-  // déterministe par seconde → précomputation par lots impossible).
   const _powTs = Math.floor(Date.now() / 1000);
   const _powSecret = process.env.SHUGOKI_SIGNING_SECRET || process.env.SHUGOKI_SECRET || '';
   const _powNonce = (typeof crypto.randomBytes === 'function' ? crypto.randomBytes(8).toString('hex') : String(Math.floor(Math.random() * 0xffffffff)).padStart(8, '0') + String(Math.floor(Math.random() * 0xffffffff)).padStart(8, '0'));
   const _powSalt = _powSecret ? crypto.createHmac('sha256', _powSecret).update(_powTs + ':' + _powNonce).digest('hex') : '';
-  // ⚠️ DIFFICULTY 10 : 15 demandait ~32k itérations crypto.subtle (~1-3s navigateur) en
-  // plus du pre-flight PoW → 2-5s de chargement. 10 bits suffit pour prouver le JS.
-  // Audit #6 : la difficulté est désormais configurable (SHUGOKI_POW_DIFF, défaut 12),
-  // et DOIT rester synchrone avec core.ts (POW_DIFF) et whitelist.ts (POW_DIFFICULTY).
   const _powDiff = (() => {
     const raw = Number(process.env.SHUGOKI_POW_DIFF || '14');
     return Number.isInteger(raw) && raw >= 8 && raw <= 24 ? raw : 12;
@@ -567,13 +517,7 @@ export async function generateSkeleton(siteKey: string, token: string, baseUrl: 
   fragments.push('window.__sg_serverTime=' + _clockts);
   fragments.push('window.__sg_clockts=' + _clockts);
   if (!restrictedAccess) fragments.push('window.__sg_disableRestrictedAccess=true');
-  // Fusion des guards (audit) : la notice de consentement est désormais intégrée dans
-  // guard-detect. Le guard séparé (cache.guard) n'est PLUS injecté — les 2 scripts
-  // définissaient chacun window._SG_ST → collision de table → le guard échouait
-  // (_SG_ST is not defined) et la popup ne s'affichait jamais.
   if (cache.detect) fragments.push("try{" + cache.detect + "}catch(e){window.__sg_blocked=true}");
-  // guard.src.js est conservé (R.export, fingerprint) mais non injecté pour éviter la collision.
-  // Locale-aware __sg_showBlock (interpolated at skeleton generation time)
   const jsStr = (s: string) => JSON.stringify(s).slice(1, -1).replace(/</g, '\\x3c');
   const devtoolsMsg = jsStr(msgs.devtoolsBody);
   const tamperTitle = jsStr(msgs.tamperTitle);
@@ -585,21 +529,6 @@ export async function generateSkeleton(siteKey: string, token: string, baseUrl: 
   fragments.push('var k=' + JSON.stringify(siteKey));
   fragments.push('var b=' + JSON.stringify(baseUrl));
   fragments.push('var r=' + JSON.stringify(rurl));
-  /* Remplacement complet du document par le contenu réel, une fois la machine vérifiée.
-   *
-   * document.write après document.open est le seul moyen de remplacer un document
-   * entier en conservant son URL. Les conséquences, documentées dans
-   * le README § "Split-Render : ce que cela implique" :
-   *   - la page n'est plus éligible au cache arrière/avant (bfcache) ;
-   *   - la restauration de défilement natif est perdue → scrollTo(0,0) explicite ;
-   *   - DOMContentLoaded se déclenche deux fois ;
-   *   - un SPA initialisé dans le squelette perd son état.
-   *
-   * Alternative écartée : remplacer document.documentElement.innerHTML ne réexécute
-   * pas les scripts du document réel, ce qui casse toute page dynamique.
-   *
-   * Pour éviter ce mécanisme : splitRender: false.
-   */
   fragments.push('var _gw=function(cb){if(window.__sg_guardsReady||window.__sg_blocked)cb();else setTimeout(function(){_gw(cb)},100)};function rd(p,n){if(window.__sg_blocked)return;if(!document.body)return setTimeout(function(){rd(p,n)},50);if(n>6){if((window.__sg_config||{}).enableContentReplacementCheck===true)window.__sg_showBlock&&window.__sg_showBlock("' + devtoolsMsg + '","' + tamperTitle + '");return}var _g=(window.__sg_grant||"");if(_g){p=p+("&grant="+encodeURIComponent(_g))}var _m=(window.__sg_detectMid||window.__sg_mid||"");if(_m){p=p+("&mid="+encodeURIComponent(_m))}fetch(p).then(function(x){return x.json()}).then(function(d){if(window.__sg_blocked)return;if(!document.body)return setTimeout(function(){rd(p,n+1)},50);if(d.html){document.open("text/html");document.write(d.html);document.close();window.scrollTo(0,0)}if(d.blocked){window.__sg_showBlock&&window.__sg_showBlock(d.message,d.title)}if(d.error){if((window.__sg_config||{}).enableContentReplacementCheck===true)window.__sg_showBlock&&window.__sg_showBlock("' + devtoolsMsg + '","' + tamperTitle + '")}else if(!d.html&&!d.blocked){setTimeout(function(){rd(p,n+1)},300)}}).catch(function(){setTimeout(function(){rd(p,n+1)},300)})}');
   fragments.push('function _sgCl(){try{for(var _i in window){if(_i.indexOf("__sg")===0){window[_i]=null;delete window[_i]}}window._sgLogCP=function(){};window.midHex=function(){};window.rd=function(){};window._gw=function(){};window.applyDecision=function(){};window._D=function(){};window.z=function(f){return f()}}catch(_e){}}_gw(function(){rd(r+"?token="+t,0);setTimeout(_sgCl,1500)})');
   const bootCode = fragments.join(';').replace(/<\/(script|style)/gi, '<\\/$1');
