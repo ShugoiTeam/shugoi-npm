@@ -31,7 +31,7 @@ export const MESSAGES = {
   },
 } as const;
 
-export function resolveLocale(explicit: Locale | undefined, acceptLanguage?: string): Locale {
+export function resolveLocale(explicit?: Locale, acceptLanguage?: string): Locale {
   if (explicit) return explicit;
   if (acceptLanguage && /^fr\b|,\s*fr\b/i.test(acceptLanguage)) return 'fr';
   return 'en';

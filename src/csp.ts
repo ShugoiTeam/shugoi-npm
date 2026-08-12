@@ -5,7 +5,7 @@ export interface CspOptions {
   apiOrigin?: string;
 }
 
-export function originOf(baseUrl: string | undefined): string | null {
+export function originOf(baseUrl?: string): string | null {
   if (!baseUrl) return null;
   try {
     const u = new URL(baseUrl);
