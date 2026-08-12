@@ -4,6 +4,7 @@ import { buildCsp, originOf } from './csp'
 import { resolveLocale, type Locale, MESSAGES } from './locales'
 import { verifyBotIp, VERIFIABLE_BOTS } from './verify-bot'
 import { BLOCK_PAGE } from './block-page'
+import { ipBucket, safeChallengePath, safeEqual, uaFingerprint } from './security-utils'
 export { BLOCK_PAGE } from './block-page'
 import crypto from 'node:crypto'
 
@@ -165,43 +166,8 @@ export function createCore(options: ShugoiCoreOptions): ShugoiCore {
     return true;
   }
 
-  function safeChallengePath(p: string): string {
-    if (!p) return '/';
-    if (p.charAt(0) !== '/' || p.charAt(1) === '/' || p.indexOf('\\') >= 0) return '/';
-    for (let i = 0; i < p.length; i++) {
-      const c = p.charCodeAt(i);
-      if (c < 0x20 || c === 0x7f) return '/';
-    }
-    return p;
-  }
-
-  function safeEqual(a: string, b: string): boolean {
-    if (a.length !== b.length) return false
-    const ba = Buffer.from(a, 'utf8')
-    const bb = Buffer.from(b, 'utf8')
-    return crypto.timingSafeEqual(ba, bb)
-  }
-
   function sgNonce(): string {
     return crypto.randomBytes(8).toString('hex')
-  }
-
-  function ipBucket(ip: string): string {
-    if (!ip || ip === 'unknown') return '0'
-    if (ip.includes('.')) {
-      const m = ip.match(/^(\d+\.\d+\.\d+)(?:\.\d+)?$/)
-      if (m) return m[1] ?? '0'
-      return '0'
-    }
-    if (ip.includes(':')) {
-      const segs = ip.split(':').filter(Boolean)
-      return segs.slice(0, 4).join('.') || '0'
-    }
-    return '0'
-  }
-
-  function uaFp(ua: string): string {
-    return crypto.createHash('sha256').update(ua || '').digest('hex').slice(0, 16)
   }
 
   function isPowValid(proof: string): boolean {
@@ -230,7 +196,7 @@ export function createCore(options: ShugoiCoreOptions): ShugoiCore {
   function sgOkCookieValue(ip: string, ua: string): string {
     const ts = Math.floor(Date.now() / 1000)
     const bucket = ipBucket(ip)
-    const fp = uaFp(ua)
+    const fp = uaFingerprint(ua)
     const sig = crypto.createHmac('sha256', powSecret).update('sg_ok:' + ts + ':' + bucket + ':' + fp).digest('hex')
     return ts + ':' + bucket + ':' + fp + ':' + sig
   }
@@ -243,7 +209,7 @@ export function createCore(options: ShugoiCoreOptions): ShugoiCore {
     if (!tsStr || !bucket || !fp || !sig) return false
     const ts = parseInt(tsStr, 10)
     if (isNaN(ts) || Date.now() - ts * 1000 > POW_OK_TTL_MS || ts * 1000 > Date.now() + 60000) return false
-    if (bucket !== ipBucket(ip) || fp !== uaFp(ua)) return false
+    if (bucket !== ipBucket(ip) || fp !== uaFingerprint(ua)) return false
     const expected = crypto.createHmac('sha256', powSecret).update('sg_ok:' + tsStr + ':' + bucket + ':' + fp).digest('hex')
     return safeEqual(sig, expected)
   }

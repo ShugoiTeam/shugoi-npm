@@ -341,7 +341,8 @@ describe('307 challenge minimal (anti-curl/view-source)', () => {
     const src = readFileSync(require('node:path').join(process.cwd(), 'src', 'core.ts'), 'utf-8');
     expect(src).toContain('sg_ok:');
     expect(src).toContain('isSgOkValid');
-    expect(src).toContain('timingSafeEqual');
+    const security = readFileSync(require('node:path').join(process.cwd(), 'src', 'security-utils.ts'), 'utf-8');
+    expect(security).toContain('timingSafeEqual');
     expect(src).toContain('const canProceed = validCookie || proofFresh');
     expect(src).toContain('function consumeProof');
   });
