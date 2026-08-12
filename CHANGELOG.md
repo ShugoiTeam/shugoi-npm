@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.4.33] - 2026-08-12
+
+### Fixed
+- Keep the Express middleware callback type compatible with Express 4 and 5 consumers.
+
 ## [0.4.32] - 2026-08-12
 
 ### Fixed
