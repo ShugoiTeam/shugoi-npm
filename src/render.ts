@@ -17,7 +17,7 @@ const MAX_TOTAL_BYTES = 64 * 1024 * 1024;
 const MAX_TOKEN_READS = 1;
 
 
-interface StoredEntry { html: string; expiresAt: number; reads: number; contentReplaceOn: boolean | undefined }
+interface StoredEntry { html: string; expiresAt: number; reads: number; contentReplaceOn?: boolean }
 const _memoryStore = new Map<string, StoredEntry>();
 const _siteCache = new Map<string, string>();
 
@@ -80,7 +80,9 @@ export function storeHtml(token: string, html: string, contentReplaceOn?: boolea
   while ((_memoryStore.size >= MAX_ENTRIES || _totalBytes + size > MAX_TOTAL_BYTES) && _memoryStore.size > 0) {
     evictOldest();
   }
-  _memoryStore.set(token, { html, expiresAt: Date.now() + TOKEN_TTL, reads: 0, contentReplaceOn });
+  const entry: StoredEntry = { html, expiresAt: Date.now() + TOKEN_TTL, reads: 0 };
+  if (contentReplaceOn !== undefined) entry.contentReplaceOn = contentReplaceOn;
+  _memoryStore.set(token, entry);
   _totalBytes += size;
   const separator = token.indexOf(':');
   if (separator > 0) {

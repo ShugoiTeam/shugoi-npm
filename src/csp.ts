@@ -2,7 +2,7 @@ export interface CspOptions {
   siteKey: string;
   extraDirectives?: Record<string, string[]>;
   splitRender?: boolean;
-  apiOrigin?: string | undefined;
+  apiOrigin?: string;
 }
 
 export function originOf(baseUrl: string | undefined): string | null {
