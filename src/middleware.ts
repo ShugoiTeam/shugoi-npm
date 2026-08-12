@@ -10,7 +10,7 @@ export interface MinimalRequest {
   headers?: Record<string, string | string[] | undefined>;
   query?: JsonObject;
 }
-type ResponseBody = string | Uint8Array | JsonValue;
+export type ResponseBody = string | Uint8Array | JsonValue;
 export interface MinimalResponse {
   setHeader?(k: string, v: string): void;
   getHeader?(k: string): string | number | string[] | undefined;

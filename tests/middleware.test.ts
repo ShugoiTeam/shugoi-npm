@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createShugoiMiddleware } from '../src/middleware';
 import { __clearConfigCache } from '../src/render';
-import type { MinimalRequest } from '../src/middleware';
+import type { MinimalRequest, ResponseBody, MinimalResponse } from '../src/middleware';
 import type { ShugoiCoreOptions } from '../src/types';
 
 describe('createShugoiMiddleware', () => {
@@ -221,7 +221,7 @@ describe('createShugoiMiddleware', () => {
         'accept-language': 'fr-FR,fr;q=0.9',
       },
       path: '/',
-    } as any;
+    } satisfies MinimalRequest;
     let sentBody = '';
     const res = {
       setHeader: vi.fn(),
@@ -249,21 +249,18 @@ describe('createShugoiMiddleware', () => {
         'accept-language': 'fr-FR,fr;q=0.9',
       },
       path: '/',
-    } as any;
+    } satisfies MinimalRequest;
     let endCalled = false;
-    let endArgs: unknown[] = [];
     const res = {
       setHeader: vi.fn(),
       getHeader: vi.fn().mockReturnValue('text/html'),
       status: vi.fn().mockReturnThis(),
       type: vi.fn().mockReturnThis(),
       send: vi.fn(),
-      end(...args: unknown[]) { endCalled = true; endArgs = args; },
-    };
+      end(_body?: ResponseBody, _encoding?: string, _callback?: () => void) { endCalled = true; },
+    } satisfies MinimalResponse;
     const next = vi.fn();
     await mw(req, res, next);
-    // res.end() without args should not crash
-    // The overridden end handles undefined correctly
     expect(next).toHaveBeenCalled();
   });
 
@@ -278,7 +275,7 @@ describe('createShugoiMiddleware', () => {
         'accept-language': 'fr-FR,fr;q=0.9',
       },
       path: '/',
-    } as any;
+    } satisfies MinimalRequest;
     let callbackCalled = false;
     let endBody = '';
     const res = {
@@ -287,16 +284,15 @@ describe('createShugoiMiddleware', () => {
       status: vi.fn().mockReturnThis(),
       type: vi.fn().mockReturnThis(),
       send: vi.fn(),
-      end(chunk?: unknown, _encoding?: string, cb?: () => void) {
+      end(chunk?: ResponseBody, _encoding?: string, cb?: () => void) {
         endBody = typeof chunk === 'string' ? chunk : '';
         if (cb) { callbackCalled = true; cb(); }
       },
-    };
+    } satisfies MinimalResponse;
     const next = vi.fn();
     await mw(req, res, next);
     const html = '<!DOCTYPE html><html><head></head><body><h1>CB</h1></body></html>';
-    (res as any).end(html, 'utf-8', () => { callbackCalled = true; });
-    // Wait for promise resolution
+    res.end?.(html, 'utf-8', () => { callbackCalled = true; });
     await new Promise(r => setTimeout(r, 100));
     expect(endBody).toContain('<script>window.__sg_siteKey=');
     expect(endBody).not.toContain('eval(');
