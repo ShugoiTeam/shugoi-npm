@@ -1,4 +1,5 @@
 import { buildCsp } from '../csp';
+import type { JsonValue } from '../types';
 
 /**
  * Options for the Next.js Shugoi plugin.
@@ -34,7 +35,7 @@ type NextHeaders = NextHeaderRule[] | (() => Promise<NextHeaderRule[]> | NextHea
 
 interface NextConfigShape {
   headers?: NextHeaders;
-  [key: string]: unknown;
+  [key: string]: JsonValue | NextHeaders | undefined;
 }
 
 /**

@@ -1,4 +1,4 @@
-import type { ShugoiCoreOptions } from './types'
+import type { JsonObject, JsonValue, ShugoiCoreOptions } from './types'
 import { injectGuardScripts, enableDiskStore, getConfig } from './render'
 
 import { mergeCsp } from './csp'
@@ -8,15 +8,16 @@ import { resolveLocale, type Locale } from './locales'
 interface MinimalRequest {
   path?: string; url?: string; ip?: string; method?: string;
   headers?: Record<string, string | string[] | undefined>;
-  query?: Record<string, unknown>;
+  query?: JsonObject;
 }
+type ResponseBody = string | Uint8Array | JsonValue;
 interface MinimalResponse {
   setHeader?(k: string, v: string): void;
   getHeader?(k: string): string | number | string[] | undefined;
-  status?(code: number): unknown;
-  type?(t: string): unknown;
-  send?(body: unknown): unknown;
-  end?(body?: unknown, ...rest: unknown[]): unknown;
+  status?(code: number): MinimalResponse;
+  type?(t: string): MinimalResponse;
+  send?(body: ResponseBody): MinimalResponse | Promise<MinimalResponse>;
+  end?(body?: ResponseBody, encoding?: string, cb?: () => void): MinimalResponse;
 }
 
 interface FastifyRequestLike {
@@ -150,7 +151,7 @@ export function createShugoiMiddleware(options: ShugoiCoreOptions) {
         acceptLanguage: typeof req.headers?.['accept-language'] === 'string' ? req.headers['accept-language'] : undefined,
         secFetchDest: typeof req.headers?.['sec-fetch-dest'] === 'string' ? req.headers['sec-fetch-dest'] : undefined,
         secFetchMode: typeof req.headers?.['sec-fetch-mode'] === 'string' ? req.headers['sec-fetch-mode'] : undefined,
-        sgProof: (req.query && typeof (req.query as Record<string, unknown>).sg_proof === 'string') ? (req.query as Record<string, unknown>).sg_proof as string : undefined,
+        sgProof: typeof req.query?.sg_proof === 'string' ? req.query.sg_proof : undefined,
         sgOk: (typeof req.headers?.cookie === 'string' ? req.headers.cookie.match(/(?:^|;\s*)__sg_ok=([^;]+)/)?.[1] : undefined),
         sgAuthorized: (typeof req.headers?.cookie === 'string' ? req.headers.cookie.match(/(?:^|;\s*)__sg_authorized=([^;]+)/)?.[1] : undefined),
         forwardedPrefix: (typeof req.headers?.['x-forwarded-prefix'] === 'string' ? req.headers['x-forwarded-prefix'] : undefined),
@@ -179,7 +180,7 @@ export function createShugoiMiddleware(options: ShugoiCoreOptions) {
 
       // PoW validé → pose le cookie __sg_ok sur la réponse du skeleton (navigations
       // suivantes sans challenge, donc chargement rapide).
-      const sgProofQ = (req.query && typeof (req.query as Record<string, unknown>).sg_proof === 'string') ? (req.query as Record<string, unknown>).sg_proof as string : undefined;
+      const sgProofQ = typeof req.query?.sg_proof === 'string' ? req.query.sg_proof : undefined;
       if (sgProofQ && res.setHeader) {
         const okCookie = core.sgOkCookie(sgProofQ, ip, ua);
         if (okCookie) res.setHeader('Set-Cookie', okCookie);
@@ -192,11 +193,11 @@ export function createShugoiMiddleware(options: ShugoiCoreOptions) {
 
       if (autoInject && splitRender && !isBot && !core.isAllowlisted(path)) {
         let injected = false;
-        const originalSend = res.send?.bind(res) as ((body?: unknown) => unknown) | undefined;
-        const originalEnd = res.end?.bind(res) as ((chunk?: unknown, encoding?: string, cb?: () => void) => unknown) | undefined;
+        const originalSend = res.send?.bind(res);
+        const originalEnd = res.end?.bind(res);
 
-        const doInject = async (body: unknown): Promise<unknown> => {
-          if (injected) return body;
+        const doInject = async (body: ResponseBody | undefined): Promise<ResponseBody> => {
+          if (injected) return body ?? '';
           if (typeof body === 'string') {
             const ct = res.getHeader ? res.getHeader('content-type') : undefined;
             if (!ct || String(ct).includes('text/html')) {
@@ -204,17 +205,17 @@ export function createShugoiMiddleware(options: ShugoiCoreOptions) {
               injected = true;
             }
           }
-          return body;
+          return body ?? '';
         };
 
         if (originalSend) {
-          res.send = function (body: unknown) { return doInject(body).then(b => originalSend(b)); };
+          res.send = function (body: ResponseBody) { return doInject(body).then(b => originalSend?.(b) ?? res); };
         }
         if (originalEnd) {
-          res.end = function (chunk?: unknown, encoding?: string, cb?: () => void) {
+          res.end = function (chunk?: ResponseBody, encoding?: string, cb?: () => void) {
             doInject(chunk).then(b => {
-              if (cb) originalEnd(b, encoding, cb);
-              else originalEnd(b, encoding);
+              if (cb) originalEnd?.(b, encoding, cb);
+              else originalEnd?.(b, encoding);
             });
             return this;
           };
