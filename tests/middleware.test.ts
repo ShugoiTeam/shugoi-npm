@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createShugoiMiddleware } from '../src/middleware';
 import { __clearConfigCache } from '../src/render';
+import type { MinimalRequest } from '../src/middleware';
 import type { ShugoiCoreOptions } from '../src/types';
 
 describe('createShugoiMiddleware', () => {
@@ -14,7 +15,7 @@ describe('createShugoiMiddleware', () => {
   };
 
   function mockReqRes(headers: Record<string, string>, path = '/') {
-    const req = { headers, path, url: path } as any;
+    const req = { headers, path, url: path } satisfies MinimalRequest;
     const res = {
       _status: 200,
       _body: '',
@@ -82,7 +83,7 @@ describe('createShugoiMiddleware', () => {
       'sec-fetch-dest': 'document',
       'sec-fetch-mode': 'navigate',
       'accept-language': 'fr-FR,fr;q=0.9',
-    }, path: '/' } as any;
+    }, path: '/' } satisfies MinimalRequest;
     let sentBody = '';
     const res = {
       setHeader: vi.fn(),
@@ -106,7 +107,7 @@ describe('createShugoiMiddleware', () => {
     const mw = createShugoiMiddleware(validOptions);
     const req = { headers: {
       'user-agent': 'Googlebot/2.1 (+http://www.google.com/bot.html)',
-    }, path: '/' } as any;
+    }, path: '/' } satisfies MinimalRequest;
     let sentBody = '';
     const res = {
       setHeader: vi.fn(),
@@ -123,7 +124,7 @@ describe('createShugoiMiddleware', () => {
   it('bypasses allowlisted path', async () => {
     mockGuardFetch();
     const mw = createShugoiMiddleware(validOptions);
-    const req = { headers: { 'user-agent': 'curl/8.0.0' }, path: '/legal/shugoi-notice', url: '/legal/shugoi-notice' } as any;
+    const req = { headers: { 'user-agent': 'curl/8.0.0' }, path: '/legal/shugoi-notice', url: '/legal/shugoi-notice' } satisfies MinimalRequest;
     const res = {
       setHeader: vi.fn(),
       getHeader: vi.fn(),
@@ -161,7 +162,7 @@ describe('createShugoiMiddleware', () => {
   it('does not modify HTML when autoInject is false', async () => {
     mockGuardFetch();
     const mw = createShugoiMiddleware({ siteKey: 'sg_sk_live_xxx', autoInject: false });
-    const req = { headers: {}, path: '/' } as any;
+    const req = { headers: {}, path: '/' } satisfies MinimalRequest;
     let sentBody = '';
     const res = {
       setHeader: vi.fn(),
