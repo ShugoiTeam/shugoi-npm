@@ -23,14 +23,14 @@ function xorEncrypt(str, hexKey) {
   const kb = hexToBytes(hexKey);
   let enc = "";
   for (let i = 0; i < str.length; i++) {
-    let cc = str.charCodeAt(i) ^ kb[i % kb.length];
+    const cc = str.charCodeAt(i) ^ (kb[i % kb.length] ?? 0);
     enc += cc.toString(16).padStart(2, "0");
   }
   return enc;
 }
 function runtimeValue(str) {
   let s = str.slice(1, -1);
-  return s.replace(/\\(['"\\bfnrtv0])/g, (_, c) => ({ "'": "'", '"': '"', "\\": "\\", "b": "\b", "f": "\f", "n": "\n", "r": "\r", "t": "	", "v": "\v", "0": "\0" })[c]).replace(/\\(u\{([\da-fA-F]+)\}|u([\da-fA-F]{4})|x([\da-fA-F]{2}))/g, (_, __, ubrace, u4, x2) => {
+  return s.replace(/\\(['"\\bfnrtv0])/g, (_, c) => ({ "'": "'", '"': '"', "\\": "\\", "b": "\b", "f": "\f", "n": "\n", "r": "\r", "t": "	", "v": "\v", "0": "\0" })[c] ?? c).replace(/\\(u\{([\da-fA-F]+)\}|u([\da-fA-F]{4})|x([\da-fA-F]{2}))/g, (_, __, ubrace, u4, x2) => {
     const code = ubrace ? parseInt(ubrace, 16) : u4 ? parseInt(u4, 16) : parseInt(x2, 16);
     return String.fromCodePoint(code);
   });
@@ -89,7 +89,7 @@ function shuffleCode(code, seed) {
   let d = 0;
   for (let i = 0; i < lines.length; i++) {
     depth[i] = d;
-    for (const ch of lines[i]) {
+    for (const ch of lines[i] ?? "") {
       if (ch === "{") d++;
       else if (ch === "}") d--;
     }
@@ -97,7 +97,8 @@ function shuffleCode(code, seed) {
   const blocks = [];
   let start = null;
   for (let i = 0; i < lines.length; i++) {
-    const isShuffleable = depth[i] === 1 && /^\s*R\.\w+\s*=/.test(lines[i]) && !/[{}]/.test(lines[i]) && lines[i].trimEnd().endsWith(";");
+    const line = lines[i] ?? "";
+    const isShuffleable = depth[i] === 1 && /^\s*R\.\w+\s*=/.test(line) && !/[{}]/.test(line) && line.trimEnd().endsWith(";");
     if (isShuffleable && start === null) start = i;
     if (!isShuffleable && start !== null) {
       blocks.push({ start, end: i - 1 });
@@ -110,7 +111,12 @@ function shuffleCode(code, seed) {
     const slice = lines.slice(blk.start, blk.end + 1);
     for (let i = slice.length - 1; i > 0; i--) {
       const j = Math.floor(rng() * (i + 1));
-      [slice[i], slice[j]] = [slice[j], slice[i]];
+      const current = slice[i];
+      const replacement = slice[j];
+      if (current !== void 0 && replacement !== void 0) {
+        slice[i] = replacement;
+        slice[j] = current;
+      }
     }
     lines.splice(blk.start, slice.length, ...slice);
   }

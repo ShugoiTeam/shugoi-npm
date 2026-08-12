@@ -136,11 +136,14 @@ function storeHtml(token, html, contentReplaceOn) {
   if (_diskEnabled) {
     storeToDisk(token, html);
   }
+  dropEntry(token);
   const size = Buffer.byteLength(html, "utf-8");
   while ((_memoryStore.size >= MAX_ENTRIES || _totalBytes + size > MAX_TOTAL_BYTES) && _memoryStore.size > 0) {
     evictOldest();
   }
-  _memoryStore.set(token, { html, expiresAt: Date.now() + TOKEN_TTL, reads: 0, contentReplaceOn });
+  const entry = { html, expiresAt: Date.now() + TOKEN_TTL, reads: 0 };
+  if (contentReplaceOn !== void 0) entry.contentReplaceOn = contentReplaceOn;
+  _memoryStore.set(token, entry);
   _totalBytes += size;
   const separator = token.indexOf(":");
   if (separator > 0) {
@@ -157,14 +160,15 @@ function storeHtml(token, html, contentReplaceOn) {
 var GRANT_TTL_MS = 6e4;
 function verifyRenderGrant(mid, grant, token, ip, expectedSiteKey) {
   const gSecret = process.env.SHUGOKI_SIGNING_SECRET || process.env.SHUGOKI_SECRET;
-  if (!gSecret) return true;
+  if (!gSecret) return false;
   if (!grant || !mid || !/^[a-f0-9]{64}$/.test(mid)) return false;
   const sep = grant.indexOf(":");
   if (sep < 0) return false;
   const ts = grant.slice(0, sep);
   const sig = grant.slice(sep + 1);
   const tsSec = parseInt(ts, 36);
-  if (isNaN(tsSec) || Date.now() - tsSec * 1e3 > GRANT_TTL_MS) return false;
+  const age = Date.now() - tsSec * 1e3;
+  if (isNaN(tsSec) || age > GRANT_TTL_MS || age < -5e3) return false;
   if (!expectedSiteKey) return false;
   const payload = "render-grant:" + [expectedSiteKey, mid, token || "", ip || "", ts].join(":");
   const exp = crypto.createHmac("sha256", gSecret).update(payload).digest("hex");
@@ -193,7 +197,10 @@ function configKey(baseUrl, siteKey) {
 function pruneCache(m) {
   if (m.size <= MAX_TENANTS) return;
   const sorted = [...m.entries()].sort((a, b) => a[1].fetchedAt - b[1].fetchedAt);
-  for (let i = 0; i < sorted.length - MAX_TENANTS; i++) m.delete(sorted[i][0]);
+  for (let i = 0; i < sorted.length - MAX_TENANTS; i++) {
+    const entry = sorted[i];
+    if (entry) m.delete(entry[0]);
+  }
 }
 async function refreshConfig(siteKey, baseUrl, entry, secret) {
   try {
@@ -354,6 +361,21 @@ async function injectGuardScripts(html, siteKey, baseUrl, whitelist, restrictedA
   return generateSkeleton(siteKey, signed.token, baseUrl, restrictedAccess, wl, renderUrl, locale, cfgData.flags, clockts, signingSecret);
 }
 
+// src/block-page.ts
+var BLOCK_PAGE = [
+  "+---------------------------------------------+",
+  "|           BLOCKED BY SHUGOI                 |",
+  "+---------------------------------------------+",
+  "|  Bots, scrapers and headless clients        |",
+  "|  are blocked by Shugoi protection.          |",
+  "|                                             |",
+  "|  Use a standard browser to access           |",
+  "|  this site.                                 |",
+  "|                                             |",
+  "|  - web: https://shugoi.com -                |",
+  "+---------------------------------------------+"
+].join("\n") + "\n";
+
 // src/next/proxy.ts
 var DEFAULT_HEADLESS = [
   /^curl/i,
@@ -385,20 +407,7 @@ function createShugoiProxy(options) {
       return NextResponse.next();
     const ua = request.headers.get("user-agent") || "";
     if (headless.some((p) => p.test(ua))) {
-      const block = [
-        "+---------------------------------------------+",
-        "|           BLOCKED BY SHUGOI                 |",
-        "+---------------------------------------------+",
-        "|  Bots, scrapers and headless clients        |",
-        "|  are blocked by Shugoi protection.          |",
-        "|                                             |",
-        "|  Use a standard browser to access           |",
-        "|  this site.                                 |",
-        "|                                             |",
-        "|  - contact: support@shugoi.com -            |",
-        "+---------------------------------------------+"
-      ].join("\n") + "\n";
-      return new NextResponse(block, { status: 403 });
+      return new NextResponse(BLOCK_PAGE, { status: 403 });
     }
     if (!accept.includes("text/html")) return NextResponse.next();
     try {
@@ -557,19 +566,6 @@ var DEFAULT_BOT_WHITELIST = [
   /AhrefsBot/i,
   /SemrushBot/i
 ];
-var BLOCK_PAGE = [
-  "+---------------------------------------------+",
-  "|           BLOCKED BY SHUGOI                 |",
-  "+---------------------------------------------+",
-  "|  Bots, scrapers and headless clients        |",
-  "|  are blocked by Shugoi protection.          |",
-  "|                                             |",
-  "|  Use a standard browser to access           |",
-  "|  this site.                                 |",
-  "|                                             |",
-  "|  - contact: support@shugoi.com -            |",
-  "+---------------------------------------------+"
-].join("\n") + "\n";
 function signToken2(siteKey, timestamp, secretOverride) {
   const secret = secretOverride || process.env.SHUGOKI_SIGNING_SECRET || process.env.SHUGOKI_SECRET;
   if (!secret) return { token: "" };
