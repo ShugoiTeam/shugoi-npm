@@ -20,6 +20,23 @@ export interface WithShugoiOptions {
   baseUrl?: string;
 }
 
+interface NextHeader {
+  key: string;
+  value: string;
+}
+
+interface NextHeaderRule {
+  source: string;
+  headers: NextHeader[];
+}
+
+type NextHeaders = NextHeaderRule[] | (() => Promise<NextHeaderRule[]> | NextHeaderRule[]);
+
+interface NextConfigShape {
+  headers?: NextHeaders;
+  [key: string]: unknown;
+}
+
 /**
  * Next.js config wrapper that adds Shugoi CSP headers.
  *
@@ -43,15 +60,15 @@ export interface WithShugoiOptions {
  */
 export function withShugoi(
   opts: WithShugoiOptions,
-  nextConfig: Record<string, unknown> = {},
-): Record<string, unknown> {
+  nextConfig: NextConfigShape = {},
+): NextConfigShape {
   const csp = buildCsp({ siteKey: opts.siteKey });
 
   return {
     ...nextConfig,
     async headers() {
       const existingHeaders = typeof nextConfig.headers === 'function'
-        ? await (nextConfig as any).headers()
+        ? await nextConfig.headers()
         : Array.isArray(nextConfig.headers)
           ? nextConfig.headers
           : [];

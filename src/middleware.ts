@@ -19,6 +19,33 @@ interface MinimalResponse {
   end?(body?: unknown, ...rest: unknown[]): unknown;
 }
 
+interface FastifyRequestLike {
+  url: string;
+  ip?: string;
+  headers: Record<string, string | undefined>;
+  query: Record<string, string | undefined>;
+}
+
+interface FastifyReplyLike {
+  statusCode: number;
+  getHeader?(name: string): string | number | string[] | undefined;
+  header(name: string, value: string): FastifyReplyLike;
+  code(status: number): FastifyReplyLike;
+  type(contentType: string): FastifyReplyLike;
+  send(body: string | Record<string, string | boolean | number | null>): FastifyReplyLike;
+}
+
+interface FastifyLike {
+  addHook(
+    name: 'onRequest' | 'preHandler' | 'onSend',
+    handler: (...args: FastifyHookArguments) => Promise<string | void>,
+  ): void;
+  get(path: string, handler: (request: FastifyRequestLike, reply: FastifyReplyLike) => Promise<void>): void;
+  head(path: string, handler: (request: FastifyRequestLike, reply: FastifyReplyLike) => Promise<FastifyReplyLike>): void;
+}
+
+type FastifyHookArguments = [FastifyRequestLike, FastifyReplyLike, string?];
+
 export { DEFAULT_HEADLESS_PATTERNS, BLOCK_PAGE, DEFAULT_BOT_WHITELIST } from './core';
 
 export function createShugoiMiddleware(options: ShugoiCoreOptions) {
@@ -34,7 +61,7 @@ export function createShugoiMiddleware(options: ShugoiCoreOptions) {
 
   return async function shugoiMiddleware(req: MinimalRequest, res: MinimalResponse, next: () => void) {
     try {
-      const path = (req.path ?? req.url ?? '/').split('?')[0];
+      const path = (req.path ?? req.url ?? '/').split('?')[0] ?? '/';
 
       // Render endpoint — handled by middleware adapter
       if (path.endsWith('/__shugoi/render')) {
@@ -139,7 +166,7 @@ export function createShugoiMiddleware(options: ShugoiCoreOptions) {
         if (decision.headers && decision.headers['Content-Type']) {
           if (res.setHeader) res.setHeader('Content-Type', decision.headers['Content-Type']);
         } else if (res.type) {
-          res.type(decision.contentType.split('/')[1]);
+          res.type(decision.contentType.split('/')[1] ?? 'plain');
         }
         if (decision.body) {
           if (res.send) res.send(decision.body);
@@ -173,7 +200,7 @@ export function createShugoiMiddleware(options: ShugoiCoreOptions) {
           if (typeof body === 'string') {
             const ct = res.getHeader ? res.getHeader('content-type') : undefined;
             if (!ct || String(ct).includes('text/html')) {
-              try { body = await injectGuardScripts(body, options.siteKey, baseUrl, undefined, restrictedAccess, signingSecret, req as any, undefined, reqLocale); } catch (e) { core.log('inject error:', e); }
+              try { body = await injectGuardScripts(body, options.siteKey, baseUrl, undefined, restrictedAccess, signingSecret, req, undefined, reqLocale); } catch (e) { core.log('inject error:', e); }
               injected = true;
             }
           }
@@ -210,9 +237,10 @@ export function createShugoiPlugin(options: ShugoiCoreOptions) {
 
   if (options.multiProcess) enableDiskStore(true);
 
-  return async function shugoiPlugin(fastify: any) {
+  return async function shugoiPlugin(fastify: FastifyLike) {
     // CSP onRequest hook
-    fastify.addHook('onRequest', async (_request: any, reply: any) => {
+    fastify.addHook('onRequest', async (...args: FastifyHookArguments) => {
+      const reply = args[1];
       if (core.cspEnabled && reply.getHeader) {
         const existing = reply.getHeader('Content-Security-Policy');
         reply.header('Content-Security-Policy', mergeCsp(
@@ -225,7 +253,7 @@ export function createShugoiPlugin(options: ShugoiCoreOptions) {
     });
 
     // Render endpoint
-    fastify.get('/__shugoi/render', async (request: any, reply: any) => {
+    fastify.get('/__shugoi/render', async (request: FastifyRequestLike, reply: FastifyReplyLike) => {
       const { renderResponseData, injectReferrerPolicy } = await import('./render');
       const ip = (typeof request.headers?.['x-forwarded-for'] === 'string'
         ? request.headers['x-forwarded-for'].split(',')[0]?.trim()
@@ -241,12 +269,14 @@ export function createShugoiPlugin(options: ShugoiCoreOptions) {
       reply.send(data);
     });
 
-    fastify.head('/__shugoi/healthcheck', async (_request: any, reply: any) => reply.send(''));
+    fastify.head('/__shugoi/healthcheck', async (_request: FastifyRequestLike, reply: FastifyReplyLike) => reply.send(''));
 
     // PreHandler: evaluation pipeline
-    fastify.addHook('preHandler', async (request: any, reply: any) => {
+    fastify.addHook('preHandler', async (...args: FastifyHookArguments) => {
+      const request = args[0];
+      const reply = args[1];
       try {
-        const path = request.url.split('?')[0];
+        const path = request.url.split('?')[0] ?? '/';
         if (path.endsWith('/__shugoi/render') || path.endsWith('/__shugoi/healthcheck')) return;
         if (core.isAllowlisted(path)) return;
 
@@ -285,19 +315,22 @@ export function createShugoiPlugin(options: ShugoiCoreOptions) {
     });
 
     // onSend: split-render injection
-    fastify.addHook('onSend', async (request: any, reply: any, payload: any) => {
+    fastify.addHook('onSend', async (...args: FastifyHookArguments) => {
+      const request = args[0];
+      const reply = args[1];
+      const payload = args[2] ?? '';
       if (typeof payload !== 'string') return payload;
-      const path = request.url.split('?')[0];
+      const path = request.url.split('?')[0] ?? '/';
       if (path.endsWith('/__shugoi/render') || path.endsWith('/__shugoi/healthcheck')) return payload;
       if (reply.statusCode !== 200) return payload;
       // Bots (moteurs + partage social) : HTML brut sans skeleton — ils ne peuvent pas
       // exécuter le skeleton JavaScript (og:image / indexation).
       const ua = typeof request.headers?.['user-agent'] === 'string' ? request.headers['user-agent'] : '';
       if (core.isWhitelistedBot(ua)) return payload;
-      const ct = reply.getHeader('content-type');
+      const ct = reply.getHeader?.('content-type');
       if (!ct || String(ct).includes('text/html')) {
         const pluginLocale: Locale = resolveLocale(options.locale, typeof request.headers?.['accept-language'] === 'string' ? request.headers?.['accept-language'] : undefined);
-        return await injectGuardScripts(payload, options.siteKey, baseUrl, undefined, restrictedAccess, signingSecret, { url: path } as any, undefined, pluginLocale);
+        return await injectGuardScripts(payload, options.siteKey, baseUrl, undefined, restrictedAccess, signingSecret, { url: path }, undefined, pluginLocale);
       }
       return payload;
     });
