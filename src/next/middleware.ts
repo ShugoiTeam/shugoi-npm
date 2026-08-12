@@ -76,9 +76,7 @@ function generateBootcode(siteKey: string, config: string, detectCode: string, g
 
 export function renderResponseData(token: string, mid?: string, grant?: string, ip?: string, expectedSiteKey?: string): { html?: string; blocked?: boolean; error?: string } {
   if (!token || token.length < 16 || token.length > 300) return { error: "not_found" };
-  // CRITIQUE 1 (§7bis) : le token appartient à ce site uniquement (anti cross-site grant).
   if (expectedSiteKey && token.split(':')[0] !== expectedSiteKey) return { error: "not_found" };
-  // Parité avec l'adapter Express (NP-01) : sans grant valide (lié au siteKey), pas de HTML.
   if (!verifyRenderGrant(mid, grant, token, ip, expectedSiteKey)) return { error: "not_found" };
   const html = tokenStore.get(token);
   if (html) return { html };
@@ -129,7 +127,6 @@ export function createShugoiNextMiddleware(options: ShugoiNextOptions) {
       detectCode = localGuards?.detect ?? "";
       guardCode = localGuards?.guard ?? "";
 
-      // 2. Fallback: HTTP
       if (!detectCode || !guardCode) {
         const httpGuards = await fetchGuardsHttp(BASE_URL, siteKey, signingSecret);
         if (httpGuards) {
