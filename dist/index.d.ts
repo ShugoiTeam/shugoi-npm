@@ -77,7 +77,7 @@ interface FastifyLike {
 }
 type FastifyHookArguments = [FastifyRequestLike, FastifyReplyLike, string?];
 
-declare function createShugoiMiddleware(options: ShugoiCoreOptions): (req: MinimalRequest, res: MinimalResponse, next: () => void) => Promise<void>;
+declare function createShugoiMiddleware(options: ShugoiCoreOptions): (req: MinimalRequest, res: MinimalResponse, next: (error?: unknown) => void) => Promise<void>;
 declare function createShugoiPlugin(options: ShugoiCoreOptions): (fastify: FastifyLike) => Promise<void>;
 
 interface CspOptions {

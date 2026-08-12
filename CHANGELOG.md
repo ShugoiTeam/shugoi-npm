@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.4.32] - 2026-08-12
+
+### Fixed
+- Accept Express 5 middleware callback types without weakening strict TypeScript checks.
+
 ## [0.4.31] - 2026-08-12
 
 ### Security

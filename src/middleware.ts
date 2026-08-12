@@ -61,7 +61,7 @@ export function createShugoiMiddleware(options: ShugoiCoreOptions) {
 
   if (options.multiProcess) enableDiskStore(true);
 
-  return async function shugoiMiddleware(req: MinimalRequest, res: MinimalResponse, next: () => void) {
+  return async function shugoiMiddleware(req: MinimalRequest, res: MinimalResponse, next: (error?: unknown) => void) {
     try {
       const path = (req.path ?? req.url ?? '/').split('?')[0] ?? '/';
 
