@@ -178,7 +178,7 @@ function readFromMemory(token) {
   }
   return entry.html;
 }
-function verifyRenderGrant(mid, grant, token, ip, expectedSiteKey) {
+function verifyRenderGrant(mid, grant, token, _ip, expectedSiteKey) {
   const gSecret = process.env.SHUGOKI_SIGNING_SECRET || process.env.SHUGOKI_SECRET;
   if (!gSecret) return false;
   if (!grant || !mid || !/^[a-f0-9]{64}$/.test(mid)) return false;
@@ -190,7 +190,7 @@ function verifyRenderGrant(mid, grant, token, ip, expectedSiteKey) {
   const age = Date.now() - tsSec * 1e3;
   if (isNaN(tsSec) || age > GRANT_TTL_MS || age < -5e3) return false;
   if (!expectedSiteKey) return false;
-  const payload = "render-grant:" + [expectedSiteKey, mid, token || "", ip || "", ts].join(":");
+  const payload = "render-grant:" + [expectedSiteKey, mid, token || "", ts].join(":");
   const exp = import_crypto.default.createHmac("sha256", gSecret).update(payload).digest("hex");
   try {
     return import_crypto.default.timingSafeEqual(Buffer.from(sig, "hex"), Buffer.from(exp, "hex"));

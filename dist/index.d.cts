@@ -12,7 +12,7 @@ declare class ShugoiError extends Error {
 type Locale = 'fr' | 'en';
 
 declare function storeHtml(token: string, html: string, contentReplaceOn?: boolean): void;
-declare function verifyRenderGrant(mid: string | undefined, grant: string | undefined, token?: string, ip?: string, expectedSiteKey?: string): boolean;
+declare function verifyRenderGrant(mid: string | undefined, grant: string | undefined, token?: string, _ip?: string, expectedSiteKey?: string): boolean;
 declare function renderResponseData(token: string, locale?: Locale, configUrl?: string, mid?: string, grant?: string, ip?: string, expectedSiteKey?: string, _secret?: string): Promise<{
     html?: string;
     error?: string;

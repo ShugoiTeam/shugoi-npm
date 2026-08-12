@@ -10,7 +10,7 @@ const mid = 'a'.repeat(64);
 function makeGrant(m: string, token: string, ip: string, siteKey?: string, tsMs?: number): string {
   const sk = siteKey ?? SITE_KEY;
   const t = Math.floor((tsMs ?? Date.now()) / 1000).toString(36);
-  const payload = 'render-grant:' + [sk, m, token, ip, t].join(':');
+  const payload = 'render-grant:' + [sk, m, token, t].join(':');
   const sig = createHmac('sha256', SECRET).update(payload).digest('hex');
   return t + ':' + sig;
 }
@@ -54,12 +54,12 @@ describe('renderResponseData anti-bypass token-only', () => {
   });
 });
 
-describe('CH-01 rejeu cross-IP', () => {
-  it('refuse un grant signé pour une autre IP', async () => {
+describe('CH-01 mobilité réseau', () => {
+  it('conserve un grant valide lors d’un changement d’IP', async () => {
     const signed = signToken(SITE_KEY, Date.now());
     storeHtml(signed.token, '<html>x</html>');
     const grant = makeGrant(mid, signed.token, '1.2.3.4');
-    expect((await renderResponseData(signed.token, undefined, undefined, mid, grant, '5.6.7.8', SITE_KEY)).error).toBe('not_found');
+    expect((await renderResponseData(signed.token, undefined, undefined, mid, grant, '5.6.7.8', SITE_KEY)).html).toBe('<html>x</html>');
   });
 });
 

@@ -7,7 +7,7 @@ const GRANT_SITE = 'sg_sk_test_render';
 function validGrant(token?: string, ip?: string): string {
   const secret = process.env.SHUGOKI_SIGNING_SECRET || process.env.SHUGOKI_SECRET || '';
   const ts = Math.floor(Date.now() / 1000).toString(36);
-  const payload = 'render-grant:' + [GRANT_SITE, GRANT_MID, token || '', ip || '', ts].join(':');
+  const payload = 'render-grant:' + [GRANT_SITE, GRANT_MID, token || '', ts].join(':');
   const sig = createHmac('sha256', secret).update(payload).digest('hex');
   return ts + ':' + sig;
 }
