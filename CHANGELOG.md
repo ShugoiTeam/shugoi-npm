@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Maintenance
+- Isolated cookie security, proof replay storage and challenge limiting into typed modules.
+- Added exact block-page adapter tests and runtime cleanup hooks.
+- Added architecture documentation and strict source-quality checks.
+
 ### Security
 - Removed dynamic JavaScript evaluation from Express, Next.js, and manual bootstraps.
 - Removed `unsafe-eval` and executable `blob:` URLs from the default script policy.
