@@ -24,6 +24,13 @@ afterAll(() => {
 });
 
 describe('renderResponseData anti-bypass token-only', () => {
+  it('refuse un grant quand aucun secret serveur n’est configuré', () => {
+    const previous = process.env.SHUGOKI_SIGNING_SECRET;
+    delete process.env.SHUGOKI_SIGNING_SECRET;
+    expect(verifyRenderGrant(mid, '1:invalid', 'token', '1.2.3.4', SITE_KEY)).toBe(false);
+    process.env.SHUGOKI_SIGNING_SECRET = previous;
+  });
+
   it('refuse sans grant (mid seul ou rien) — le bypass curl', async () => {
     const token = signToken(SITE_KEY, Date.now()).token;
     expect((await renderResponseData(token)).error).toBe('not_found');
