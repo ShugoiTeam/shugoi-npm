@@ -4,6 +4,7 @@ import crypto from "node:crypto";
 import { verifyRenderGrant } from "../render";
 import { loadLocalGuards } from "./guard-cache";
 import { createDiskHtmlStore } from "./token-store";
+import { BLOCK_PAGE } from "../block-page";
 
 const tokenStore = createDiskHtmlStore();
 setInterval(() => {
@@ -29,20 +30,6 @@ const DEFAULT_BOT_WHITELIST = [
   /FacebookExternalHit/i, /Twitterbot/i, /LinkedInBot/i, /Applebot/i,
   /AhrefsBot/i, /SemrushBot/i,
 ];
-
-const BLOCK_PAGE = [
-  "+---------------------------------------------+",
-  "|           BLOCKED BY SHUGOI                 |",
-  "+---------------------------------------------+",
-  "|  Bots, scrapers and headless clients        |",
-  "|  are blocked by Shugoi protection.          |",
-  "|                                             |",
-  "|  Use a standard browser to access           |",
-  "|  this site.                                 |",
-  "|                                             |",
-  "|  - contact: support@shugoi.com -            |",
-  "+---------------------------------------------+",
-].join('\n') + '\n';
 
 function signToken(siteKey: string, timestamp: number, secretOverride?: string) {
   const secret = secretOverride || process.env.SHUGOKI_SIGNING_SECRET || process.env.SHUGOKI_SECRET;

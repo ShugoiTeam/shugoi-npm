@@ -3,6 +3,8 @@ import { ensureGuardsReady, fetchConfigForSiteKey } from './render'
 import { buildCsp, originOf } from './csp'
 import { resolveLocale, type Locale, MESSAGES } from './locales'
 import { verifyBotIp, VERIFIABLE_BOTS } from './verify-bot'
+import { BLOCK_PAGE } from './block-page'
+export { BLOCK_PAGE } from './block-page'
 import crypto from 'node:crypto'
 
 export const DEFAULT_HEADLESS_PATTERNS = [
@@ -10,20 +12,6 @@ export const DEFAULT_HEADLESS_PATTERNS = [
   /HTTPie/i, /^node-fetch/i, /axios/i, /^okhttp/i, /^scrapy/i,
   /PowerShell/i, /WinHttp/i,
 ];
-
-export const BLOCK_PAGE = [
-  "+---------------------------------------------+",
-  "|           BLOCKED BY SHUGOI                 |",
-  "+---------------------------------------------+",
-  "|  Bots, scrapers and headless clients        |",
-  "|  are blocked by Shugoi protection.          |",
-  "|                                             |",
-  "|  Use a standard browser to access           |",
-  "|  this site.                                 |",
-  "|                                             |",
-  "|  - web: https://shugoi.com -                |",
-  "+---------------------------------------------+",
-].join('\n') + '\n';
 
 export const DEFAULT_BOT_WHITELIST = [
   /Googlebot/i, /Bingbot/i, /Slurp/i, /DuckDuckBot/i, /YandexBot/i, /Applebot/i,
@@ -44,14 +32,14 @@ export interface EvaluateCtx {
   path: string;
   ua: string;
   ip: string;
-  host?: string;
-  acceptLanguage?: string;
-  secFetchDest?: string;
-  secFetchMode?: string;
-  sgProof?: string;
-  sgOk?: string;
-  sgAuthorized?: string;
-  forwardedPrefix?: string;
+  host?: string | undefined;
+  acceptLanguage?: string | undefined;
+  secFetchDest?: string | undefined;
+  secFetchMode?: string | undefined;
+  sgProof?: string | undefined;
+  sgOk?: string | undefined;
+  sgAuthorized?: string | undefined;
+  forwardedPrefix?: string | undefined;
 }
 
 export interface BlockDecision {
@@ -109,7 +97,13 @@ export function createCore(options: ShugoiCoreOptions): ShugoiCore {
   let _validationWarnedAt = 0
   const VALIDATION_WARN_INTERVAL = 3_600_000
 
-  const csp = buildCsp({ siteKey: options.siteKey, extraDirectives: options.extraDirectives || {}, splitRender: options.splitRender ?? true, apiOrigin: originOf(baseUrl) ?? undefined })
+  const apiOrigin = originOf(baseUrl)
+  const csp = buildCsp({
+    siteKey: options.siteKey,
+    extraDirectives: options.extraDirectives || {},
+    splitRender: options.splitRender ?? true,
+    ...(apiOrigin === null ? {} : { apiOrigin }),
+  })
 
   function log(...args: unknown[]) { if (debug) console.log('[shugoi]', ...args) }
 
@@ -237,7 +231,7 @@ export function createCore(options: ShugoiCoreOptions): ShugoiCore {
     if (!ip || ip === 'unknown') return '0'
     if (ip.includes('.')) {
       const m = ip.match(/^(\d+\.\d+\.\d+)(?:\.\d+)?$/)
-      if (m) return m[1]
+      if (m) return m[1] ?? '0'
       return '0'
     }
     if (ip.includes(':')) {
@@ -270,7 +264,9 @@ export function createCore(options: ShugoiCoreOptions): ShugoiCore {
     // et DOIT rester synchrone avec render.ts (challenge JS), whitelist.ts et le guard.
     let leading = 0
     for (let i = 0; i < digest.length; i++) {
-      const nib = parseInt(digest[i], 16)
+      const nibble = digest[i]
+      if (nibble === undefined) continue
+      const nib = parseInt(nibble, 16)
       if (nib === 0) { leading += 4; continue }
       leading += (nib & 8) ? 0 : (nib & 4) ? 1 : (nib & 2) ? 2 : 3
       break
