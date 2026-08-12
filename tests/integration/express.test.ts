@@ -50,7 +50,9 @@ describe('Express integration', () => {
 
     return new Promise<void>(resolve => {
       server = app.listen(0, () => {
-        port = (server.address() as any).port;
+        const address = server.address();
+        if (address === null || typeof address === 'string') throw new Error('server address unavailable');
+        port = address.port;
         resolve();
       });
     });
