@@ -10,7 +10,6 @@ const runtimeGlobal = globalThis as typeof globalThis & {
   __sg_ntpTime?: number;
 };
 
-// ── Token storage ──
 const TOKEN_DIR = join(tmpdir(), 'shugoi-render-' + (process.getuid?.() ?? 'x'));
 const TOKEN_TTL = 120_000;
 const MAX_ENTRIES = 5000;
@@ -105,20 +104,11 @@ function readFromMemory(token: string): string | null {
   }
   entry.reads++;
   if (entry.reads > MAX_TOKEN_READS) {
-    // Limite atteinte — renderResponseData décidera selon le flag
     return entry.html;
   }
   return entry.html;
 }
 
-// ── Render-grant : preuve anti-bypass "token-only" ──
-// Le grant est émis par le wlc (/api/v1/wlc) quand le mid est autorisé (whitelisté OU
-// whitelist désactivée). Le guard l'obtient APRÈS avoir exécuté le fingerprint et
-// l'ajoute à l'URL render. Un bot curl qui extrait le token du challenge sans exécuter
-// le JS n'a pas de mid/grant cohérents → render refuse. Signé avec le même secret que
-// le token (SHUGOKI_SIGNING_SECRET) → vérifiable localement, sans état partagé.
-// Format : base36(timestamp) + ":" + HMAC(secret, "render-grant:mid:token:ip:timestamp").
-// Lié au token + IP + TTL (CH-01/02/03). Factorisé pour les adapters Express/Next/Fastify.
 const GRANT_TTL_MS = 60_000;
 
 export function verifyRenderGrant(mid: string | undefined, grant: string | undefined, token?: string, ip?: string, expectedSiteKey?: string): boolean {
@@ -131,9 +121,6 @@ export function verifyRenderGrant(mid: string | undefined, grant: string | undef
   const sig = grant.slice(sep + 1);
   const tsSec = parseInt(ts, 36);
   if (isNaN(tsSec) || Date.now() - tsSec * 1000 > GRANT_TTL_MS) return false;
-  // CRITIQUE 1 (§7bis) : le grant est signé AVEC le siteKey du wlc émetteur. Le render
-  // vérifie que ce siteKey == le sien — un grant émis par un autre site (whitelist off)
-  // pour un token d'ici est refusé même si le token est authentique.
   if (!expectedSiteKey) return false;
   const payload = 'render-grant:' + [expectedSiteKey, mid, token || '', ip || '', ts].join(':');
   const exp = crypto.createHmac('sha256', gSecret).update(payload).digest('hex');
@@ -144,26 +131,18 @@ export function verifyRenderGrant(mid: string | undefined, grant: string | undef
 export async function renderResponseData(token: string, locale?: Locale, configUrl?: string, mid?: string, grant?: string, ip?: string, expectedSiteKey?: string, _secret?: string): Promise<{ html?: string; error?: string; blocked?: boolean; reason?: string; message?: string; title?: string }> {
   if (!token || token.length < 16 || token.length > 300) return { error: 'not_found' };
 
-  // CRITIQUE 1 (§7bis) : le token a la forme `siteKey:timestamp:nonce:sig`. Le render
-  // d'un site ne doit servir que les tokens de SON siteKey — sinon un grant émis par un
-  // autre site (whitelist désactivée) serait accepté ici (secret global partagé).
   if (expectedSiteKey) {
     const tokSiteKey = token.split(':')[0];
     if (tokSiteKey !== expectedSiteKey) return { error: 'not_found' };
   }
 
-  // Audit passe 8 : expiration explicite du token, avant même le grant (le chemin mémoire
-  // court-circuite verifyTokenAndRead). Un token signé mais daté > TOKEN_TTL est refusé.
   const tokTs = parseInt(token.split(':')[1] || '', 10);
   if (!isNaN(tokTs) && Date.now() - tokTs > TOKEN_TTL) return { error: 'not_found' };
 
-  // Anti-bypass "token-only" : sans grant valide (lié au siteKey), pas de HTML.
   if (!verifyRenderGrant(mid, grant, token, ip, expectedSiteKey)) return { error: 'not_found' };
 
-  // Vérifier le flag en direct depuis l'API interne (pas de cache)
   const contentReplaceOn = await fetchContentReplaceFlag(token, configUrl || 'http://127.0.0.1:3098', _secret);
 
-  // 1. Essayer par token (mémoire)
   const memHtml = readFromMemory(token);
   if (memHtml) {
     if (contentReplaceOn) {
@@ -176,8 +155,6 @@ export async function renderResponseData(token: string, locale?: Locale, configU
     return { html: memHtml };
   }
 
-  // Fallback : quand contentReplace OFF, on RENVOIE TOUJOURS la HTML
-  // peu importe si le token est en mémoire ou pas
   if (!contentReplaceOn) {
     const siteKey = token.split(':')[0] ?? '';
     const siteHtml = _siteCache.get(siteKey);
@@ -196,9 +173,6 @@ async function fetchContentReplaceFlag(token: string, internalUrl: string, _secr
   try {
     const siteKey = token.split(':')[0];
     if (!siteKey) return false;
-    // Le flag est lu via getConfig (cache mémoire + stale-refresh en arrière-plan).
-    // Pas de __clearConfigCache() ici : purger le cache à CHAQUE render forçait un
-    // fetch réseau (~300-400ms) vers l'API interne à chaque requête → render lent.
     const { flags } = await getConfig(siteKey, internalUrl, _secret);
     return flags?.enableContentReplacementCheck === true;
   } catch {
@@ -217,12 +191,8 @@ function verifyTokenAndRead(token: string, _locale?: Locale): { html?: string; e
   const ts = parseInt(timestamp, 10);
 
   if (isNaN(ts)) {
-    // Pas d'oracle : un timestamp invalide retourne la même erreur qu'un HMAC invalide.
     return { error: 'not_found' };
   }
-  // Audit passe 8 : expiration explicite du token (défense en profondeur, en plus du
-  // TTL du store). Un token signé mais daté > TOKEN_TTL est refusé, même si son HTML
-  // traînait dans le store disque d'un process rejoué.
   if (Date.now() - ts > TOKEN_TTL) {
     return { error: 'not_found' };
   }
