@@ -1,4 +1,4 @@
-import type { ShugoiCoreOptions } from './types'
+import type { JsonObject, ShugoiCoreOptions } from './types'
 import { ensureGuardsReady, fetchConfigForSiteKey } from './render'
 import { buildCsp, originOf } from './csp'
 import { resolveLocale, type Locale, MESSAGES } from './locales'
@@ -60,7 +60,7 @@ export interface ShugoiCore {
   evaluate(ctx: EvaluateCtx): Promise<BlockDecision | null>;
   isProofValid(proof: string): boolean;
   sgOkCookie(proof: string, ip: string, ua: string): string | null;
-  log(...args: unknown[]): void;
+  log(...args: string[]): void;
 }
 
 function shieldPage(title: string, msg: string, badge: string, host: string, remainSecs: number, locale: Locale): string {
@@ -105,7 +105,7 @@ export function createCore(options: ShugoiCoreOptions): ShugoiCore {
     ...(apiOrigin === null ? {} : { apiOrigin }),
   })
 
-  function log(...args: unknown[]) { if (debug) console.log('[shugoi]', ...args) }
+  function log(...args: string[]) { if (debug) console.log('[shugoi]', ...args) }
 
   // ═══ PoW anti-curl helpers (définis ici, utilisés par evaluate ET l'interface) ═══
   // Audit #6 : difficulté configurable (SHUGOKI_POW_DIFF) au lieu d'une valeur en dur
@@ -325,7 +325,7 @@ export function createCore(options: ShugoiCoreOptions): ShugoiCore {
           signal: AbortSignal.timeout(5000)
         })
         if (res.ok) {
-          const data = await res.json() as Record<string, unknown>
+          const data = await res.json() as JsonObject
           if (data.valid) {
             _validationValid = true
             if (debug) console.log('[shugoi] key validation OK')
@@ -573,7 +573,7 @@ step();
           signal: AbortSignal.timeout(2000)
         })
         if (rlRes.ok) {
-          const rlData = await rlRes.json() as Record<string, unknown>
+      const rlData = await rlRes.json() as JsonObject
           if (rlData.allowed === false) {
             const remain = Math.max(0, Math.ceil(((rlData.resetAt as number) - Date.now()) / 1000))
             const mins = Math.floor(remain / 60)

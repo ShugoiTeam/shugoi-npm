@@ -62,6 +62,6 @@ export async function validateSiteKey(
     if (err instanceof Error && err.name === 'AbortError') {
       throw new ShugoiError('api_timeout', 'API request timed out', err);
     }
-    throw new ShugoiError('api_unreachable', 'Shugoi API unreachable', err);
+    throw new ShugoiError('api_unreachable', 'Shugoi API unreachable', String(err));
   }
 }

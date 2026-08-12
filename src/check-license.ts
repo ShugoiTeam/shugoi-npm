@@ -1,5 +1,5 @@
 import { ShugoiError } from './errors';
-import type { CheckResponse } from './types';
+import type { CheckResponse, JsonObject } from './types';
 
 /**
  * Options for {@link checkLicense}.
@@ -12,7 +12,7 @@ export interface CheckLicenseOptions {
   /** Machine ID (SHA-256 of browser fingerprint) */
   machineId?: string;
   /** Additional fingerprint signals */
-  signals?: Record<string, unknown>;
+  signals?: JsonObject;
   /** Captcha token (if required by API) */
   captchaToken?: string;
   /** Pass token */
@@ -102,6 +102,6 @@ export async function checkLicense(
     if (err instanceof Error && err.name === 'AbortError') {
       throw new ShugoiError('api_timeout', 'Shugoi API request timed out', err);
     }
-    throw new ShugoiError('api_unreachable', 'Shugoi API unreachable', err);
+    throw new ShugoiError('api_unreachable', 'Shugoi API unreachable', String(err));
   }
 }

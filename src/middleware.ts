@@ -200,7 +200,7 @@ export function createShugoiMiddleware(options: ShugoiCoreOptions) {
           if (typeof body === 'string') {
             const ct = res.getHeader ? res.getHeader('content-type') : undefined;
             if (!ct || String(ct).includes('text/html')) {
-              try { body = await injectGuardScripts(body, options.siteKey, baseUrl, undefined, restrictedAccess, signingSecret, req, undefined, reqLocale); } catch (e) { core.log('inject error:', e); }
+              try { body = await injectGuardScripts(body, options.siteKey, baseUrl, undefined, restrictedAccess, signingSecret, req, undefined, reqLocale); } catch (e) { core.log('inject error:', String(e)); }
               injected = true;
             }
           }
@@ -223,7 +223,7 @@ export function createShugoiMiddleware(options: ShugoiCoreOptions) {
 
       next();
     } catch (err) {
-      core.log('Unhandled error:', err);
+      core.log('Unhandled error:', String(err));
       next();
     }
   };
@@ -310,7 +310,7 @@ export function createShugoiPlugin(options: ShugoiCoreOptions) {
           if (okCookie) reply.header('Set-Cookie', okCookie);
         }
       } catch (err) {
-        core.log('preHandler error:', err);
+        core.log('preHandler error:', String(err));
       }
     });
 

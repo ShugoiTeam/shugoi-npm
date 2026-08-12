@@ -1,3 +1,7 @@
+export type JsonPrimitive = string | number | boolean | null
+export type JsonValue = JsonPrimitive | JsonObject | JsonValue[]
+export type JsonObject = { [key: string]: JsonValue }
+
 /** Options communes au middleware Express et au plugin Fastify. */
 export interface ShugoiCoreOptions {
   /** Votre siteKey Shugoi. Requis. */
@@ -95,7 +99,7 @@ export interface CheckRequest {
   siteKey: string
   action: string
   fingerprint: { machineId?: string; browser?: string }
-  signals?: Record<string, unknown>
+  signals?: JsonObject
   captchaToken?: string
   passToken?: string
   metadata?: { ip?: string; email?: string }
