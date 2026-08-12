@@ -23,7 +23,7 @@ function xorEncrypt(str: string, hexKey: string): string {
   const kb = hexToBytes(hexKey);
   let enc = '';
   for (let i = 0; i < str.length; i++) {
-    let cc = str.charCodeAt(i) ^ kb[i % kb.length];
+    const cc = str.charCodeAt(i) ^ (kb[i % kb.length] ?? 0);
     enc += cc.toString(16).padStart(2, '0');
   }
   return enc;
@@ -31,7 +31,7 @@ function xorEncrypt(str: string, hexKey: string): string {
 
 function runtimeValue(str: string): string {
   let s = str.slice(1, -1);
-  return s.replace(/\\(['"\\bfnrtv0])/g, (_: string, c: string) => ({ "'": "'", '"': '"', '\\': '\\', 'b': '\b', 'f': '\f', 'n': '\n', 'r': '\r', 't': '\t', 'v': '\v', '0': '\0' } as Record<string, string>)[c])
+  return s.replace(/\\(['"\\bfnrtv0])/g, (_: string, c: string) => ({ "'": "'", '"': '"', '\\': '\\', 'b': '\b', 'f': '\f', 'n': '\n', 'r': '\r', 't': '\t', 'v': '\v', '0': '\0' } as Record<string, string>)[c] ?? c)
     .replace(/\\(u\{([\da-fA-F]+)\}|u([\da-fA-F]{4})|x([\da-fA-F]{2}))/g, (_: string, __: string, ubrace: string, u4: string, x2: string) => {
       const code = ubrace ? parseInt(ubrace, 16) : (u4 ? parseInt(u4, 16) : parseInt(x2, 16));
       return String.fromCodePoint(code);
@@ -85,7 +85,7 @@ function shuffleCode(code: string, seed: string): string {
   let d = 0;
   for (let i = 0; i < lines.length; i++) {
     depth[i] = d;
-    for (const ch of lines[i]) {
+    for (const ch of lines[i] ?? '') {
       if (ch === '{') d++;
       else if (ch === '}') d--;
     }
@@ -93,7 +93,8 @@ function shuffleCode(code: string, seed: string): string {
   const blocks: Array<{ start: number; end: number }> = [];
   let start: number | null = null;
   for (let i = 0; i < lines.length; i++) {
-    const isShuffleable = depth[i] === 1 && /^\s*R\.\w+\s*=/.test(lines[i]) && !/[{}]/.test(lines[i]) && lines[i].trimEnd().endsWith(';');
+    const line = lines[i] ?? '';
+    const isShuffleable = depth[i] === 1 && /^\s*R\.\w+\s*=/.test(line) && !/[{}]/.test(line) && line.trimEnd().endsWith(';');
     if (isShuffleable && start === null) start = i;
     if (!isShuffleable && start !== null) {
       blocks.push({ start, end: i - 1 });
@@ -106,7 +107,12 @@ function shuffleCode(code: string, seed: string): string {
     const slice = lines.slice(blk.start, blk.end + 1);
     for (let i = slice.length - 1; i > 0; i--) {
       const j = Math.floor(rng() * (i + 1));
-      [slice[i], slice[j]] = [slice[j], slice[i]];
+      const current = slice[i];
+      const replacement = slice[j];
+      if (current !== undefined && replacement !== undefined) {
+        slice[i] = replacement;
+        slice[j] = current;
+      }
     }
     lines.splice(blk.start, slice.length, ...slice);
   }
@@ -151,7 +157,6 @@ export function stripTrace(code: string): string {
   // Remove declarations
   r = r.replace(/var\s+_SG_TRACE\s*=\s*(?:true|false)\s*;\s*/g, '');
   r = r.replace(/var\s+_sgCP\s*=\s*[^;]*;\s*/g, '');
-  // Remove any leftover empty semicolons
   r = r.replace(/;\s*;/g, ';');
   return r;
 }
