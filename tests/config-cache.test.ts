@@ -1,6 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { fetchWhitelistForSiteKey, fetchConfigForSiteKey, injectGuardScripts, __clearConfigCache } from "../src/render";
 
+interface ConfigFetchResponse {
+  ok: boolean;
+  text: () => Promise<string>;
+  json: () => Promise<{ whitelistedMachines: string[]; detectionFlags: { enableRateLimit: boolean } }>;
+}
+
 describe("cache de configuration", () => {
   let calls: string[];
   beforeEach(() => {
@@ -8,7 +14,12 @@ describe("cache de configuration", () => {
     calls = [];
     vi.stubGlobal("fetch", vi.fn(async (url: string) => {
       calls.push(String(url));
-      return { ok: true, text: async () => "(function(){})()", json: async () => ({ whitelistedMachines: ["a".repeat(64)], detectionFlags: { enableRateLimit: false } }) } as any;
+      const response: ConfigFetchResponse = {
+        ok: true,
+        text: async () => "(function(){})()",
+        json: async () => ({ whitelistedMachines: ["a".repeat(64)], detectionFlags: { enableRateLimit: false } }),
+      };
+      return response;
     }));
   });
   afterEach(() => vi.unstubAllGlobals());
