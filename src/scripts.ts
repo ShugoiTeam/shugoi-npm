@@ -1,7 +1,6 @@
 import type { ScriptTagsOptions, ScriptTagsResult } from './types'
 import { signToken, generateSkeleton } from './render'
 
-/** Generates script tags for manual Shugoi integration. */
 export async function scriptTags(options: ScriptTagsOptions): Promise<ScriptTagsResult> {
   const base = options.baseUrl ?? 'https://shugoi.com/api/v1';
   const key = options.siteKey;
