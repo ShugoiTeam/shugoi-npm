@@ -3,6 +3,7 @@ import { writeFileSync, readFileSync, existsSync, unlinkSync, mkdirSync, readdir
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { MESSAGES, type Locale } from './locales';
+import type { JsonObject } from './types';
 
 const runtimeGlobal = globalThis as typeof globalThis & {
   __sg_ntpDrift?: number;
@@ -17,7 +18,7 @@ const MAX_TOTAL_BYTES = 64 * 1024 * 1024;
 const MAX_TOKEN_READS = 1;
 
 
-interface StoredEntry { html: string; expiresAt: number; reads: number; contentReplaceOn?: boolean }
+interface StoredEntry { html: string; expiresAt: number; reads: number; contentReplaceOn: boolean | undefined }
 const _memoryStore = new Map<string, StoredEntry>();
 const _siteCache = new Map<string, string>();
 
@@ -75,6 +76,7 @@ export function storeHtml(token: string, html: string, contentReplaceOn?: boolea
   if (_diskEnabled) {
     storeToDisk(token, html);
   }
+  dropEntry(token);
   const size = Buffer.byteLength(html, 'utf-8');
   while ((_memoryStore.size >= MAX_ENTRIES || _totalBytes + size > MAX_TOTAL_BYTES) && _memoryStore.size > 0) {
     evictOldest();
@@ -177,7 +179,7 @@ export async function renderResponseData(token: string, locale?: Locale, configU
   // Fallback : quand contentReplace OFF, on RENVOIE TOUJOURS la HTML
   // peu importe si le token est en mémoire ou pas
   if (!contentReplaceOn) {
-    const siteKey = token.split(':')[0];
+    const siteKey = token.split(':')[0] ?? '';
     const siteHtml = _siteCache.get(siteKey);
     if (siteHtml) return { html: siteHtml };
   }
@@ -207,11 +209,11 @@ async function fetchContentReplaceFlag(token: string, internalUrl: string, _secr
 
 function verifyTokenAndRead(token: string, _locale?: Locale): { html?: string; error?: string; blocked?: boolean; reason?: string; message?: string; title?: string } {
   const parts = token.split(':');
-  if (parts.length !== 4 || parts[3].length !== 64) {
+  if (parts.length !== 4 || parts[3] === undefined || parts[3].length !== 64) {
     return { error: 'not_found' };
   }
 
-  const [siteKey, timestamp, nonce, sig] = parts;
+  const [siteKey = '', timestamp = '', nonce = '', sig = ''] = parts;
   const ts = parseInt(timestamp, 10);
 
   if (isNaN(ts)) {
@@ -269,7 +271,7 @@ export function injectReferrerPolicy(html: string): string {
 
 export async function handleRender(token: string, res: { setHeader?: (k: string, v: string) => void; send?: (body: string) => void; end?: (body: string) => void }, configUrl?: string, mid?: string, grant?: string, ip?: string, expectedSiteKey?: string, baseUrl?: string, _secret?: string) {
   const data = await renderResponseData(token, undefined, configUrl, mid, grant, ip, expectedSiteKey, _secret);
-  if (data.html && mid) data.html = injectNoticeScript(data.html, mid, expectedSiteKey || token.split(':')[0], baseUrl);
+  if (data.html && mid) data.html = injectNoticeScript(data.html, mid, expectedSiteKey || token.split(':')[0] || '', baseUrl);
   if (data.html) data.html = injectReferrerPolicy(data.html);
   const json = JSON.stringify(data);
   if (res.setHeader) res.setHeader('Content-Type', 'application/json');
@@ -438,7 +440,10 @@ function configKey(baseUrl: string, siteKey: string): string {
 function pruneCache<T extends { fetchedAt: number }>(m: Map<string, T>): void {
   if (m.size <= MAX_TENANTS) return;
   const sorted = [...m.entries()].sort((a, b) => a[1].fetchedAt - b[1].fetchedAt);
-  for (let i = 0; i < sorted.length - MAX_TENANTS; i++) m.delete(sorted[i][0]);
+  for (let i = 0; i < sorted.length - MAX_TENANTS; i++) {
+    const entry = sorted[i];
+    if (entry) m.delete(entry[0]);
+  }
 }
 
 async function refreshConfig(siteKey: string, baseUrl: string, entry: ConfigEntry, secret?: string): Promise<void> {
@@ -451,7 +456,7 @@ async function refreshConfig(siteKey: string, baseUrl: string, entry: ConfigEntr
       signal: AbortSignal.timeout(CONFIG_FETCH_TIMEOUT),
     });
     if (res.ok) {
-      const data = await res.json() as Record<string, unknown>;
+      const data = await res.json() as JsonObject;
       entry.whitelist = (data.whitelistedMachines as string[]) || [];
       entry.flags = (data.detectionFlags as Record<string, boolean>) || (data.flags as Record<string, boolean>) || {};
       entry.skipPaths = (data.skipPaths as string[]) || [];
@@ -631,7 +636,7 @@ export async function generateSkeleton(siteKey: string, token: string, baseUrl: 
   return '<script>' + bootCode + '</script>';
 }
 
-export async function injectGuardScripts(html: string, siteKey: string, baseUrl: string, whitelist?: string[] | null, restrictedAccess?: boolean, signingSecret?: string, _req?: unknown, _allowedOrigins?: string[], locale?: Locale, clockts?: number): Promise<string> {
+export async function injectGuardScripts(html: string, siteKey: string, baseUrl: string, whitelist?: string[] | null, restrictedAccess?: boolean, signingSecret?: string, _req?: object, _allowedOrigins?: string[], locale?: Locale, clockts?: number): Promise<string> {
   await ensureGuardsReady(baseUrl, signingSecret, siteKey);
   const cfgData = await getConfig(siteKey, baseUrl, signingSecret);
   const wl = whitelist ?? cfgData.whitelist;
