@@ -133,9 +133,6 @@ export function createCore(options: ShugoiCoreOptions): ShugoiCore {
     }
   }, CHALLENGE_WINDOW_MS).unref();
 
-  // Retourne true si le challenge peut être émis pour cette IP. Au-delà du quota,
-  // un backoff exponentiel (2^n minutes, plafonné) s'applique : un scraper est
-  // ralenti à l'infini, un humain ne le ressent jamais (blocage ≥ 2^12 min).
   function allowChallenge(ip: string): boolean {
     if (!ip || ip === 'unknown') return true;
     const now = Date.now();
@@ -155,12 +152,6 @@ export function createCore(options: ShugoiCoreOptions): ShugoiCore {
     return true;
   }
 
-  // ═══ Preuve PoW single-use GLOBAL (round 17) ═══
-  // Une preuve `sg_proof=ts:nonce:solution` résolue ne doit servir QU'UNE fois, quel
-  // que soit l'IP : la preuve embarque un nonce aléatoire unique → clé = proof seule.
-  // (Round 16 : la clé `ip:proof` laissait un rejeu CROSS-IP → 200 : un script résolvait
-  // une fois et rejouait la preuve via botnet/rotation d'IP. Round 17 : la 1re requête
-  // qui présente la preuve la consomme, TOUTE autre requête (n'importe quel IP) → 307.
   // Bonus NAT : deux visiteurs derrière le même IP ont des preuves distinctes → aucun
   const _usedProofs = new Map<string, number>();
   setInterval(() => {
@@ -320,20 +311,9 @@ export function createCore(options: ShugoiCoreOptions): ShugoiCore {
   function isWhitelistedBot(ua: string): boolean {
     return botWhitelist.some(p => p.test(ua))
   }
-  // Allowlist IP EMPIRIQUE (env SHUGOKI_BOT_IPS, virgules) : Discord fetch les embeds
-  // depuis des IP Google Cloud (reverse-DNS non Discord) → on autorise par IP observée
-  // dans les logs ("[shugoi] bot_ua ip=…"). Vérif : UA whitelisté + IP dans la liste.
   const botIpList = new Set((process.env.SHUGOKI_BOT_IPS || '').split(',').map(s => s.trim()).filter(Boolean))
-  // Bypass bot SÉCURISÉ : les bots dont l'IP est VÉRIFIABLE (reverse-DNS : Google, Bing,
-  // Yandex, DuckDuckGo, Apple, Discord…) exigent UA + IP confirmée — un curl qui imite
-  // leur UA depuis une IP aléatoire est traité comme un visiteur normal (F1/challenge).
-  // Les bots sociaux SANS config de vérif d'IP (facebookexternalhit, Twitterbot…)
-  // restent UA-only (compromis assumé, à durcir au fur et à mesure).
   async function botBypass(ua: string, ip: string): Promise<boolean> {
     if (!isWhitelistedBot(ua)) return false
-    // Diagnostic : journaliser les IP des bots (Discord, Twitter…) pour construire une
-    // allowlist IP EMPIRIQUE (le reverse-DNS de Discord doit être confirmé — les embeds
-    // peuvent passer par un CDN qui fait varier l'IP). Grep: 'shugoi] bot_ua'.
     if (options.logBotIps !== false) {
       console.log('[shugoi] bot_ua ip=' + ip + ' ua=' + String(ua).slice(0, 50))
     }
@@ -366,12 +346,6 @@ export function createCore(options: ShugoiCoreOptions): ShugoiCore {
       }).catch(() => {})
     }
 
-    // ═══ Protection des assets à contenu (/assets/*.js, *.css) ═══
-    // Le bundle SPA contient les textes/structure de la page. Servi publiquement, il
-    // permet d'extraire tout le contenu sans passer la whitelist (audit). On exige donc
-    // le cookie __sg_authorized (posé par handleRender après un render réussi) pour le
-    // télécharger. Un curl direct / un non-validé reçoit le tableau BLOCKED.
-    // NB : on vérifie AVANT isAllowlisted (les assets sont allowlistés pour le split-render).
     if (/\/assets\/[^?#]+\.(js|css)(\?|$)/.test(ctx.path)) {
       const authOk = !!ctx.sgAuthorized && isSgAuthorizedValid(ctx.sgAuthorized)
       if (!authOk) {
@@ -382,14 +356,7 @@ export function createCore(options: ShugoiCoreOptions): ShugoiCore {
 
     if (isAllowlisted(ctx.path)) return null
 
-    // ═══ Route du challenge JS (suit le 307 anti-curl) ═══
-    // Le navigateur arrive ici après le 307. Body : le tableau ASCII dans un COMMENTAIRE
-    // HTML (<!-- -->) — le view-source le montre, mais le navigateur ne le peint PAS :
-    // pas de flash pendant la résolution PoW. Le JS de résolution est INLINE (économise
-    // un aller-retour réseau : pas de <script src> externe → chargement plus rapide).
     if (ctx.path === '/__sg_challenge') {
-      // Anti-scraping (audit #6) : la page de challenge est aussi bornée par IP —
-      // un script peut la requêter directement sans passer par le 307.
       if (!allowChallenge(ctx.ip)) {
         const loc = resolveLocale(undefined, ctx.acceptLanguage)
         const lmsgs = MESSAGES[loc]
@@ -398,13 +365,8 @@ export function createCore(options: ShugoiCoreOptions): ShugoiCore {
       const js = `(function(){
 var P=new URLSearchParams(location.search);
 var salt=P.get('salt')||'', ts=P.get('ts')||'', nonce=P.get('nonce')||'', diff=parseInt(P.get('diff')||'14',10), path=P.get('path')||'/';
-// Open redirect (audit #5) : un //evil.com (protocole-relatif) ou un backslash
-// détourneraient le location.replace ci-dessous vers un domaine externe. On n'accepte
-// qu'un chemin relatif commençant par UN SEUL '/', sans backslash ni contrôle.
 if(path.charAt(0)!=='/'||path.charAt(1)==='/'||path.indexOf('\\\\')>=0)path='/';
 var enc=new TextEncoder();
-// Audit 2026-08-03 : comptage de bits CORRIGÉ (zéros internes du premier nibble
-// non-nul comptés) — DOIT rester synchrone avec isPowValid serveur + guard + whitelist.
 function bits(d){var l=0;for(var i=0;i<d.length;i++){var b=parseInt(d[i],16);if(b===0){l+=4;continue}l+=(b&8)?0:(b&4)?1:(b&2)?2:3;break}return l}
 var n=0;
 function step(){
