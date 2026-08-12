@@ -3,6 +3,7 @@ import { injectGuardScripts, enableDiskStore, getConfig } from './render'
 
 import { mergeCsp } from './csp'
 import { createCore } from './core'
+import { createEvaluateContext } from './evaluate-context'
 import { resolveLocale, type Locale } from './locales'
 
 export interface MinimalRequest {
@@ -130,19 +131,16 @@ export function createShugoiMiddleware(options: ShugoiCoreOptions) {
         } catch {}
       }
 
-      const decision = await core.evaluate({
-        path,
-        ua,
-        ip,
-        host: typeof req.headers?.['host'] === 'string' ? req.headers.host : undefined,
-        acceptLanguage: typeof req.headers?.['accept-language'] === 'string' ? req.headers['accept-language'] : undefined,
-        secFetchDest: typeof req.headers?.['sec-fetch-dest'] === 'string' ? req.headers['sec-fetch-dest'] : undefined,
-        secFetchMode: typeof req.headers?.['sec-fetch-mode'] === 'string' ? req.headers['sec-fetch-mode'] : undefined,
-        sgProof: typeof req.query?.sg_proof === 'string' ? req.query.sg_proof : undefined,
-        sgOk: (typeof req.headers?.cookie === 'string' ? req.headers.cookie.match(/(?:^|;\s*)__sg_ok=([^;]+)/)?.[1] : undefined),
-        sgAuthorized: (typeof req.headers?.cookie === 'string' ? req.headers.cookie.match(/(?:^|;\s*)__sg_authorized=([^;]+)/)?.[1] : undefined),
-        forwardedPrefix: (typeof req.headers?.['x-forwarded-prefix'] === 'string' ? req.headers['x-forwarded-prefix'] : undefined),
-      });
+      const decision = await core.evaluate(createEvaluateContext(path, ua, ip, {
+        host: typeof req.headers?.['host'] === 'string' ? req.headers.host : null,
+        acceptLanguage: typeof req.headers?.['accept-language'] === 'string' ? req.headers['accept-language'] : null,
+        secFetchDest: typeof req.headers?.['sec-fetch-dest'] === 'string' ? req.headers['sec-fetch-dest'] : null,
+        secFetchMode: typeof req.headers?.['sec-fetch-mode'] === 'string' ? req.headers['sec-fetch-mode'] : null,
+        sgProof: typeof req.query?.sg_proof === 'string' ? req.query.sg_proof : null,
+        sgOk: typeof req.headers?.cookie === 'string' ? req.headers.cookie.match(/(?:^|;\s*)__sg_ok=([^;]+)/)?.[1] ?? null : null,
+        sgAuthorized: typeof req.headers?.cookie === 'string' ? req.headers.cookie.match(/(?:^|;\s*)__sg_authorized=([^;]+)/)?.[1] ?? null : null,
+        forwardedPrefix: typeof req.headers?.['x-forwarded-prefix'] === 'string' ? req.headers['x-forwarded-prefix'] : null,
+      }));
 
       if (decision) {
         if (decision.headers) {
@@ -260,19 +258,16 @@ export function createShugoiPlugin(options: ShugoiCoreOptions) {
         const ua = request.headers['user-agent'] ?? '';
         const ip = request.headers['x-forwarded-for']?.split(',')[0]?.trim() || request.ip || 'unknown';
 
-        const decision = await core.evaluate({
-          path,
-          ua,
-          ip,
-          host: request.headers?.host,
-          acceptLanguage: request.headers['accept-language'],
-          secFetchDest: request.headers['sec-fetch-dest'],
-          secFetchMode: request.headers['sec-fetch-mode'],
-          sgProof: (request.query && typeof request.query?.sg_proof === 'string') ? request.query.sg_proof as string : undefined,
-          sgOk: (typeof request.headers.cookie === 'string' ? request.headers.cookie.match(/(?:^|;\s*)__sg_ok=([^;]+)/)?.[1] : undefined),
-          sgAuthorized: (typeof request.headers.cookie === 'string' ? request.headers.cookie.match(/(?:^|;\s*)__sg_authorized=([^;]+)/)?.[1] : undefined),
-          forwardedPrefix: (typeof request.headers['x-forwarded-prefix'] === 'string' ? request.headers['x-forwarded-prefix'] : undefined),
-        });
+        const decision = await core.evaluate(createEvaluateContext(path, ua, ip, {
+          host: request.headers?.host ?? null,
+          acceptLanguage: request.headers['accept-language'] ?? null,
+          secFetchDest: request.headers['sec-fetch-dest'] ?? null,
+          secFetchMode: request.headers['sec-fetch-mode'] ?? null,
+          sgProof: request.query && typeof request.query?.sg_proof === 'string' ? request.query.sg_proof : null,
+          sgOk: typeof request.headers.cookie === 'string' ? request.headers.cookie.match(/(?:^|;\s*)__sg_ok=([^;]+)/)?.[1] ?? null : null,
+          sgAuthorized: typeof request.headers.cookie === 'string' ? request.headers.cookie.match(/(?:^|;\s*)__sg_authorized=([^;]+)/)?.[1] ?? null : null,
+          forwardedPrefix: typeof request.headers['x-forwarded-prefix'] === 'string' ? request.headers['x-forwarded-prefix'] : null,
+        }));
 
         if (decision) {
           if (decision.headers) {

@@ -9,6 +9,7 @@ import { createPowNonce, verifyPow } from './pow-utils'
 import { ChallengeLimiter } from './challenge-limiter'
 import { createOkCookieValue, isAuthorizedCookieValid, isOkCookieValid } from './cookie-security'
 import { ProofReplayStore } from './proof-replay-store'
+import type { EvaluateContext } from './evaluate-context'
 export { BLOCK_PAGE } from './block-page'
 import crypto from 'node:crypto'
 
@@ -33,19 +34,7 @@ export function escapeHtml(s: string): string {
     .replace(/'/g, '&#39;');
 }
 
-export interface EvaluateCtx {
-  path: string;
-  ua: string;
-  ip: string;
-  host?: string | undefined;
-  acceptLanguage?: string | undefined;
-  secFetchDest?: string | undefined;
-  secFetchMode?: string | undefined;
-  sgProof?: string | undefined;
-  sgOk?: string | undefined;
-  sgAuthorized?: string | undefined;
-  forwardedPrefix?: string | undefined;
-}
+export type EvaluateCtx = EvaluateContext
 
 export interface BlockDecision {
   block: true;
