@@ -56,6 +56,6 @@ describe('Multi-tenant cache isolation', () => {
     await mwA(req, resA, () => {});
     await mwB(req, resB, () => {});
 
-    expect(true).toBe(true); // smoke test passes
+      expect(true).toBe(true)
   });
 });

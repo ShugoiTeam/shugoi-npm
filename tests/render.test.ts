@@ -50,10 +50,10 @@ describe('signToken — HMAC signing', () => {
     const result = signToken('sg_sk_test', 1234567890);
     expect(result.token).toContain(':');
     const parts = result.token.split(':');
-    expect(parts.length).toBe(4); // siteKey:timestamp:nonce:sig
+    expect(parts.length).toBe(4)
     expect(parts[0]).toBe('sg_sk_test');
     expect(parts[1]).toBe('1234567890');
-    expect(parts[3].length).toBe(64); // SHA-256 hex
+    expect(parts[3].length).toBe(64)
   });
 
   it('produces different nonces for consecutive calls', () => {

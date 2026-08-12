@@ -113,7 +113,7 @@ const GRANT_TTL_MS = 60_000;
 
 export function verifyRenderGrant(mid: string | undefined, grant: string | undefined, token?: string, ip?: string, expectedSiteKey?: string): boolean {
   const gSecret = process.env.SHUGOKI_SIGNING_SECRET || process.env.SHUGOKI_SECRET;
-  if (!gSecret) return true; // fail-safe : pas de secret configuré → pas de vérification
+  if (!gSecret) return true
   if (!grant || !mid || !/^[a-f0-9]{64}$/.test(mid)) return false;
   const sep = grant.indexOf(':');
   if (sep < 0) return false;
