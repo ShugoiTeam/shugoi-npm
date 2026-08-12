@@ -49,12 +49,13 @@ describe("page de blocage injectée", () => {
     const { generateSkeleton, __clearConfigCache } = await import("../src/render");
     const { MESSAGES } = await import("../src/locales");
     __clearConfigCache();
-    const saved = MESSAGES.en.tamperTitle;
-    (MESSAGES.en as any).tamperTitle = 'He said "stop"';
+    const englishMessages = MESSAGES.en;
+    const saved = englishMessages.tamperTitle;
+    englishMessages.tamperTitle = 'He said "stop"';
     try {
       const html = await generateSkeleton("k", "t".repeat(40), "http://api.test/v1", false, [], undefined, "en");
       expect(html.startsWith("<script>")).toBe(true);
       expect(html.endsWith("</script>")).toBe(true);
-    } finally { (MESSAGES.en as any).tamperTitle = saved; }
+    } finally { englishMessages.tamperTitle = saved; }
   });
 });
