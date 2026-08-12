@@ -8,6 +8,7 @@ import { safeChallengePath } from './security-utils'
 import { createPowNonce, verifyPow } from './pow-utils'
 import { ChallengeLimiter } from './challenge-limiter'
 import { createOkCookieValue, isAuthorizedCookieValid, isOkCookieValid } from './cookie-security'
+import { ProofReplayStore } from './proof-replay-store'
 export { BLOCK_PAGE } from './block-page'
 import crypto from 'node:crypto'
 
@@ -131,18 +132,7 @@ export function createCore(options: ShugoiCoreOptions): ShugoiCore {
   const CHALLENGE_MAX_BLOCK_MS = 15 * 60 * 1000;
   const challengeLimiter = new ChallengeLimiter({ limit: CHALLENGE_LIMIT, windowMs: CHALLENGE_WINDOW_MS, maxBlockMs: CHALLENGE_MAX_BLOCK_MS })
 
-  const _usedProofs = new Map<string, number>();
-  setInterval(() => {
-    const now = Date.now();
-    for (const [k, t] of _usedProofs) {
-      if (now - t > POW_TTL_MS) _usedProofs.delete(k);
-    }
-  }, POW_TTL_MS).unref();
-  function consumeProof(proof: string): boolean {
-    if (_usedProofs.has(proof)) return false;
-    _usedProofs.set(proof, Date.now());
-    return true;
-  }
+   const proofReplayStore = new ProofReplayStore({ ttlMs: POW_TTL_MS })
 
   const isPowValid = (proof: string): boolean => verifyPow(proof, { secret: powSecret, difficulty: POW_DIFF, ttlMs: POW_TTL_MS })
 
@@ -288,7 +278,7 @@ step();
       const proof = ctx.sgProof || ''
       const validProof = !!proof && isPowValid(proof)
       const validCookie = !!ctx.sgOk && isSgOkValid(ctx.sgOk, ctx.ip, ctx.ua)
-      const proofFresh = validProof ? consumeProof(proof) : false
+       const proofFresh = validProof ? proofReplayStore.consume(proof) : false
       const canProceed = validCookie || proofFresh
       if (!canProceed && !(await botBypass(ctx.ua, ctx.ip))) {
          if (!challengeLimiter.allow(ctx.ip)) {

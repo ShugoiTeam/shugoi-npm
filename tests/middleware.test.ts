@@ -345,7 +345,7 @@ describe('307 challenge minimal (anti-curl/view-source)', () => {
     const cookies = readFileSync(require('node:path').join(process.cwd(), 'src', 'cookie-security.ts'), 'utf-8');
     expect(cookies).toContain('sg_ok:');
     expect(src).toContain('const canProceed = validCookie || proofFresh');
-    expect(src).toContain('function consumeProof');
+    expect(src).toContain('proofReplayStore.consume');
   });
 });
 
