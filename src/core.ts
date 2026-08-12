@@ -61,9 +61,10 @@ export interface ShugoiCore {
   ensureValidated(): Promise<void>;
   isAllowlisted(path: string): boolean;
   isWhitelistedBot(ua: string): boolean;
-  isTrustedBot(ua: string, ip: string): Promise<boolean>;
-  evaluate(ctx: EvaluateCtx): Promise<BlockDecision | null>;
-  isProofValid(proof: string): boolean;
+   isTrustedBot(ua: string, ip: string): Promise<boolean>;
+   evaluate(ctx: EvaluateCtx): Promise<BlockDecision | null>;
+   close(): void;
+   isProofValid(proof: string): boolean;
   sgOkCookie(proof: string, ip: string, ua: string): string | null;
   log(...args: string[]): void;
 }
@@ -343,6 +344,10 @@ step();
   }
 
   return { csp, cspEnabled, ensureValidated, isAllowlisted, isWhitelistedBot, isTrustedBot, evaluate, log,
+    close(): void {
+      challengeLimiter.close()
+      proofReplayStore.close()
+    },
     isProofValid: isPowValid,
     sgOkCookie(proof: string, ip: string, ua: string): string | null {
       if (!proof || !isPowValid(proof)) return null

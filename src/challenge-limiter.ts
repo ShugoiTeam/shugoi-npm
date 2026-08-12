@@ -12,9 +12,11 @@ export interface ChallengeLimiterOptions {
 
 export class ChallengeLimiter {
   private readonly entries = new Map<string, ChallengeEntry>()
+  private readonly timer: NodeJS.Timeout
 
   public constructor(private readonly options: ChallengeLimiterOptions) {
-    setInterval(() => this.cleanup(), options.windowMs).unref()
+    this.timer = setInterval(() => this.cleanup(), options.windowMs)
+    this.timer.unref()
   }
 
   public allow(ip: string): boolean {
@@ -34,6 +36,11 @@ export class ChallengeLimiter {
       return false
     }
     return true
+  }
+
+  public close(): void {
+    clearInterval(this.timer)
+    this.entries.clear()
   }
 
   private cleanup(): void {
