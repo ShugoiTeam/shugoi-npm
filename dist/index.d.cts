@@ -1,5 +1,5 @@
-import { S as ShugoiCoreOptions, J as JsonObject, a as JsonValue, C as CheckResponse, b as ScriptTagsOptions, c as ScriptTagsResult } from './types-B7HEI2Ab.cjs';
-export { B as BlockPageContext, d as CheckRequest, e as ShugoiMiddlewareOptions, f as ShugoiPluginOptions } from './types-B7HEI2Ab.cjs';
+import { S as ShugoiCoreOptions, J as JsonObject, C as CheckResponse, a as ScriptTagsOptions, b as ScriptTagsResult } from './types-NuVrJ21J.cjs';
+export { B as BlockPageContext, c as CheckRequest, d as ShugoiMiddlewareOptions, e as ShugoiPluginOptions } from './types-NuVrJ21J.cjs';
 
 type ShugoiErrorCode = 'invalid_site_key' | 'site_key_validation_failed' | 'api_unreachable' | 'api_timeout' | 'missing_site_key' | 'unexpected_api_response' | 'internal_error';
 type ErrorCause = string | number | boolean | object | null;
@@ -39,23 +39,6 @@ declare const BLOCK_PAGE: string;
 declare const DEFAULT_HEADLESS_PATTERNS: RegExp[];
 declare const DEFAULT_BOT_WHITELIST: RegExp[];
 
-interface MinimalRequest {
-    path?: string;
-    url?: string;
-    ip?: string;
-    method?: string;
-    headers?: Record<string, string | string[]>;
-    query?: JsonObject;
-}
-type ResponseBody = string | Uint8Array | JsonValue;
-interface MinimalResponse {
-    setHeader?(k: string, v: string): void;
-    getHeader?(k: string): string | number | string[] | undefined;
-    status?(code: number): MinimalResponse;
-    type?(t: string): MinimalResponse;
-    send?(body: ResponseBody): MinimalResponse | Promise<MinimalResponse>;
-    end?(body?: ResponseBody, encoding?: string, cb?: () => void): MinimalResponse;
-}
 interface FastifyRequestLike {
     url: string;
     ip?: string;
@@ -77,7 +60,7 @@ interface FastifyLike {
 }
 type FastifyHookArguments = [FastifyRequestLike, FastifyReplyLike, string?];
 
-declare function createShugoiMiddleware(options: ShugoiCoreOptions): (req: MinimalRequest, res: MinimalResponse, next: (...args: never[]) => void) => Promise<void>;
+declare function createShugoiMiddleware(options: ShugoiCoreOptions): (req: object, res: object, next: (...args: never[]) => void) => Promise<void>;
 declare function createShugoiPlugin(options: ShugoiCoreOptions): (fastify: FastifyLike) => Promise<void>;
 
 interface CspOptions {

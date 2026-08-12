@@ -1273,7 +1273,7 @@ function createShugoiMiddleware(options) {
   const baseUrl = options.baseUrl ?? "https://shugoi.com/api/v1";
   const internalUrl = options.internalUrl || baseUrl;
   if (options.multiProcess) enableDiskStore(true);
-  return async function shugoiMiddleware(req, res, next) {
+  const middleware = async function shugoiMiddleware(req, res, next) {
     try {
       const path = (req.path ?? req.url ?? "/").split("?")[0] ?? "/";
       if (path.endsWith("/__shugoi/render")) {
@@ -1410,6 +1410,7 @@ function createShugoiMiddleware(options) {
       next();
     }
   };
+  return async (req, res, next) => middleware(req, res, next);
 }
 function createShugoiPlugin(options) {
   const core = createCore(options);

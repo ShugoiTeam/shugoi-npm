@@ -61,7 +61,7 @@ export function createShugoiMiddleware(options: ShugoiCoreOptions) {
 
   if (options.multiProcess) enableDiskStore(true);
 
-  return async function shugoiMiddleware(req: MinimalRequest, res: MinimalResponse, next: (...args: never[]) => void) {
+  const middleware = async function shugoiMiddleware(req: MinimalRequest, res: MinimalResponse, next: (...args: never[]) => void) {
     try {
       const path = (req.path ?? req.url ?? '/').split('?')[0] ?? '/';
 
@@ -208,6 +208,9 @@ export function createShugoiMiddleware(options: ShugoiCoreOptions) {
       next();
     }
   };
+
+  return async (req: object, res: object, next: (...args: never[]) => void): Promise<void> =>
+    middleware(req as MinimalRequest, res as MinimalResponse, next);
 }
 
 export function createShugoiPlugin(options: ShugoiCoreOptions) {

@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.4.34] - 2026-08-12
+
+### Fixed
+- Expose a framework-neutral middleware adapter compatible with strict Express 4 and 5 applications.
+
 ## [0.4.33] - 2026-08-12
 
 ### Fixed

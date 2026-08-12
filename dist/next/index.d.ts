@@ -1,4 +1,4 @@
-import { a as JsonValue } from '../types-B7HEI2Ab.js';
+import { f as JsonValue } from '../types-NuVrJ21J.js';
 import { NextRequest, NextResponse } from 'next/server.js';
 
 interface WithShugoiOptions {
