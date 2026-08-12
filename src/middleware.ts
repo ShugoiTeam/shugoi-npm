@@ -8,7 +8,7 @@ import { resolveLocale, type Locale } from './locales'
 
 export interface MinimalRequest {
   path?: string; url?: string; ip?: string; method?: string;
-  headers?: Record<string, string | string[] | undefined>;
+  headers?: Record<string, string | string[]>;
   query?: JsonObject;
 }
 export type ResponseBody = string | Uint8Array | JsonValue;
@@ -24,8 +24,8 @@ export interface MinimalResponse {
 interface FastifyRequestLike {
   url: string;
   ip?: string;
-  headers: Record<string, string | undefined>;
-  query: Record<string, string | undefined>;
+  headers: Record<string, string>;
+  query: Record<string, string>;
 }
 
 interface FastifyReplyLike {
