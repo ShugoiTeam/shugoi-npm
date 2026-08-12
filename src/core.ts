@@ -107,31 +107,15 @@ export function createCore(options: ShugoiCoreOptions): ShugoiCore {
 
   function log(...args: string[]) { if (debug) console.log('[shugoi]', ...args) }
 
-  // ═══ PoW anti-curl helpers (définis ici, utilisés par evaluate ET l'interface) ═══
-  // Audit #6 : difficulté configurable (SHUGOKI_POW_DIFF) au lieu d'une valeur en dur
-  // à 10. Le défaut remonte à 12 (4× plus dur que 10) tout en restant imperceptible à
-  // l'UX (~1-2k itérations crypto.subtle). Doit rester SYNCHRONE avec render.ts
-  // (generateSkeleton → __sg_pow.difficulty) et whitelist.ts côté site.
   const POW_DIFF = (() => {
     const raw = Number(process.env.SHUGOKI_POW_DIFF || "14");
     return Number.isInteger(raw) && raw >= 8 && raw <= 24 ? raw : 12;
   })();
-  const POW_OK_TTL_MS = 30 * 24 * 3600 * 1000; // cookie __sg_ok valable 30 jours
+  const POW_OK_TTL_MS = 30 * 24 * 3600 * 1000;
   const powSecret = process.env.SHUGOKI_SIGNING_SECRET || process.env.SHUGOKI_SECRET || ''
 
-  // ═══ Fenêtre de validité d'une preuve PoW (audit 2026-08-03 #7 : rejeu) ═══
-  // Une preuve `sg_proof=ts:nonce` est acceptée si |now - ts| <= POW_TTL_MS. 120 s
-  // laissait une fenêtre de rejeu confortable ; 60 s suffit pour une navigation
-  // humaine (le solve est < 1 s) et réduit la durée de vie d'une preuve volée/rejouée.
   const POW_TTL_MS = 60_000;
 
-  // ═══ Anti-scraping : rate-limit de l'émission du challenge (audit #6) ═══
-  // Le 307 anti-curl est STATELESS : sans limite, un script résout 20 challenges en
-  // série gratuitement (constaté par l'audit externe). On borne par IP :
-  //   - SHUGOKI_CHALLENGE_LIMIT = nombre max de challenges par fenêtre (défaut 60)
-  //   - SHUGOKI_CHALLENGE_WINDOW = fenêtre en secondes (défaut 60)
-  // Un SPA légitime déclenche 1-3 challenges par session (navigations full-page),
-  // 60/min ne le pénalise pas ; un scraper qui bourrine est freiné puis bloqué 429.
   const CHALLENGE_LIMIT = (() => {
     const raw = Number(process.env.SHUGOKI_CHALLENGE_LIMIT || "60");
     return Number.isInteger(raw) && raw > 0 ? raw : 60;
@@ -140,7 +124,7 @@ export function createCore(options: ShugoiCoreOptions): ShugoiCore {
     const raw = Number(process.env.SHUGOKI_CHALLENGE_WINDOW || "60");
     return Number.isInteger(raw) && raw > 0 ? raw * 1000 : 60_000;
   })();
-  const CHALLENGE_MAX_BLOCK_MS = 15 * 60 * 1000; // plafond du blocage progressif
+  const CHALLENGE_MAX_BLOCK_MS = 15 * 60 * 1000;
   const _challengeLimits = new Map<string, { count: number; windowStart: number; blockedUntil: number }>();
   setInterval(() => {
     const now = Date.now();
