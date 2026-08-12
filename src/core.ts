@@ -162,7 +162,6 @@ export function createCore(options: ShugoiCoreOptions): ShugoiCore {
   // une fois et rejouait la preuve via botnet/rotation d'IP. Round 17 : la 1re requête
   // qui présente la preuve la consomme, TOUTE autre requête (n'importe quel IP) → 307.
   // Bonus NAT : deux visiteurs derrière le même IP ont des preuves distinctes → aucun
-  // cross-user). Entrées purgées après POW_TTL_MS (même fenêtre que la preuve).
   const _usedProofs = new Map<string, number>();
   setInterval(() => {
     const now = Date.now();
@@ -176,11 +175,6 @@ export function createCore(options: ShugoiCoreOptions): ShugoiCore {
     return true;
   }
 
-  // ═══ Sanitisation du `path` du challenge (audit #5 : open redirect) ═══
-  // Le `path` reflété dans l'URL du challenge finit dans un `location.replace()` côté
-  // client. Un `//evil.com` (protocole-relatif) ou un backslash (`\evil.com`, traité
-  // comme `/` par certains navigateurs) détournent la redirection vers un domaine
-  // externe. On n'accepte qu'un chemin relatif commençant par UN SEUL `/`.
   function safeChallengePath(p: string): string {
     if (!p) return '/';
     if (p.charAt(0) !== '/' || p.charAt(1) === '/' || p.indexOf('\\') >= 0) return '/';
@@ -198,19 +192,10 @@ export function createCore(options: ShugoiCoreOptions): ShugoiCore {
     return crypto.timingSafeEqual(ba, bb)
   }
 
-  // ═══ Forteresse : sel RANDOM par challenge (nonce) + preuve ts:nonce:solution ═══
-  // L'ancien sel HMAC(secret, ts) était DÉTERMINISTE par seconde : le même sel pour
-  // tous les visiteurs de la seconde → un adversaire pouvait précalculer un lot de
-  // solutions et les rejouer via une botnet/rotation d'IP (la preuve single-use ne
-  // protège que d'un rejeu SAME-IP). Chaque challenge reçoit désormais un nonce
-  // aléatoire 64 bits : la preuve `ts:nonce:solution` est liée à SA challenge, la
-  // précomputation par lots devient impossible (chaque sollicitation = nouveau sel).
   function sgNonce(): string {
     return crypto.randomBytes(8).toString('hex')
   }
 
-  // Bucket d'IP (sans ':' pour rester parseable dans le cookie). IPv4 → /24 (3 octets),
-  // IPv6 → 4 hextets. Une rotation d'IP dans le même sous-réseau garde le cookie valide.
   function ipBucket(ip: string): string {
     if (!ip || ip === 'unknown') return '0'
     if (ip.includes('.')) {
@@ -225,7 +210,6 @@ export function createCore(options: ShugoiCoreOptions): ShugoiCore {
     return '0'
   }
 
-  // Empreinte UA (16 hex) — un changement de navigateur invalide le cookie → re-challenge.
   function uaFp(ua: string): string {
     return crypto.createHash('sha256').update(ua || '').digest('hex').slice(0, 16)
   }
@@ -241,11 +225,6 @@ export function createCore(options: ShugoiCoreOptions): ShugoiCore {
     if (isNaN(ts) || Math.abs(Date.now() - ts * 1000) > POW_TTL_MS) return false
     const salt = crypto.createHmac('sha256', powSecret).update(tsStr + ':' + nonce).digest('hex')
     const digest = crypto.createHash('sha256').update(salt + ':' + sol).digest('hex')
-    // Vérifie POW_DIFFICULTY bits à zéro en tête (en hex, chaque nibble = 4 bits).
-    // Audit 2026-08-03 : comptage CORRIGÉ — l'ancienne version sous-comptait les zéros
-    // internes du premier nibble non-nul (`3` → '11' → 0 au lieu de 2), ce qui rendait
-    // la difficulté effective ~2^12.5 au lieu de 2^14. Le comptage ci-dessous est exact
-    // et DOIT rester synchrone avec render.ts (challenge JS), whitelist.ts et le guard.
     let leading = 0
     for (let i = 0; i < digest.length; i++) {
       const nibble = digest[i]
@@ -258,9 +237,6 @@ export function createCore(options: ShugoiCoreOptions): ShugoiCore {
     return leading >= POW_DIFF
   }
 
-  // Forteresse : le cookie __sg_ok est lié au bucket IP + empreinte UA. Un cookie
-  // volé/soustrait n'est plus rejouable depuis une autre IP (ou un autre navigateur) —
-  // la signature inclut ipBucket + uaFp. Format : ts:ipBucket:uaFp:sig.
   function sgOkCookieValue(ip: string, ua: string): string {
     const ts = Math.floor(Date.now() / 1000)
     const bucket = ipBucket(ip)
@@ -277,15 +253,11 @@ export function createCore(options: ShugoiCoreOptions): ShugoiCore {
     if (!tsStr || !bucket || !fp || !sig) return false
     const ts = parseInt(tsStr, 10)
     if (isNaN(ts) || Date.now() - ts * 1000 > POW_OK_TTL_MS || ts * 1000 > Date.now() + 60000) return false
-    // Lier au bucket IP + UA courants : un cookie d'une autre IP/UA → invalide.
     if (bucket !== ipBucket(ip) || fp !== uaFp(ua)) return false
     const expected = crypto.createHmac('sha256', powSecret).update('sg_ok:' + tsStr + ':' + bucket + ':' + fp).digest('hex')
     return safeEqual(sig, expected)
   }
 
-  // Cookie __sg_authorized posé par handleRender après un render réussi (grant valide).
-  // Protège les assets à contenu (/assets/*.js, *.css) : sans lui, le bundle JS est
-  // téléchargeable publiquement → extraction du contenu. TTL court (120s).
   const SG_AUTHORIZED_TTL_MS = 120_000;
   function isSgAuthorizedValid(cookieVal: string): boolean {
     if (!powSecret) return false
