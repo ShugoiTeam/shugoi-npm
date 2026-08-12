@@ -152,7 +152,6 @@ export function createCore(options: ShugoiCoreOptions): ShugoiCore {
     return true;
   }
 
-  // Bonus NAT : deux visiteurs derrière le même IP ont des preuves distinctes → aucun
   const _usedProofs = new Map<string, number>();
   setInterval(() => {
     const now = Date.now();
@@ -382,30 +381,9 @@ step();
       return { block: true, status: 200, contentType: 'text/html', body: html }
     }
 
-    // ═══ Pre-flight PoW challenge (anti-curl/view-source) ═══
-    // Un 307 dont le corps est UNIQUEMENT le tableau ASCII : curl le voit en clair,
-    // le navigateur suit la redirection vers /__sg_challenge (le JS qui résout le PoW).
-    // Le challenge s'applique à TOUTE page sans sg_proof valide — même un navigateur avec
-    // cookie : le view-source (qui n'exécute pas le JS) voit donc toujours le tableau.
-    // Aucune exclusion d'extension : le catch-all SPA renvoie index.html pour TOUT chemin
-    // (y compris /index.js, /app.js, /__shugoi.js) → ils doivent être challengés aussi,
-    // sinon un curl les obtient sans PoW (fallback skeleton). Les vrais assets statiques
-    // (/assets/*, /robots.txt...) sont allowlisted et ne passent pas par ici.
     const isPage = !ctx.path.includes('/__shugoi/') && !ctx.path.startsWith('/api/')
 
     if (isPage && powSecret && ctx.ua) {
-      // Divulgation F1 : faux navigateur (UA navigateur mais ni Accept-Language ni
-      // Sec-Fetch-*) → 403 immédiat avec page dédiée, AVANT le challenge (sinon un curl
-      // reçoit le 307 avant ce check). Les navigateurs réels (Chrome/Firefox/Safari, y
-      // compris Tor Browser Firefox-based) envoient toujours ces headers. Le cas "navigateur
-      // réel + Tor" (IP = nœud de sortie, avec Sec-Fetch) reste géré par /wlc → card
-      // "Tor détecté".
-      // Le F1 vise les FAUX navigateurs (curl avec un UA navigateur). Un bot WHITELISTÉ
-      // (ex. Discordbot dont l'UA réel est "Mozilla/5.0 (compatible; Discordbot/2.0; …)")
-      // ne doit PAS être bloqué par ce check même sans IP vérifiée : il n'envoie pas de
-      // Sec-Fetch/Accept-Language. Exemption = isWhitelistedBot (même logique que le bypass
-      // challenge). Un curl qui imiterait Discordbot n'y gagne rien : il obtient la page
-      // publique, et l'anti-curl réel (rate-limit + grant + whitelist) reste en place.
       if (/Mozilla/i.test(ctx.ua) && !(await botBypass(ctx.ua, ctx.ip))) {
         const sfd = ctx.secFetchDest ?? ''
         const sfm = ctx.secFetchMode ?? ''
@@ -419,64 +397,31 @@ step();
       }
       const proof = ctx.sgProof || ''
       const validProof = !!proof && isPowValid(proof)
-      // Re-audit (résidu #3) : un cookie __sg_ok valide (HMAC serveur, 30 j) saute le
-      // pre-flight PoW. Il est posé APRÈS une première résolution réussie (middleware).
-      // Bénéfices :
-      //   - UX : 1 PoW par navigateur/30 j au lieu d'un par chargement de page ;
-      //   - anti-DoS NAT : un IP partagé (entreprise/VPN) ne consomme plus le quota de
-      //     challenge à chaque utilisateur — seuls les visiteurs sans cookie challengent.
-      // Un script doit de toute façon résoudre le PoW une première fois pour obtenir le
-      // cookie, puis le vrai verrou reste le render-grant (wlc + raw + mid).
       const validCookie = !!ctx.sgOk && isSgOkValid(ctx.sgOk, ctx.ip, ctx.ua)
-      // Round 16 (R2) : la preuve est SINGLE-USE (par IP). Une seule résolution ne doit
-      // pas permettre de mint des cookies sur plusieurs chemins/sessions. Une preuve
-      // valide est CONSOMMÉE à sa 1re utilisation ; un rejeu (sans cookie) → 307.
       const proofFresh = validProof ? consumeProof(proof) : false
       const canProceed = validCookie || proofFresh
       if (!canProceed && !(await botBypass(ctx.ua, ctx.ip))) {
-        // SEO / aperçus sociaux : un crawler légitime NE PEUT PAS exécuter le PoW JS.
-        // Les bots whitelistés (moteurs de recherche + bots de partage social :
-        // googlebot, bingbot, facebookexternalhit, twitterbot, linkedinbot, discordbot,
-        // whatsapp, telegram…) bypassent le challenge → la page HTML (og:image, contenu
-        // indexable) leur est servie. Le vrai verrou reste le render-grant + la whitelist
-        // (round 16 : la difficulté du PoW n'est pas la barrière — un script le résout
-        // en ~0,15 s ; il ne sert que de premier filtre anti-curl). `verifyBots` conserve
-        // la vérification DNS inverse pour les moteurs (checks F1 / headless).
-        // Anti-scraping (audit #6) : on refuse d'émettre le challenge à un IP qui
-        // bourrine (solve en série). 429 shield au lieu du 307 — un humain ne le
-        // ressent jamais (quota 60/fenêtre), un scraper est ralenti indéfiniment.
         if (!allowChallenge(ctx.ip)) {
           const loc = resolveLocale(undefined, ctx.acceptLanguage)
           const lmsgs = MESSAGES[loc]
           log('challenge rate-limited:', ctx.ip.slice(0, 24), ctx.ua.slice(0, 40))
           return { block: true, status: 429, contentType: 'text/html', body: shieldPage(lmsgs.rateLimitTitle, lmsgs.rateLimitBody('1 min'), lmsgs.rateLimitBadge, ctx.host || '', 60, loc) }
         }
-        // 307 vers le challenge : body = tableau ASCII SEUL (curl le voit tel quel).
-        // Le navigateur suit la redirection → /__sg_challenge?ts=&salt=&diff=&path=
-        // Le prefix X-Forwarded-Prefix (ex. /express derrière un reverse proxy) est
-        // préfixé pour que la redirection reste dans le sous-chemin de la démo.
         const tsNow = Math.floor(Date.now() / 1000)
-        // Forteresse : sel RANDOM par requête (nonce 64 bits) — plus de sel déterministe
-        // par seconde (précomputation par lots impossible). La preuve devient ts:nonce:n.
         const nonce = sgNonce()
         const salt = crypto.createHmac('sha256', powSecret).update(tsNow + ':' + nonce).digest('hex')
         const prefix = ctx.forwardedPrefix && ctx.forwardedPrefix !== '/' ? ctx.forwardedPrefix.replace(/\/$/, '') : ''
-        // Sanitisation open redirect (audit #5) : on ne reflète jamais un path brut.
         const path = safeChallengePath(ctx.path.startsWith('/') ? ctx.path : '/' + ctx.path)
         const chalUrl = prefix + '/__sg_challenge?ts=' + tsNow + '&salt=' + salt + '&nonce=' + nonce + '&diff=' + POW_DIFF + '&path=' + encodeURIComponent(prefix + path)
         log('pow challenge (307):', ctx.ua.slice(0, 40))
         return { block: true, status: 307, contentType: 'text/plain', body: BLOCK_PAGE, headers: { Location: chalUrl } }
       }
-      // sgProof valide → on laisse passer (le middleware posera le cookie).
     }
 
     const flags = await fetchConfigForSiteKey(options.siteKey, baseUrl, options.signingSecret || options.secret)
 
-    // Le blocage headless est actif par défaut, y compris sans configuration chargée :
-    // c'est la protection minimale attendue du produit.
     const headlessEnabled = flags.enableHeadlessCheck !== false
 
-    // Rate limit check — activé uniquement si le flag est explicitement vrai
     if (flags.enableRateLimit === true) {
       try {
         const rlRes = await fetch(baseUrl + '/rate-limit-check', {
@@ -508,7 +453,6 @@ step();
       } catch {}
     }
 
-    // Headless UA block
     if (headlessEnabled && ctx.ua && !(await botBypass(ctx.ua, ctx.ip)) && headlessPatterns.some(p => p.test(ctx.ua))) {
       log('headless block:', ctx.ua.slice(0, 40))
       fetch(baseUrl + '/event', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ siteKey: options.siteKey, reason: 'headless' }), signal: AbortSignal.timeout(2000) }).catch(() => {})
