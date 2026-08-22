@@ -41,7 +41,16 @@ function runtimeValue(str: string): string {
 function encryptStrings(code: string, key: string): string {
   let r = '', i = 0;
   while (i < code.length) {
-    if (code[i] === "'" || code[i] === '"') {
+    if (code[i] === '`') {
+      const start = i;
+      i++;
+      while (i < code.length) {
+        if (code[i] === '\\') { i += 2; continue; }
+        if (code[i] === '`') { i++; break; }
+        i++;
+      }
+      r += code.slice(start, i);
+    } else if (code[i] === "'" || code[i] === '"') {
       const q = code[i];
       let j = i + 1;
       while (j < code.length) { if (code[j] === '\\') { j += 2; continue; } if (code[j] === q) break; j++; }

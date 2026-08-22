@@ -9,6 +9,13 @@ function run(code: string): EvaluatedValue {
 }
 
 describe("obfuscation", () => {
+  it("préserve les template literals pendant l'encodage des chaînes simples", () => {
+    const src = "(function(){var a=\"plain\";var b=`literal \${a}`;out=b})()";
+    const out = applyObfuscation(src, "seed-1234");
+    expect(out).toContain("`literal \${a}`");
+    expect(out).not.toContain('"plain"');
+    expect(run(out)).toBe("literal plain");
+  });
   it("est déterministe pour une graine donnée", () => {
     const src = "(function(){var a='x';out=a})()";
     expect(applyObfuscation(src, "s1")).toBe(applyObfuscation(src, "s1"));
