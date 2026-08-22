@@ -66,7 +66,7 @@ function encryptStrings(code, key) {
       }
       if (j < code.length) {
         const val = runtimeValue(code.slice(i, j + 1));
-        r += '_D("' + xorEncrypt(val, key) + '")';
+        r += '(_D("' + xorEncrypt(val, key) + '"))';
         i = j + 1;
       } else {
         r += code[i];
@@ -86,7 +86,7 @@ function escapeClosingTags(code) {
   return code.replace(/<\/(script|style)/gi, "<\\/$1");
 }
 function fixComputedProperties(code) {
-  return code.replace(/([{,])(\s*)_D\("([^"]*)"\)(\s*:)/g, '$1$2[_D("$3")]$4');
+  return code.replace(/([{,])(\s*)\(_D\("([^"]*)"\)\)(\s*:)/g, '$1$2[_D("$3")]$4');
 }
 function deriveKey(seed) {
   return crypto.createHash("sha256").update(seed + "sg_val_v1").digest("hex").slice(0, 32);

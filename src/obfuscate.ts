@@ -56,7 +56,9 @@ function encryptStrings(code: string, key: string): string {
       while (j < code.length) { if (code[j] === '\\') { j += 2; continue; } if (code[j] === q) break; j++; }
       if (j < code.length) {
         const val = runtimeValue(code.slice(i, j + 1));
-        r += '_D("' + xorEncrypt(val, key) + '")';
+        // Parentheses prevent minifiers from merging `return` with `_D` into
+        // the invalid identifier `return_D`.
+        r += '(_D("' + xorEncrypt(val, key) + '"))';
         i = j + 1;
       } else { r += code[i]; i++; }
     } else { r += code[i]; i++; }
@@ -73,7 +75,7 @@ function escapeClosingTags(code: string): string {
 }
 
 function fixComputedProperties(code: string): string {
-  return code.replace(/([{,])(\s*)_D\("([^"]*)"\)(\s*:)/g, '$1$2[_D("$3")]$4');
+  return code.replace(/([{,])(\s*)\(_D\("([^"]*)"\)\)(\s*:)/g, '$1$2[_D("$3")]$4');
 }
 
 function deriveKey(seed: string): string {
