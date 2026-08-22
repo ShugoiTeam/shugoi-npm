@@ -56,6 +56,185 @@ var init_locales = __esm({
   }
 });
 
+// src/obfuscate.ts
+import crypto from "crypto";
+function hash(s) {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) {
+    h = (h << 5) - h + s.charCodeAt(i);
+    h |= 0;
+  }
+  return Math.abs(h);
+}
+function hexToBytes(hex) {
+  const b = [];
+  for (let i = 0; i < hex.length; i += 2) b.push(parseInt(hex.substr(i, 2), 16));
+  return b;
+}
+function xorEncrypt(str, hexKey) {
+  const kb = hexToBytes(hexKey);
+  let enc = "";
+  for (let i = 0; i < str.length; i++) {
+    const cc = str.charCodeAt(i) ^ (kb[i % kb.length] ?? 0);
+    enc += cc.toString(16).padStart(2, "0");
+  }
+  return enc;
+}
+function runtimeValue(str) {
+  let s = str.slice(1, -1);
+  return s.replace(/\\(['"\\bfnrtv0])/g, (_, c) => ({ "'": "'", '"': '"', "\\": "\\", "b": "\b", "f": "\f", "n": "\n", "r": "\r", "t": "	", "v": "\v", "0": "\0" })[c] ?? c).replace(/\\(u\{([\da-fA-F]+)\}|u([\da-fA-F]{4})|x([\da-fA-F]{2}))/g, (_, __, ubrace, u4, x2) => {
+    const code = ubrace ? parseInt(ubrace, 16) : u4 ? parseInt(u4, 16) : parseInt(x2, 16);
+    return String.fromCodePoint(code);
+  });
+}
+function encryptStrings(code, key) {
+  let r = "", i = 0;
+  while (i < code.length) {
+    if (code[i] === "'" || code[i] === '"') {
+      const q = code[i];
+      let j = i + 1;
+      while (j < code.length) {
+        if (code[j] === "\\") {
+          j += 2;
+          continue;
+        }
+        if (code[j] === q) break;
+        j++;
+      }
+      if (j < code.length) {
+        const val = runtimeValue(code.slice(i, j + 1));
+        r += '_D("' + xorEncrypt(val, key) + '")';
+        i = j + 1;
+      } else {
+        r += code[i];
+        i++;
+      }
+    } else {
+      r += code[i];
+      i++;
+    }
+  }
+  return r;
+}
+function stripComments(s) {
+  return s.replace(/^\s*\/\/.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "").replace(/\n{3,}/g, "\n\n");
+}
+function escapeClosingTags(code) {
+  return code.replace(/<\/(script|style)/gi, "<\\/$1");
+}
+function fixComputedProperties(code) {
+  return code.replace(/([{,])(\s*)_D\("([^"]*)"\)(\s*:)/g, '$1$2[_D("$3")]$4');
+}
+function deriveKey(seed) {
+  return crypto.createHash("sha256").update(seed + "sg_val_v1").digest("hex").slice(0, 32);
+}
+function seededRng(seed) {
+  let s = hash(seed + "_shuffle");
+  return function() {
+    s = s * 1103515245 + 12345 & 2147483647;
+    return s / 2147483647;
+  };
+}
+function shuffleCode(code, seed) {
+  const lines = code.split("\n");
+  const depth = new Array(lines.length).fill(0);
+  let d = 0;
+  for (let i = 0; i < lines.length; i++) {
+    depth[i] = d;
+    for (const ch of lines[i] ?? "") {
+      if (ch === "{") d++;
+      else if (ch === "}") d--;
+    }
+  }
+  const blocks = [];
+  let start = null;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i] ?? "";
+    const isShuffleable = depth[i] === 1 && /^\s*R\.\w+\s*=/.test(line) && !/[{}]/.test(line) && line.trimEnd().endsWith(";");
+    if (isShuffleable && start === null) start = i;
+    if (!isShuffleable && start !== null) {
+      blocks.push({ start, end: i - 1 });
+      start = null;
+    }
+  }
+  if (start !== null) blocks.push({ start, end: lines.length - 1 });
+  const rng = seededRng(seed);
+  for (const blk of blocks) {
+    const slice = lines.slice(blk.start, blk.end + 1);
+    for (let i = slice.length - 1; i > 0; i--) {
+      const j = Math.floor(rng() * (i + 1));
+      const current = slice[i];
+      const replacement = slice[j];
+      if (current !== void 0 && replacement !== void 0) {
+        slice[i] = replacement;
+        slice[j] = current;
+      }
+    }
+    lines.splice(blk.start, slice.length, ...slice);
+  }
+  return lines.join("\n");
+}
+function renameFunctions(code, seed) {
+  let r = code;
+  const names = Object.entries(RENAMES).sort((a, b) => {
+    const ha = hash(a[0] + seed), hb = hash(b[0] + seed);
+    return ha < hb ? -1 : ha > hb ? 1 : 0;
+  });
+  for (const [from, to] of names) {
+    const suffix = (hash(from + seed) % 9e3 + 1e3).toString(36);
+    const newName = to + suffix;
+    r = r.replace(new RegExp("\\b" + from + "\\(", "g"), newName + "(");
+  }
+  return r;
+}
+function injectDecoder(hexKey) {
+  const kb = hexToBytes(hexKey);
+  const ks = kb.map((b) => "\\x" + b.toString(16).padStart(2, "0")).join("");
+  return 'var _D=function(h){var k="' + ks + '",r="";for(var i=0;i<h.length;i+=2){r+=String.fromCharCode(parseInt(h.substr(i,2),16)^k.charCodeAt((i/2)%' + kb.length + "))}return r};";
+}
+function removeFunction(code, name) {
+  const regex = new RegExp("function\\s+" + name + "\\s*\\([^)]*\\)\\s*\\{[^{}]*\\}", "g");
+  let r = code.replace(regex, "");
+  const multiRegex = new RegExp("function\\s+" + name + "\\s*\\([^)]*\\)\\s*\\{[^}]*\\{[^}]*\\}[^}]*\\}", "g");
+  r = r.replace(multiRegex, "");
+  return r;
+}
+function stripTrace(code) {
+  let r = code;
+  r = removeFunction(r, "_sgLogCP");
+  r = removeFunction(r, "_sgErr");
+  r = r.replace(/_sgLogCP\(\s*\d+\s*\)\s*[;,]?/g, "");
+  r = r.replace(/_sgErr\(\s*(['"][^'"]*['"]|[A-Za-z_$][\w$]*)\s*,\s*(['"][^'"]*['"]|[A-Za-z_$][\w$]*)\s*\)\s*[;,]?/g, "");
+  r = r.replace(/var\s+_SG_TRACE\s*=\s*(?:true|false)\s*;\s*/g, "");
+  r = r.replace(/var\s+_sgCP\s*=\s*[^;]*;\s*/g, "");
+  r = r.replace(/;\s*;/g, ";");
+  return r;
+}
+function applyObfuscation(code, seed) {
+  let r = stripComments(code);
+  r = stripTrace(r);
+  r = renameFunctions(r, seed);
+  r = shuffleCode(r, seed);
+  const encKey = deriveKey(seed);
+  r = encryptStrings(r, encKey);
+  r = r.replace(/^\s*\(function\(\)\{/, (m) => m + injectDecoder(encKey));
+  r = escapeClosingTags(r);
+  r = fixComputedProperties(r);
+  return r;
+}
+var RENAMES;
+var init_obfuscate = __esm({
+  "src/obfuscate.ts"() {
+    "use strict";
+    RENAMES = {
+      buildOverlay: "_wf",
+      checkNotice: "_wg",
+      hex: "_wh",
+      stable: "_wi"
+    };
+  }
+});
+
 // src/render.ts
 var render_exports = {};
 __export(render_exports, {
@@ -74,7 +253,7 @@ __export(render_exports, {
   storeHtml: () => storeHtml,
   verifyRenderGrant: () => verifyRenderGrant
 });
-import crypto, { createHash } from "crypto";
+import crypto2, { createHash } from "crypto";
 import { writeFileSync, readFileSync, existsSync, unlinkSync, mkdirSync, readdirSync, chmodSync, statSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
@@ -173,9 +352,9 @@ function verifyRenderGrant(mid, grant, token, _ip, expectedSiteKey) {
   if (isNaN(tsSec) || age > GRANT_TTL_MS || age < -5e3) return false;
   if (!expectedSiteKey) return false;
   const payload = "render-grant:" + [expectedSiteKey, mid, token || "", ts].join(":");
-  const exp = crypto.createHmac("sha256", gSecret).update(payload).digest("hex");
+  const exp = crypto2.createHmac("sha256", gSecret).update(payload).digest("hex");
   try {
-    return crypto.timingSafeEqual(Buffer.from(sig, "hex"), Buffer.from(exp, "hex"));
+    return crypto2.timingSafeEqual(Buffer.from(sig, "hex"), Buffer.from(exp, "hex"));
   } catch {
     return false;
   }
@@ -239,8 +418,8 @@ function verifyTokenAndRead(token, _locale) {
   const secret = process.env.SHUGOKI_SIGNING_SECRET || process.env.SHUGOKI_SECRET;
   if (secret) {
     const payload = [siteKey, timestamp, nonce].join(":");
-    const expectedSig = crypto.createHmac("sha256", secret).update(payload).digest("hex");
-    if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expectedSig))) {
+    const expectedSig = crypto2.createHmac("sha256", secret).update(payload).digest("hex");
+    if (!crypto2.timingSafeEqual(Buffer.from(sig), Buffer.from(expectedSig))) {
       return { error: "not_found" };
     }
   }
@@ -278,7 +457,7 @@ async function handleRender(token, res, configUrl, mid, grant, ip, expectedSiteK
     const authSecret = process.env.SHUGOKI_SIGNING_SECRET || process.env.SHUGOKI_SECRET;
     if (authSecret) {
       const ts = Math.floor(Date.now() / 1e3);
-      const val = ts + ":" + crypto.createHmac("sha256", authSecret).update("sg_authorized:" + ts).digest("hex");
+      const val = ts + ":" + crypto2.createHmac("sha256", authSecret).update("sg_authorized:" + ts).digest("hex");
       const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
       res.setHeader("Set-Cookie", "__sg_authorized=" + val + "; Path=/; HttpOnly; SameSite=Strict; Max-Age=120" + secure);
     }
@@ -295,9 +474,9 @@ function injectNoticeScript(html, mid, siteKey, baseUrl) {
 function signToken(siteKey, timestamp, secretOverride) {
   const secret = secretOverride || process.env.SHUGOKI_SIGNING_SECRET || process.env.SHUGOKI_SECRET;
   if (!secret) return { token: "" };
-  const nonce = crypto.randomBytes(8).toString("hex");
+  const nonce = crypto2.randomBytes(8).toString("hex");
   const payload = [siteKey, timestamp, nonce].join(":");
-  const sig = crypto.createHmac("sha256", secret).update(payload).digest("hex");
+  const sig = crypto2.createHmac("sha256", secret).update(payload).digest("hex");
   return { token: payload + ":" + sig };
 }
 function configKey(baseUrl, siteKey) {
@@ -314,7 +493,7 @@ function pruneCache(m) {
 async function refreshConfig(siteKey, baseUrl, entry, secret) {
   try {
     const cb = Date.now();
-    const sig = secret ? crypto.createHmac("sha256", secret).update(cb.toString()).digest("hex") : "";
+    const sig = secret ? crypto2.createHmac("sha256", secret).update(cb.toString()).digest("hex") : "";
     const res = await fetch(baseUrl + "/whitelist?key=" + encodeURIComponent(siteKey) + "&cb=" + cb + (sig ? "&sig=" + sig : ""), {
       signal: AbortSignal.timeout(CONFIG_FETCH_TIMEOUT)
     });
@@ -384,7 +563,7 @@ async function fetchGuardScripts(baseUrl, secret, siteKey) {
   cache.fetching = true;
   try {
     const cb = Date.now();
-    const sig = secret ? crypto.createHmac("sha256", secret).update(cb.toString()).digest("hex") : "";
+    const sig = secret ? crypto2.createHmac("sha256", secret).update(cb.toString()).digest("hex") : "";
     const [dRes, gRes] = await Promise.all([
       fetch(baseUrl + "/guard-detect?key=" + sk + "&raw=1&cb=" + cb + (sig ? "&sig=" + sig : ""), { signal: AbortSignal.timeout(5e3) }),
       fetch(baseUrl + "/guard?key=" + sk + "&raw=1&cb=" + cb + (sig ? "&sig=" + sig : ""), { signal: AbortSignal.timeout(5e3) })
@@ -422,8 +601,8 @@ async function generateSkeleton(siteKey, token, baseUrl, restrictedAccess, _whit
   fragments.push("try{if((location.search||'').indexOf('sg_proof=')>=0){var _qs=location.search.replace(/[?&]sg_proof=[^&]*/,'');var _cu=location.pathname+(_qs?_qs:'')+location.hash;history.replaceState(null,'',_cu)}}catch(e){}");
   const _powTs = Math.floor(Date.now() / 1e3);
   const _powSecret = process.env.SHUGOKI_SIGNING_SECRET || process.env.SHUGOKI_SECRET || "";
-  const _powNonce = typeof crypto.randomBytes === "function" ? crypto.randomBytes(8).toString("hex") : String(Math.floor(Math.random() * 4294967295)).padStart(8, "0") + String(Math.floor(Math.random() * 4294967295)).padStart(8, "0");
-  const _powSalt = _powSecret ? crypto.createHmac("sha256", _powSecret).update(_powTs + ":" + _powNonce).digest("hex") : "";
+  const _powNonce = typeof crypto2.randomBytes === "function" ? crypto2.randomBytes(8).toString("hex") : String(Math.floor(Math.random() * 4294967295)).padStart(8, "0") + String(Math.floor(Math.random() * 4294967295)).padStart(8, "0");
+  const _powSalt = _powSecret ? crypto2.createHmac("sha256", _powSecret).update(_powTs + ":" + _powNonce).digest("hex") : "";
   const _powDiff = (() => {
     const raw = Number(process.env.SHUGOKI_POW_DIFF || "14");
     return Number.isInteger(raw) && raw >= 8 && raw <= 24 ? raw : 12;
@@ -450,7 +629,8 @@ async function generateSkeleton(siteKey, token, baseUrl, restrictedAccess, _whit
   fragments.push("var r=" + JSON.stringify(rurl));
   fragments.push('var _gw=function(cb){if(window.__sg_guardsReady||window.__sg_blocked)cb();else setTimeout(function(){_gw(cb)},100)};function rd(p,n){if(window.__sg_blocked)return;if(!document.body)return setTimeout(function(){rd(p,n)},50);if(n>6){if((window.__sg_config||{}).enableContentReplacementCheck===true)window.__sg_showBlock&&window.__sg_showBlock("' + devtoolsMsg + '","' + tamperTitle + '");return}var _g=(window.__sg_grant||"");if(_g){p=p+("&grant="+encodeURIComponent(_g))}var _m=(window.__sg_detectMid||window.__sg_mid||"");if(_m){p=p+("&mid="+encodeURIComponent(_m))}fetch(p).then(function(x){return x.json()}).then(function(d){if(window.__sg_blocked)return;if(!document.body)return setTimeout(function(){rd(p,n+1)},50);if(d.html){document.open("text/html");document.write(d.html);document.close();window.scrollTo(0,0)}if(d.blocked){window.__sg_showBlock&&window.__sg_showBlock(d.message,d.title)}if(d.error){if((window.__sg_config||{}).enableContentReplacementCheck===true)window.__sg_showBlock&&window.__sg_showBlock("' + devtoolsMsg + '","' + tamperTitle + '")}else if(!d.html&&!d.blocked){setTimeout(function(){rd(p,n+1)},300)}}).catch(function(){setTimeout(function(){rd(p,n+1)},300)})}');
   fragments.push('function _sgCl(){try{for(var _i in window){if(_i.indexOf("__sg")===0){window[_i]=null;delete window[_i]}}window._sgLogCP=function(){};window.midHex=function(){};window.rd=function(){};window._gw=function(){};window.applyDecision=function(){};window._D=function(){};window.z=function(f){return f()}}catch(_e){}}_gw(function(){rd(r+"?token="+t,0);setTimeout(_sgCl,1500)})');
-  const bootCode = fragments.join(";").replace(/<\/(script|style)/gi, "<\\/$1");
+  const variantSeed = createHash("sha256").update(`${siteKey}:${token}`).digest("hex");
+  const bootCode = applyObfuscation(fragments.join(";"), variantSeed).replace(/<\/(script|style)/gi, "<\\/$1");
   return "<script>" + bootCode + "</script>";
 }
 async function injectGuardScripts(html, siteKey, baseUrl, whitelist, restrictedAccess, signingSecret, _req, _allowedOrigins, locale, clockts) {
@@ -485,6 +665,7 @@ var init_render = __esm({
   "src/render.ts"() {
     "use strict";
     init_locales();
+    init_obfuscate();
     runtimeGlobal = globalThis;
     TOKEN_DIR = join(tmpdir(), "shugoi-render-" + (process.getuid?.() ?? "x"));
     TOKEN_TTL = 12e4;
@@ -745,7 +926,7 @@ var BLOCK_PAGE = [
 ].join("\n") + "\n";
 
 // src/security-utils.ts
-import crypto2 from "crypto";
+import crypto3 from "crypto";
 function safeChallengePath(path) {
   if (!path) return "/";
   if (path.charAt(0) !== "/" || path.charAt(1) === "/" || path.includes("\\")) return "/";
@@ -757,7 +938,7 @@ function safeChallengePath(path) {
 }
 function safeEqual(left, right) {
   if (left.length !== right.length) return false;
-  return crypto2.timingSafeEqual(Buffer.from(left), Buffer.from(right));
+  return crypto3.timingSafeEqual(Buffer.from(left), Buffer.from(right));
 }
 function ipBucket(ip) {
   if (!ip || ip === "unknown") return "0";
@@ -769,13 +950,13 @@ function ipBucket(ip) {
   return "0";
 }
 function uaFingerprint(userAgent) {
-  return crypto2.createHash("sha256").update(userAgent).digest("hex").slice(0, 16);
+  return crypto3.createHash("sha256").update(userAgent).digest("hex").slice(0, 16);
 }
 
 // src/pow-utils.ts
-import crypto3 from "crypto";
+import crypto4 from "crypto";
 function createPowNonce() {
-  return crypto3.randomBytes(8).toString("hex");
+  return crypto4.randomBytes(8).toString("hex");
 }
 function verifyPow(proof, options) {
   if (!proof || !options.secret) return false;
@@ -783,8 +964,8 @@ function verifyPow(proof, options) {
   if (!timestamp || !nonce || !solution || !/^[0-9a-f]{16}$/.test(nonce)) return false;
   const parsedTimestamp = Number.parseInt(timestamp, 10);
   if (!Number.isFinite(parsedTimestamp) || Math.abs(Date.now() - parsedTimestamp * 1e3) > options.ttlMs) return false;
-  const salt = crypto3.createHmac("sha256", options.secret).update(`${timestamp}:${nonce}`).digest("hex");
-  const digest = crypto3.createHash("sha256").update(`${salt}:${solution}`).digest("hex");
+  const salt = crypto4.createHmac("sha256", options.secret).update(`${timestamp}:${nonce}`).digest("hex");
+  const digest = crypto4.createHash("sha256").update(`${salt}:${solution}`).digest("hex");
   let leadingBits = 0;
   for (const nibble of digest) {
     const value = Number.parseInt(nibble, 16);
@@ -839,12 +1020,12 @@ var ChallengeLimiter = class {
 };
 
 // src/cookie-security.ts
-import crypto4 from "crypto";
+import crypto5 from "crypto";
 function createOkCookieValue(ip, userAgent, options) {
   const timestamp = Math.floor(Date.now() / 1e3);
   const bucket = ipBucket(ip);
   const fingerprint = uaFingerprint(userAgent);
-  const signature = crypto4.createHmac("sha256", options.secret).update(`sg_ok:${timestamp}:${bucket}:${fingerprint}`).digest("hex");
+  const signature = crypto5.createHmac("sha256", options.secret).update(`sg_ok:${timestamp}:${bucket}:${fingerprint}`).digest("hex");
   return `${timestamp}:${bucket}:${fingerprint}:${signature}`;
 }
 function isOkCookieValid(value, ip, userAgent, options) {
@@ -854,7 +1035,7 @@ function isOkCookieValid(value, ip, userAgent, options) {
   const parsedTimestamp = Number.parseInt(timestamp, 10);
   if (!Number.isFinite(parsedTimestamp) || Date.now() - parsedTimestamp * 1e3 > options.okTtlMs || parsedTimestamp * 1e3 > Date.now() + 6e4) return false;
   if (bucket !== ipBucket(ip) || fingerprint !== uaFingerprint(userAgent)) return false;
-  const expected = crypto4.createHmac("sha256", options.secret).update(`sg_ok:${timestamp}:${bucket}:${fingerprint}`).digest("hex");
+  const expected = crypto5.createHmac("sha256", options.secret).update(`sg_ok:${timestamp}:${bucket}:${fingerprint}`).digest("hex");
   return safeEqual(signature, expected);
 }
 function isAuthorizedCookieValid(value, options) {
@@ -865,7 +1046,7 @@ function isAuthorizedCookieValid(value, options) {
   const signature = value.slice(separator + 1);
   const parsedTimestamp = Number.parseInt(timestamp, 10);
   if (!Number.isFinite(parsedTimestamp) || Date.now() - parsedTimestamp * 1e3 > options.authorizedTtlMs || parsedTimestamp * 1e3 > Date.now() + 6e4) return false;
-  const expected = crypto4.createHmac("sha256", options.secret).update(`sg_authorized:${timestamp}`).digest("hex");
+  const expected = crypto5.createHmac("sha256", options.secret).update(`sg_authorized:${timestamp}`).digest("hex");
   return safeEqual(signature, expected);
 }
 
@@ -898,7 +1079,7 @@ var ProofReplayStore = class {
 };
 
 // src/core.ts
-import crypto5 from "crypto";
+import crypto6 from "crypto";
 var DEFAULT_HEADLESS_PATTERNS = [
   /^curl/i,
   /^wget/i,
@@ -1130,7 +1311,7 @@ step();
         }
         const tsNow = Math.floor(Date.now() / 1e3);
         const nonce = createPowNonce();
-        const salt = crypto5.createHmac("sha256", powSecret).update(tsNow + ":" + nonce).digest("hex");
+        const salt = crypto6.createHmac("sha256", powSecret).update(tsNow + ":" + nonce).digest("hex");
         const prefix = ctx.forwardedPrefix && ctx.forwardedPrefix !== "/" ? ctx.forwardedPrefix.replace(/\/$/, "") : "";
         const path = safeChallengePath(ctx.path.startsWith("/") ? ctx.path : "/" + ctx.path);
         const chalUrl = prefix + "/__sg_challenge?ts=" + tsNow + "&salt=" + salt + "&nonce=" + nonce + "&diff=" + POW_DIFF + "&path=" + encodeURIComponent(prefix + path);

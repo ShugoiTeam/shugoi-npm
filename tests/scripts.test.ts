@@ -30,7 +30,7 @@ describe('scriptTags', () => {
     });
 
     const result = await scriptTags({ siteKey: 'sg_sk_live_xxx', baseUrl: 'https://custom.com/api' });
-    expect(result.guardDetect).toContain('window.__sg_baseUrl="https://custom.com/api"');
+    expect(result.guardDetect).toContain('window.__sg_baseUrl=_D(');
     expect(result.guardDetect).not.toContain('eval(');
   });
 });
