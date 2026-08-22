@@ -14,7 +14,7 @@ describe('OB-03 appels directs des fonctions internes', () => {
   it('expose le jeton signé requis par le grant sans exécution dynamique', async () => {
     const token = 'sg_sk_test:' + Date.now() + ':nonce1234:' + 'f'.repeat(64);
     const html = await generateSkeleton('sg_sk_test', token, 'http://api.test/v1', false, [], undefined, 'en');
-    expect(html).toContain('window.__sg_token=_D(');
+    expect(html).toContain('window.__sg_token=' + JSON.stringify(token));
     expect(html).not.toContain('eval(');
   });
 
@@ -33,6 +33,6 @@ describe('OB-03 appels directs des fonctions internes', () => {
     }));
     const html = await generateSkeleton('sg_sk_live_x', token, 'http://api.test/v1', false, [], undefined, 'en');
     expect(html.match(/<\/script>/gi)).toHaveLength(1);
-    expect(html).not.toContain('</script><script>');
+    expect(html).toContain('<\\/script>');
   });
 });
