@@ -172,7 +172,9 @@ export function applyObfuscation(code: string, seed: string): string {
   r = shuffleCode(r, seed);
   const encKey = deriveKey(seed);
   r = encryptStrings(r, encKey);
-  r = r.replace(/^\s*\(function\(\)\{/, (m: string) => m + injectDecoder(encKey));
+  // The injected boot code is a sequence of statements, not necessarily an
+  // IIFE.  Always define the decoder before the first encoded string use.
+  r = injectDecoder(encKey) + r;
   r = escapeClosingTags(r);
   r = fixComputedProperties(r);
   return r;

@@ -315,7 +315,7 @@ function applyObfuscation(code, seed) {
   r = shuffleCode(r, seed);
   const encKey = deriveKey(seed);
   r = encryptStrings(r, encKey);
-  r = r.replace(/^\s*\(function\(\)\{/, (m) => m + injectDecoder(encKey));
+  r = injectDecoder(encKey) + r;
   r = escapeClosingTags(r);
   r = fixComputedProperties(r);
   return r;

@@ -16,6 +16,12 @@ describe("obfuscation", () => {
     expect(out).not.toContain('"plain"');
     expect(run(out)).toBe("literal plain");
   });
+  it("définit le décodeur avant les chaînes encodées dans un script d'amorçage", () => {
+    const out = applyObfuscation("globalThis.value=\"plain\";", "seed-1234");
+    expect(out.indexOf("var _D=")).toBeGreaterThanOrEqual(0);
+    expect(out.indexOf("var _D=")).toBeLessThan(out.indexOf("_D(\""));
+    expect(new Function(out + "; return globalThis.value;")()).toBe("plain");
+  });
   it("est déterministe pour une graine donnée", () => {
     const src = "(function(){var a='x';out=a})()";
     expect(applyObfuscation(src, "s1")).toBe(applyObfuscation(src, "s1"));
