@@ -188,7 +188,7 @@ function renameFunctions(code, seed) {
 function injectDecoder(hexKey) {
   const kb = hexToBytes(hexKey);
   const ks = kb.map((b) => "\\x" + b.toString(16).padStart(2, "0")).join("");
-  return 'var _D=function(h){var k="' + ks + '",r="";for(var i=0;i<h.length;i+=2){r+=String.fromCharCode(parseInt(h.substr(i,2),16)^k.charCodeAt((i/2)%' + kb.length + "))}return r};";
+  return 'var _Dx=Object.create(null),_D=function(h){var c=_Dx[h];if(c!==void 0)return c;var k="' + ks + '",r="";for(var i=0;i<h.length;i+=2){r+=String.fromCharCode(parseInt(h.substr(i,2),16)^k.charCodeAt((i/2)%' + kb.length + "))}return _Dx[h]=r};";
 }
 function removeFunction(code, name) {
   const regex = new RegExp("function\\s+" + name + "\\s*\\([^)]*\\)\\s*\\{[^{}]*\\}", "g");

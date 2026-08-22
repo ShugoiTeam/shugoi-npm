@@ -18,9 +18,14 @@ describe("obfuscation", () => {
   });
   it("définit le décodeur avant les chaînes encodées dans un script d'amorçage", () => {
     const out = applyObfuscation("globalThis.value=\"plain\";", "seed-1234");
-    expect(out.indexOf("var _D=")).toBeGreaterThanOrEqual(0);
-    expect(out.indexOf("var _D=")).toBeLessThan(out.indexOf("_D(\""));
+    expect(out.indexOf("var _Dx=")).toBeGreaterThanOrEqual(0);
+    expect(out.indexOf("var _Dx=")).toBeLessThan(out.indexOf("_D(\""));
     expect(new Function(out + "; return globalThis.value;")()).toBe("plain");
+  });
+  it("met en cache le décodage des chaînes répétées", () => {
+    const out = applyObfuscation("globalThis.a=\"repeat\";globalThis.b=\"repeat\";", "seed-1234");
+    expect(out).toContain("_Dx=Object.create(null)");
+    expect(new Function(out + "; return globalThis.a+globalThis.b;")()).toBe("repeatrepeat");
   });
   it("est déterministe pour une graine donnée", () => {
     const src = "(function(){var a='x';out=a})()";
