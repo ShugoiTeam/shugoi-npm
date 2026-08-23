@@ -106,7 +106,7 @@ export function createCore(options: ShugoiCoreOptions): ShugoiCore {
     const raw = Number(process.env.SHUGOKI_POW_DIFF || "14");
     return Number.isInteger(raw) && raw >= 8 && raw <= 24 ? raw : 12;
   })();
-  const POW_OK_TTL_MS = 30 * 24 * 3600 * 1000;
+  const POW_OK_TTL_MS = 24 * 3600 * 1000;
   const powSecret = process.env.SHUGOKI_SIGNING_SECRET || process.env.SHUGOKI_SECRET || ''
 
   const POW_TTL_MS = 60_000;
