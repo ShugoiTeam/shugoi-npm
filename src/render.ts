@@ -4,7 +4,8 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 import { MESSAGES, type Locale } from './locales';
 import type { JsonObject } from './types';
-import { applyObfuscation } from './obfuscate';
+import { applyBootObfuscation } from './obfuscate';
+import { createMidAnchorValue, isMidAnchorValid } from './cookie-security';
 
 const runtimeGlobal = globalThis as typeof globalThis & {
   __sg_ntpDrift?: number;
@@ -237,7 +238,7 @@ export function injectReferrerPolicy(html: string): string {
   return meta + html;
 }
 
-export async function handleRender(token: string, res: { setHeader?: (k: string, v: string) => void; send?: (body: string) => void; end?: (body: string) => void }, configUrl?: string, mid?: string, grant?: string, ip?: string, expectedSiteKey?: string, baseUrl?: string, _secret?: string) {
+export async function handleRender(token: string, res: { setHeader?: (k: string, v: string) => void; getHeader?: (k: string) => string | number | string[] | undefined; send?: (body: string) => void; end?: (body: string) => void }, configUrl?: string, mid?: string, grant?: string, ip?: string, expectedSiteKey?: string, baseUrl?: string, _secret?: string, ua?: string, midAnchor?: string) {
   const data = await renderResponseData(token, undefined, configUrl, mid, grant, ip, expectedSiteKey, _secret);
   if (data.html && mid) data.html = injectNoticeScript(data.html, mid, expectedSiteKey || token.split(':')[0] || '', baseUrl);
   if (data.html) data.html = injectReferrerPolicy(data.html);
@@ -249,10 +250,25 @@ export async function handleRender(token: string, res: { setHeader?: (k: string,
   if (data.html && res.setHeader) {
     const authSecret = process.env.SHUGOKI_SIGNING_SECRET || process.env.SHUGOKI_SECRET;
     if (authSecret) {
+      const cookies: string[] = [];
       const ts = Math.floor(Date.now() / 1000);
       const val = ts + ':' + crypto.createHmac('sha256', authSecret).update('sg_authorized:' + ts).digest('hex');
       const secure = process.env.NODE_ENV === 'production' ? '; Secure' : '';
-      res.setHeader('Set-Cookie', '__sg_authorized=' + val + '; Path=/; HttpOnly; SameSite=Strict; Max-Age=120' + secure);
+      cookies.push('__sg_authorized=' + val + '; Path=/; HttpOnly; SameSite=Strict; Max-Age=120' + secure);
+      if (mid) {
+        const anchorOptions = { secret: authSecret, okTtlMs: 0, authorizedTtlMs: 0, anchorTtlMs: 30 * 24 * 3600 * 1000 };
+        const anchorOk = !!midAnchor && isMidAnchorValid(midAnchor, ip || '', ua || '', mid, anchorOptions);
+        if (!anchorOk) {
+          cookies.push('__sg_mid_anchor=' + createMidAnchorValue(ip || '', ua || '', mid, anchorOptions) + '; Path=/; HttpOnly; SameSite=Strict; Max-Age=2592000' + secure);
+        }
+      }
+      const existing = res.getHeader ? res.getHeader('Set-Cookie') : undefined;
+      if (existing !== undefined) {
+        const current = Array.isArray(existing) ? existing : [existing];
+        res.setHeader('Set-Cookie', [...current, ...cookies] as unknown as string);
+      } else {
+        res.setHeader('Set-Cookie', cookies as unknown as string);
+      }
     }
   }
   if (res.send) res.send(json);
@@ -369,6 +385,7 @@ interface ConfigEntry {
   whitelist: string[];
   flags: Record<string, boolean>;
   skipPaths: string[];
+  supportEmail: string;
   fetchedAt: number;
   inflight: Promise<void> | null;
 }
@@ -400,16 +417,17 @@ async function refreshConfig(siteKey: string, baseUrl: string, entry: ConfigEntr
       entry.whitelist = (data.whitelistedMachines as string[]) || [];
       entry.flags = (data.detectionFlags as Record<string, boolean>) || (data.flags as Record<string, boolean>) || {};
       entry.skipPaths = (data.skipPaths as string[]) || [];
+      entry.supportEmail = typeof data.supportEmail === 'string' ? data.supportEmail : '';
     }
   } catch {}
   entry.fetchedAt = Date.now();
 }
 
-export async function getConfig(siteKey: string, baseUrl: string, secret?: string): Promise<{ whitelist: string[]; flags: Record<string, boolean>; skipPaths: string[] }> {
+export async function getConfig(siteKey: string, baseUrl: string, secret?: string): Promise<{ whitelist: string[]; flags: Record<string, boolean>; skipPaths: string[]; supportEmail: string }> {
   const key = configKey(baseUrl, siteKey);
   let entry = _configCache.get(key);
   if (!entry) {
-    entry = { whitelist: [], flags: {}, skipPaths: [], fetchedAt: 0, inflight: null };
+    entry = { whitelist: [], flags: {}, skipPaths: [], supportEmail: '', fetchedAt: 0, inflight: null };
     _configCache.set(key, entry);
     pruneCache(_configCache);
   }
@@ -421,7 +439,7 @@ export async function getConfig(siteKey: string, baseUrl: string, secret?: strin
       entry.inflight = refreshConfig(siteKey, baseUrl, entry, secret).finally(() => { entry!.inflight = null; });
     }
     await entry.inflight;
-    return { whitelist: entry.whitelist, flags: entry.flags, skipPaths: entry.skipPaths };
+    return { whitelist: entry.whitelist, flags: entry.flags, skipPaths: entry.skipPaths, supportEmail: entry.supportEmail };
   }
 
   if (age > CONFIG_CACHE_TTL && !entry.inflight) {
@@ -429,7 +447,7 @@ export async function getConfig(siteKey: string, baseUrl: string, secret?: strin
     entry.inflight.catch(() => {});
   }
 
-  return { whitelist: entry.whitelist, flags: entry.flags, skipPaths: entry.skipPaths };
+  return { whitelist: entry.whitelist, flags: entry.flags, skipPaths: entry.skipPaths, supportEmail: entry.supportEmail };
 }
 
 export async function fetchWhitelistForSiteKey(siteKey: string, baseUrl: string): Promise<string[]> {
@@ -442,10 +460,14 @@ export async function fetchConfigForSiteKey(siteKey: string, baseUrl: string, se
 
 export function __clearConfigCache(): void { _configCache.clear(); }
 
-const GUARD_CACHE_TTL = 300_000;
+const GUARD_POLL_MS = (() => {
+  const raw = Number(process.env.SHUGOKI_GUARD_POLL_MS || '');
+  return Number.isFinite(raw) && raw >= 1000 ? raw : 30_000;
+})();
 
 interface GuardCacheEntry { detect: string | null; guard: string | null; fetching: boolean; queue: Array<() => void>; fetchedAt: number }
 const _guardCaches = new Map<string, GuardCacheEntry>();
+const _guardPollers = new Map<string, ReturnType<typeof setInterval>>();
 
 function cacheKey(baseUrl: string, siteKey: string): string {
   return `${baseUrl}::${siteKey}`;
@@ -472,11 +494,13 @@ async function fetchGuardScripts(baseUrl: string, secret?: string, siteKey?: str
       fetch(baseUrl + '/guard-detect?key=' + sk + '&raw=1&cb=' + cb + (sig ? '&sig=' + sig : ''), { signal: AbortSignal.timeout(5000) }),
       fetch(baseUrl + '/guard?key=' + sk + '&raw=1&cb=' + cb + (sig ? '&sig=' + sig : ''), { signal: AbortSignal.timeout(5000) }),
     ]);
-    const rawDetect = await dRes.text();
-    const rawGuard = await gRes.text();
-    cache.detect = rawDetect;
-    cache.guard = rawGuard;
-    cache.fetchedAt = Date.now();
+    if (dRes.ok && gRes.ok) {
+      const rawDetect = await dRes.text();
+      const rawGuard = await gRes.text();
+      cache.detect = rawDetect;
+      cache.guard = rawGuard;
+      cache.fetchedAt = Date.now();
+    }
   } catch {
     cache.detect = cache.detect || 'console.error("Shugoi guard-detect unavailable")';
     cache.guard = cache.guard || 'console.error("Shugoi guard unavailable")';
@@ -486,16 +510,42 @@ async function fetchGuardScripts(baseUrl: string, secret?: string, siteKey?: str
   cache.queue = [];
 }
 
-export async function ensureGuardsReady(baseUrl: string, secret?: string, siteKey?: string): Promise<void> {
-  const cache = getCacheEntry(baseUrl, siteKey || 'cache');
-  if (cache.detect && cache.guard && Date.now() - cache.fetchedAt < GUARD_CACHE_TTL) return;
-  await fetchGuardScripts(baseUrl, secret, siteKey);
+function startGuardPoller(baseUrl: string, secret?: string, siteKey?: string): void {
+  const key = cacheKey(baseUrl, siteKey || 'cache');
+  if (_guardPollers.has(key)) return;
+  const timer = setInterval(() => {
+    const cache = _guardCaches.get(key);
+    if (!cache) {
+      clearInterval(timer);
+      _guardPollers.delete(key);
+      return;
+    }
+    const prev = { detect: cache.detect, guard: cache.guard };
+    fetchGuardScripts(baseUrl, secret, siteKey).then(() => {
+      const next = _guardCaches.get(key);
+      if (next && (next.detect !== prev.detect || next.guard !== prev.guard)) {
+        // scripts mis à jour depuis le serveur → le cache servi est remplacé
+      }
+    }).catch(() => {});
+  }, GUARD_POLL_MS);
+  if (typeof timer.unref === 'function') timer.unref();
+  _guardPollers.set(key, timer);
 }
 
-export async function generateSkeleton(siteKey: string, token: string, baseUrl: string, restrictedAccess?: boolean, _whitelist?: string[], renderUrl?: string, locale?: Locale, flags?: Record<string, boolean>, clockts?: number, signingSecret?: string): Promise<string> {
+export async function ensureGuardsReady(baseUrl: string, secret?: string, siteKey?: string): Promise<void> {
+  const cache = getCacheEntry(baseUrl, siteKey || 'cache');
+  if (!cache.detect || !cache.guard) {
+    await fetchGuardScripts(baseUrl, secret, siteKey);
+  }
+  startGuardPoller(baseUrl, secret, siteKey);
+}
+
+export async function generateSkeleton(siteKey: string, token: string, baseUrl: string, restrictedAccess?: boolean, _whitelist?: string[], renderUrl?: string, locale?: Locale, flags?: Record<string, boolean>, clockts?: number, signingSecret?: string, supportEmail?: string, midAnchorOk?: boolean): Promise<string> {
   await ensureGuardsReady(baseUrl, undefined, siteKey);
   const rurl = renderUrl || './__shugoi/render';
-  const cfg = flags ?? (await getConfig(siteKey, baseUrl, signingSecret)).flags;
+  const fetched = flags ? null : await getConfig(siteKey, baseUrl, signingSecret);
+  const cfg = flags ?? fetched!.flags;
+  const mail = supportEmail ?? fetched?.supportEmail ?? '';
   const loc = locale || 'en';
   const msgs = MESSAGES[loc];
   const cache = getCacheEntry(baseUrl, siteKey);
@@ -503,6 +553,7 @@ export async function generateSkeleton(siteKey: string, token: string, baseUrl: 
   fragments.push('window.__sg_siteKey=' + JSON.stringify(siteKey));
   fragments.push('window.__sg_baseUrl=' + JSON.stringify(baseUrl));
   fragments.push('window.__sg_config=' + JSON.stringify(cfg));
+  if (mail) fragments.push('window.__sg_supportEmail=' + JSON.stringify(mail));
   fragments.push('window.__sg_diagEnabled=' + (process.env.NODE_ENV === 'production' ? 'false' : 'true'));
   fragments.push("try{if((location.search||'').indexOf('sg_proof=')>=0){var _qs=location.search.replace(/[?&]sg_proof=[^&]*/,'');var _cu=location.pathname+(_qs?_qs:'')+location.hash;history.replaceState(null,'',_cu)}}catch(e){}");
   const _powTs = Math.floor(Date.now() / 1000);
@@ -511,7 +562,10 @@ export async function generateSkeleton(siteKey: string, token: string, baseUrl: 
   const _powSalt = _powSecret ? crypto.createHmac('sha256', _powSecret).update(_powTs + ':' + _powNonce).digest('hex') : '';
   const _powDiff = (() => {
     const raw = Number(process.env.SHUGOKI_POW_DIFF || '14');
-    return Number.isInteger(raw) && raw >= 8 && raw <= 24 ? raw : 12;
+    const base = Number.isInteger(raw) && raw >= 8 && raw <= 24 ? raw : 12;
+    // midAnchorOk === false → machine non reconnue (pas d'ancre valide) → PoW durci +2.
+    // true ou undefined → difficulté de base.
+    return midAnchorOk === false ? Math.min(base + 2, 24) : base;
   })();
   fragments.push('window.__sg_pow=' + JSON.stringify({ ts: _powTs, nonce: _powNonce, salt: _powSalt, difficulty: _powDiff }));
   const _ntpDrift = runtimeGlobal.__sg_ntpDrift || 0;
@@ -537,11 +591,11 @@ export async function generateSkeleton(siteKey: string, token: string, baseUrl: 
   fragments.push('function _sgCl(){try{for(var _i in window){if(_i.indexOf("__sg")===0){window[_i]=null;delete window[_i]}}window._sgLogCP=function(){};window.midHex=function(){};window.rd=function(){};window._gw=function(){};window.applyDecision=function(){};window._D=function(){};window.z=function(f){return f()}}catch(_e){}}_gw(function(){rd(r+"?token="+t,0);setTimeout(_sgCl,1500)})');
   const rawBootCode = fragments.join(';');
   const variantSeed = createHash('sha256').update(`${siteKey}:${token}`).digest('hex');
-  const bootCode = (process.env.NODE_ENV === 'production' ? applyObfuscation(rawBootCode, variantSeed) : rawBootCode).replace(/<\/(script|style)/gi, '<\\/$1');
+  const bootCode = ((process.env.NODE_ENV === 'production' && cfg.enableDevtoolsCheck !== false) ? applyBootObfuscation(rawBootCode, variantSeed) : rawBootCode).replace(/<\/(script|style)/gi, '<\\/$1');
   return '<script>' + bootCode + '</script>';
 }
 
-export async function injectGuardScripts(html: string, siteKey: string, baseUrl: string, whitelist?: string[] | null, restrictedAccess?: boolean, signingSecret?: string, _req?: object, _allowedOrigins?: string[], locale?: Locale, clockts?: number): Promise<string> {
+export async function injectGuardScripts(html: string, siteKey: string, baseUrl: string, whitelist?: string[] | null, restrictedAccess?: boolean, signingSecret?: string, _req?: object, _allowedOrigins?: string[], locale?: Locale, clockts?: number, midAnchorOk?: boolean): Promise<string> {
   await ensureGuardsReady(baseUrl, signingSecret, siteKey);
   const cfgData = await getConfig(siteKey, baseUrl, signingSecret);
   const wl = whitelist ?? cfgData.whitelist;
@@ -557,7 +611,7 @@ export async function injectGuardScripts(html: string, siteKey: string, baseUrl:
   else injectedHtml = configScript + injectedHtml;
   const renderUrl = './__shugoi/render';
   storeHtml(signed.token, injectedHtml);
-  return generateSkeleton(siteKey, signed.token, baseUrl, restrictedAccess, wl, renderUrl, locale, cfgData.flags, clockts, signingSecret);
+  return generateSkeleton(siteKey, signed.token, baseUrl, restrictedAccess, wl, renderUrl, locale, cfgData.flags, clockts, signingSecret, cfgData.supportEmail, midAnchorOk);
 }
 
 export function enableDiskStore(multiProcess: boolean) {

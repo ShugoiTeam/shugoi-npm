@@ -1,5 +1,6 @@
 import { S as ShugoiCoreOptions, J as JsonObject, C as CheckResponse, a as ScriptTagsOptions, b as ScriptTagsResult } from './types-NuVrJ21J.cjs';
 export { B as BlockPageContext, c as CheckRequest, d as ShugoiMiddlewareOptions, e as ShugoiPluginOptions } from './types-NuVrJ21J.cjs';
+export { applyBootObfuscation, applyObfuscation, isValidJs } from './obfuscate.cjs';
 
 type ShugoiErrorCode = 'invalid_site_key' | 'site_key_validation_failed' | 'api_unreachable' | 'api_timeout' | 'missing_site_key' | 'unexpected_api_response' | 'internal_error';
 type ErrorCause = string | number | boolean | object | null;
@@ -23,16 +24,17 @@ declare function renderResponseData(token: string, locale?: Locale, configUrl?: 
 }>;
 declare function handleRender(token: string, res: {
     setHeader?: (k: string, v: string) => void;
+    getHeader?: (k: string) => string | number | string[] | undefined;
     send?: (body: string) => void;
     end?: (body: string) => void;
-}, configUrl?: string, mid?: string, grant?: string, ip?: string, expectedSiteKey?: string, baseUrl?: string, _secret?: string): Promise<void>;
+}, configUrl?: string, mid?: string, grant?: string, ip?: string, expectedSiteKey?: string, baseUrl?: string, _secret?: string, ua?: string, midAnchor?: string): Promise<void>;
 declare function signToken(siteKey: string, timestamp: number, secretOverride?: string): {
     token: string;
 };
 declare function fetchWhitelistForSiteKey(siteKey: string, baseUrl: string): Promise<string[]>;
 declare function __clearConfigCache(): void;
-declare function generateSkeleton(siteKey: string, token: string, baseUrl: string, restrictedAccess?: boolean, _whitelist?: string[], renderUrl?: string, locale?: Locale, flags?: Record<string, boolean>, clockts?: number, signingSecret?: string): Promise<string>;
-declare function injectGuardScripts(html: string, siteKey: string, baseUrl: string, whitelist?: string[] | null, restrictedAccess?: boolean, signingSecret?: string, _req?: object, _allowedOrigins?: string[], locale?: Locale, clockts?: number): Promise<string>;
+declare function generateSkeleton(siteKey: string, token: string, baseUrl: string, restrictedAccess?: boolean, _whitelist?: string[], renderUrl?: string, locale?: Locale, flags?: Record<string, boolean>, clockts?: number, signingSecret?: string, supportEmail?: string, midAnchorOk?: boolean): Promise<string>;
+declare function injectGuardScripts(html: string, siteKey: string, baseUrl: string, whitelist?: string[] | null, restrictedAccess?: boolean, signingSecret?: string, _req?: object, _allowedOrigins?: string[], locale?: Locale, clockts?: number, midAnchorOk?: boolean): Promise<string>;
 
 declare const BLOCK_PAGE: string;
 

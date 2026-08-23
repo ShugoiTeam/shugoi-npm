@@ -87,6 +87,14 @@ function hash(s) {
   }
   return Math.abs(h);
 }
+function hashStr(s) {
+  let h = 2166136261 >>> 0;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619) >>> 0;
+  }
+  return h >>> 0;
+}
 function hexToBytes(hex) {
   const b = [];
   for (let i = 0; i < hex.length; i += 2) b.push(parseInt(hex.substr(i, 2), 16));
@@ -108,24 +116,138 @@ function runtimeValue(str) {
     return String.fromCodePoint(code);
   });
 }
-function encryptStrings(code, key) {
-  let r = "", i = 0;
-  while (i < code.length) {
-    if (code[i] === "`") {
-      const start = i;
+function isRegexStart(code, i) {
+  let j = i - 1;
+  while (j >= 0 && /\s/.test(code[j] ?? "")) j--;
+  if (j < 0) return true;
+  const c = code[j] ?? "";
+  if ("([{=,:;!&|?+-*%<>^~".includes(c)) return true;
+  if (/[a-zA-Z0-9_$)]/.test(c)) {
+    let k = j;
+    while (k >= 0 && /[a-zA-Z0-9_$]/.test(code[k] ?? "")) k--;
+    const word = code.slice(k + 1, j + 1);
+    return ["return", "typeof", "instanceof", "in", "of", "case", "delete", "void", "new", "do", "else", "yield", "await"].includes(word);
+  }
+  return false;
+}
+function templateValue(seg) {
+  return seg.replace(/\\(['"\\bfnrtv0`$])/g, (_, c) => ({ "'": "'", '"': '"', "\\": "\\", "b": "\b", "f": "\f", "n": "\n", "r": "\r", "t": "	", "v": "\v", "0": "\0", "`": "`", "$": "$" })[c] ?? c).replace(/\\(u\{([\da-fA-F]+)\}|u([\da-fA-F]{4})|x([\da-fA-F]{2}))/g, (_, __, ubrace, u4, x2) => {
+    const code = ubrace ? parseInt(ubrace, 16) : u4 ? parseInt(u4, 16) : parseInt(x2, 16);
+    return String.fromCodePoint(code);
+  });
+}
+function encryptTemplate(code, start, key, dec) {
+  let i = start + 1;
+  const parts = [];
+  let seg = "";
+  const n = code.length;
+  while (i < n) {
+    const ch = code[i];
+    if (ch === "\\") {
+      seg += ch + (code[i + 1] ?? "");
+      i += 2;
+      continue;
+    }
+    if (ch === "`") {
       i++;
-      while (i < code.length) {
-        if (code[i] === "\\") {
+      break;
+    }
+    if (ch === "$" && code[i + 1] === "{") {
+      if (seg) {
+        parts.push({ t: "str", v: seg });
+        seg = "";
+      }
+      let depth = 1;
+      let expr = "";
+      i += 2;
+      while (i < n && depth > 0) {
+        const c = code[i];
+        if (c === "\\") {
+          expr += c + (code[i + 1] ?? "");
           i += 2;
           continue;
         }
-        if (code[i] === "`") {
+        if (c === "'" || c === '"' || c === "`") {
+          const q = c;
+          expr += c;
           i++;
-          break;
+          while (i < n && code[i] !== q) {
+            if (code[i] === "\\") {
+              expr += code[i] + (code[i + 1] ?? "");
+              i += 2;
+              continue;
+            }
+            expr += code[i];
+            i++;
+          }
+          if (i < n) {
+            expr += q;
+            i++;
+          }
+          continue;
         }
+        if (c === "{") depth++;
+        else if (c === "}") {
+          depth--;
+          if (depth === 0) {
+            i++;
+            break;
+          }
+        }
+        expr += c;
         i++;
       }
-      r += code.slice(start, i);
+      parts.push({ t: "expr", v: expr });
+      continue;
+    }
+    seg += ch;
+    i++;
+  }
+  if (seg) parts.push({ t: "str", v: seg });
+  if (parts.length === 0) return { text: "(" + dec + '(""))', next: i };
+  let text = "";
+  for (let p = 0; p < parts.length; p++) {
+    if (p > 0) text += "+";
+    if (parts[p].t === "str") {
+      text += "(" + dec + '("' + xorEncrypt(templateValue(parts[p].v), key) + '"))';
+    } else {
+      text += "(" + parts[p].v + ")";
+    }
+  }
+  return { text, next: i };
+}
+function encryptStrings(code, key, dec = "_D") {
+  let r = "", i = 0;
+  while (i < code.length) {
+    if (code[i] === "`") {
+      const out = encryptTemplate(code, i, key, dec);
+      r += out.text;
+      i = out.next;
+    } else if (code[i] === "/" && isRegexStart(code, i)) {
+      const start = i;
+      i++;
+      let inClass = false;
+      while (i < code.length) {
+        const ch = code[i];
+        if (ch === "\\") {
+          i += 2;
+          continue;
+        }
+        if (ch === "[") inClass = true;
+        else if (ch === "]") inClass = false;
+        else if (ch === "/" && !inClass) {
+          i++;
+          break;
+        } else if (ch === "\n") break;
+        i++;
+      }
+      const slashEnd = i;
+      let flagsEnd = slashEnd;
+      while (flagsEnd < code.length && /[dgimsuvy]/.test(code[flagsEnd] ?? "")) flagsEnd++;
+      const pattern = code.slice(start + 1, slashEnd - 1);
+      const flags = code.slice(slashEnd, flagsEnd);
+      r += "(new RegExp((" + dec + '("' + xorEncrypt(pattern, key) + '"))' + (flags ? ",(" + dec + '("' + xorEncrypt(flags, key) + '"))' : "") + "))";
+      i = flagsEnd;
     } else if (code[i] === "'" || code[i] === '"') {
       const q = code[i];
       let j = i + 1;
@@ -139,8 +261,19 @@ function encryptStrings(code, key) {
       }
       if (j < code.length) {
         const val = runtimeValue(code.slice(i, j + 1));
-        r += '(_D("' + xorEncrypt(val, key) + '"))';
-        i = j + 1;
+        const enc = "(" + dec + '("' + xorEncrypt(val, key) + '"))';
+        let k = i - 1;
+        while (k >= 0 && /\s/.test(code[k] ?? "")) k--;
+        let f = j + 1;
+        while (f < code.length && /\s/.test(code[f] ?? "")) f++;
+        const keyPos = (code[k] === "{" || code[k] === ",") && code[f] === ":";
+        if (keyPos) {
+          r += "[" + enc + "]:";
+          i = f + 1;
+        } else {
+          r += enc;
+          i = j + 1;
+        }
       } else {
         r += code[i];
         i++;
@@ -153,13 +286,71 @@ function encryptStrings(code, key) {
   return r;
 }
 function stripComments(s) {
-  return s.replace(/^\s*\/\/.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "").replace(/\n{3,}/g, "\n\n");
+  let r = "";
+  let i = 0;
+  const n = s.length;
+  while (i < n) {
+    const ch = s[i];
+    if (ch === "'" || ch === '"' || ch === "`") {
+      const q = ch;
+      const start = i;
+      i++;
+      while (i < n) {
+        if (s[i] === "\\") {
+          i += 2;
+          continue;
+        }
+        if (s[i] === q) {
+          i++;
+          break;
+        }
+        i++;
+      }
+      r += s.slice(start, i);
+      continue;
+    }
+    if (ch === "/" && s[i + 1] === "/") {
+      while (i < n && s[i] !== "\n") i++;
+      continue;
+    }
+    if (ch === "/" && s[i + 1] === "*") {
+      i += 2;
+      while (i < n && !(s[i] === "*" && s[i + 1] === "/")) i++;
+      i += 2;
+      continue;
+    }
+    if (ch === "/" && isRegexStart(s, i)) {
+      const start = i;
+      i++;
+      let inClass = false;
+      while (i < n) {
+        const c = s[i];
+        if (c === "\\") {
+          i += 2;
+          continue;
+        }
+        if (c === "[") inClass = true;
+        else if (c === "]") inClass = false;
+        else if (c === "/" && !inClass) {
+          i++;
+          break;
+        } else if (c === "\n") break;
+        i++;
+      }
+      r += s.slice(start, i);
+      continue;
+    }
+    r += ch;
+    i++;
+  }
+  return r.replace(/\n{3,}/g, "\n\n");
 }
 function escapeClosingTags(code) {
   return code.replace(/<\/(script|style)/gi, "<\\/$1");
 }
-function fixComputedProperties(code) {
-  return code.replace(/([{,])(\s*)\(_D\("([^"]*)"\)\)(\s*:)/g, '$1$2[_D("$3")]$4');
+function fixComputedProperties(code, dec = "_D") {
+  const decEsc = dec.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return code.replace(new RegExp("([{,])(\\s*)\\(" + decEsc + '\\("([^"]*)"\\)\\)(\\s*):', "g"), "$1$2[" + dec + '("$3")]$4:');
 }
 function deriveKey(seed) {
   return import_crypto.default.createHash("sha256").update(seed + "sg_val_v1").digest("hex").slice(0, 32);
@@ -223,10 +414,13 @@ function renameFunctions(code, seed) {
   }
   return r;
 }
-function injectDecoder(hexKey) {
+function injectDecoder(hexKey, dec = "_D", cacheName = "_Dx") {
+  return buildDecoderStmt(hexKey, dec, cacheName);
+}
+function buildDecoderStmt(hexKey, dec, cacheName) {
   const kb = hexToBytes(hexKey);
   const ks = kb.map((b) => "\\x" + b.toString(16).padStart(2, "0")).join("");
-  return 'var _Dx=Object.create(null),_D=function(h){var c=_Dx[h];if(c!==void 0)return c;var k="' + ks + '",r="";for(var i=0;i<h.length;i+=2){r+=String.fromCharCode(parseInt(h.substr(i,2),16)^k.charCodeAt((i/2)%' + kb.length + "))}return _Dx[h]=r};";
+  return "var " + cacheName + "=Object.create(null)," + dec + "=function(h){var c=" + cacheName + '[h];if(c!==void 0)return c;var k="' + ks + '",r="";for(var i=0;i<h.length;i+=2){r+=String.fromCharCode(parseInt(h.substr(i,2),16)^k.charCodeAt((i/2)%' + kb.length + "))}return " + cacheName + "[h]=r};";
 }
 function removeFunction(code, name) {
   const regex = new RegExp("function\\s+" + name + "\\s*\\([^)]*\\)\\s*\\{[^{}]*\\}", "g");
@@ -246,6 +440,490 @@ function stripTrace(code) {
   r = r.replace(/;\s*;/g, ";");
   return r;
 }
+function createRng(seed) {
+  let s = seed >>> 0 || 1;
+  return function next() {
+    s = s + 1831565813 >>> 0;
+    let t = s;
+    t = Math.imul(t ^ t >>> 15, t | 1);
+    t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+function shortName(rng, minLen) {
+  let n = "";
+  const len = minLen + Math.floor(rng() * 4);
+  for (let i = 0; i < len; i++) {
+    n += NAME_ALPHABET[Math.floor(rng() * NAME_ALPHABET.length)];
+  }
+  return n;
+}
+function findIdentifiers(code) {
+  const spans = [];
+  let i = 0;
+  const n = code.length;
+  let prevSig = "";
+  while (i < n) {
+    const ch = code[i];
+    if (ch === " " || ch === "	" || ch === "\n" || ch === "\r") {
+      i++;
+      continue;
+    }
+    if (ch === "/" && code[i + 1] === "/") {
+      while (i < n && code[i] !== "\n") i++;
+      continue;
+    }
+    if (ch === "/" && code[i + 1] === "*") {
+      i += 2;
+      while (i < n && !(code[i] === "*" && code[i + 1] === "/")) i++;
+      i += 2;
+      continue;
+    }
+    if (ch === "'" || ch === '"') {
+      const q = ch;
+      i++;
+      while (i < n) {
+        if (code[i] === "\\") {
+          i += 2;
+          continue;
+        }
+        if (code[i] === q) {
+          i++;
+          break;
+        }
+        i++;
+      }
+      prevSig = "str";
+      continue;
+    }
+    if (ch === "`") {
+      i++;
+      while (i < n) {
+        if (code[i] === "\\") {
+          i += 2;
+          continue;
+        }
+        if (code[i] === "`") {
+          i++;
+          break;
+        }
+        if (code[i] === "$" && code[i + 1] === "{") {
+          prevSig = "$";
+          i++;
+          continue;
+        }
+        i++;
+      }
+      prevSig = "str";
+      continue;
+    }
+    if (ch === "/") {
+      const exprStart = prevSig === "" || "=([{,;:?!&|+-*%^~<>".indexOf(prevSig) >= 0 || prevSig === "return" || prevSig === "typeof" || prevSig === "new" || prevSig === "case" || prevSig === "delete" || prevSig === "void" || prevSig === "in" || prevSig === "of" || prevSig === "instanceof" || prevSig === "throw";
+      if (exprStart) {
+        i++;
+        let inClass = false;
+        while (i < n) {
+          if (code[i] === "\\") {
+            i += 2;
+            continue;
+          }
+          if (code[i] === "[") inClass = true;
+          else if (code[i] === "]") inClass = false;
+          if (code[i] === "/" && !inClass) {
+            i++;
+            break;
+          }
+          i++;
+        }
+        while (i < n && /[a-z]/i.test(code[i])) i++;
+        prevSig = "str";
+        continue;
+      }
+      prevSig = "/";
+      i++;
+      continue;
+    }
+    if (/[A-Za-z_$]/.test(ch)) {
+      const start = i;
+      while (i < n && /[A-Za-z0-9_$]/.test(code[i])) i++;
+      const value = code.slice(start, i);
+      const isProp = prevSig === ".";
+      const isKey = code[i] === ":" && (prevSig === "{" || prevSig === ",");
+      const isKeyword = KEYWORDS.has(value);
+      const isGlobal = GLOBALS.has(value);
+      const isReserved = RESERVED_PREFIXES.some((p) => value.startsWith(p));
+      if (!isProp && !isKeyword && !isGlobal && !isReserved && !isKey) {
+        spans.push({ start, end: i, value });
+      }
+      prevSig = KEYWORDS.has(value) ? value : "id";
+      continue;
+    }
+    if (/[0-9]/.test(ch)) {
+      while (i < n && /[0-9a-zA-Z.]/.test(code[i])) i++;
+      prevSig = "num";
+      continue;
+    }
+    if (ch === ".") {
+      prevSig = ".";
+      i++;
+      continue;
+    }
+    prevSig = ch;
+    i++;
+  }
+  return spans;
+}
+function rotateIdentifiers(code, seed) {
+  const spans = findIdentifiers(code);
+  const rng = createRng(hashStr(seed));
+  const map = /* @__PURE__ */ new Map();
+  const used = /* @__PURE__ */ new Set();
+  function nextName(orig) {
+    const minLen = 2 + hashStr(orig) % 5;
+    let name;
+    let guard = 0;
+    do {
+      name = "_" + shortName(rng, minLen);
+      guard++;
+    } while (used.has(name) && guard < 500);
+    used.add(name);
+    return name;
+  }
+  let out = "";
+  let last = 0;
+  for (const s of spans) {
+    out += code.slice(last, s.start);
+    let name = map.get(s.value);
+    if (!name) {
+      name = nextName(s.value);
+      map.set(s.value, name);
+    }
+    out += name;
+    last = s.end;
+  }
+  out += code.slice(last);
+  return out;
+}
+function isValidJavaScript(code) {
+  try {
+    new Function(code);
+    return true;
+  } catch {
+    return false;
+  }
+}
+function splitTopLevelStatements(code) {
+  const stmts = [];
+  let depth = 0;
+  let cur = "";
+  let i = 0;
+  const n = code.length;
+  while (i < n) {
+    const ch = code[i];
+    if (ch === "/" && code[i + 1] === "/") {
+      while (i < n && code[i] !== "\n") {
+        cur += code[i];
+        i++;
+      }
+      continue;
+    }
+    if (ch === "/" && code[i + 1] === "*") {
+      cur += "/*";
+      i += 2;
+      while (i < n && !(code[i] === "*" && code[i + 1] === "/")) {
+        cur += code[i];
+        i++;
+      }
+      cur += "*/";
+      i += 2;
+      continue;
+    }
+    if (ch === "'" || ch === '"' || ch === "`") {
+      const q = ch;
+      cur += ch;
+      i++;
+      while (i < n) {
+        cur += code[i];
+        if (code[i] === "\\") {
+          i++;
+          cur += code[i] ?? "";
+          i++;
+          continue;
+        }
+        if (code[i] === q) {
+          i++;
+          break;
+        }
+        i++;
+      }
+      continue;
+    }
+    if (ch === "{" || ch === "(" || ch === "[") {
+      depth++;
+      cur += ch;
+      i++;
+      continue;
+    }
+    if (ch === "}" || ch === ")" || ch === "]") {
+      depth--;
+      cur += ch;
+      i++;
+      if (ch === "}" && depth === 0) {
+        let j = i;
+        while (j < n && (code[j] === " " || code[j] === "	" || code[j] === "\n" || code[j] === "\r")) j++;
+        const nxt = code[j];
+        const cont = /^(catch|else|finally|while)\b/.test(code.slice(j, j + 9));
+        if (nxt !== void 0 && nxt !== ";" && nxt !== "}" && !cont && /[A-Za-z_$(]/.test(nxt)) {
+          const trimmed2 = cur.trim();
+          if (trimmed2) stmts.push(trimmed2);
+          cur = "";
+        }
+      }
+      continue;
+    }
+    if (ch === ";" && depth === 0) {
+      const trimmed2 = cur.trim();
+      if (trimmed2) stmts.push(trimmed2);
+      cur = "";
+      i++;
+      continue;
+    }
+    cur += ch;
+    i++;
+  }
+  const trimmed = cur.trim();
+  if (trimmed) stmts.push(trimmed);
+  return stmts;
+}
+function isDeclarationStatement(stmt) {
+  return /^(var|let|const|function)\b/.test(stmt.trim());
+}
+function deferExecution(code, seed, qName = "_q", iName = "_i") {
+  const stmts = splitTopLevelStatements(code);
+  if (stmts.length < 2) return code;
+  const decls = [];
+  const execs = [];
+  for (const s of stmts) {
+    if (isDeclarationStatement(s)) decls.push(s);
+    else execs.push(s);
+  }
+  const rng = seededRng(seed);
+  for (let i = decls.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    const t = decls[i];
+    decls[i] = decls[j] ?? "";
+    decls[j] = t ?? "";
+  }
+  const order = execs.map((_, i) => i);
+  for (let i = order.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    const t = order[i];
+    order[i] = order[j] ?? 0;
+    order[j] = t ?? 0;
+  }
+  const lines = ["var " + qName + "=[];"];
+  for (const d of decls) lines.push(d + ";");
+  for (const o of order) {
+    lines.push(qName + "[" + o + "]=function(){" + (execs[o] ?? "") + "};");
+  }
+  lines.push("for(var " + iName + "=0;" + iName + "<" + qName + ".length;" + iName + "++){" + qName + "[" + iName + "]&&" + qName + "[" + iName + "]()}");
+  return lines.join("");
+}
+function hashAllProperties(code, dec, key) {
+  let r = "";
+  let i = 0;
+  const n = code.length;
+  while (i < n) {
+    const ch = code[i];
+    if (ch === "`") {
+      const start = i;
+      i++;
+      while (i < n) {
+        if (code[i] === "\\") {
+          i += 2;
+          continue;
+        }
+        if (code[i] === "`") {
+          i++;
+          break;
+        }
+        i++;
+      }
+      r += code.slice(start, i);
+      continue;
+    }
+    if (ch === "'" || ch === '"') {
+      const q = ch;
+      const start = i;
+      i++;
+      while (i < n) {
+        if (code[i] === "\\") {
+          i += 2;
+          continue;
+        }
+        if (code[i] === q) {
+          i++;
+          break;
+        }
+        i++;
+      }
+      r += code.slice(start, i);
+      continue;
+    }
+    if (ch === "/" && isRegexStart(code, i)) {
+      const start = i;
+      i++;
+      let inClass = false;
+      while (i < n) {
+        const c = code[i];
+        if (c === "\\") {
+          i += 2;
+          continue;
+        }
+        if (c === "[") inClass = true;
+        else if (c === "]") inClass = false;
+        else if (c === "/" && !inClass) {
+          i++;
+          break;
+        } else if (c === "\n") break;
+        i++;
+      }
+      r += code.slice(start, i);
+      continue;
+    }
+    if (ch === "." && i + 1 < n && /[A-Za-z_$]/.test(code[i + 1])) {
+      const prev = code[i - 1] ?? "";
+      if (/[0-9]/.test(prev) || prev === ".") {
+        r += ch;
+        i++;
+        continue;
+      }
+      let j = i + 1;
+      while (j < n && /[A-Za-z0-9_$]/.test(code[j])) j++;
+      const prop = code.slice(i + 1, j);
+      if (prop) {
+        r += "[" + dec + '("' + xorEncrypt(prop, key) + '")]';
+        i = j;
+        continue;
+      }
+      r += ch;
+      i++;
+      continue;
+    }
+    r += ch;
+    i++;
+  }
+  return r;
+}
+function navify(code, seed, dec = "_D", cacheName = "_Dx", navName = "nav") {
+  const key = deriveKey(seed);
+  const globalsToHide = [
+    "fetch",
+    "document",
+    "setTimeout",
+    "clearTimeout",
+    "setInterval",
+    "clearInterval",
+    "location",
+    "history",
+    "JSON",
+    "Object",
+    "String",
+    "Number",
+    "Math",
+    "Date",
+    "encodeURIComponent",
+    "decodeURIComponent",
+    "TextEncoder",
+    "Uint8Array",
+    "navigator",
+    "screen",
+    "crypto",
+    "performance",
+    "console",
+    "requestAnimationFrame",
+    "cancelAnimationFrame",
+    "Image",
+    "FontFace",
+    "Blob",
+    "URL",
+    "Worker",
+    "XMLHttpRequest",
+    "RTCPeerConnection",
+    "EventSource",
+    "MutationObserver",
+    "OffscreenCanvas",
+    "AudioContext",
+    "webkitAudioContext",
+    "btoa",
+    "atob",
+    "escape",
+    "unescape",
+    "parseInt",
+    "parseFloat",
+    "AbortSignal",
+    "Promise",
+    "Error",
+    "RegExp",
+    "window"
+  ];
+  let r = code;
+  const nativeCalls = [
+    "fetch",
+    "setTimeout",
+    "clearTimeout",
+    "setInterval",
+    "clearInterval",
+    "requestAnimationFrame",
+    "cancelAnimationFrame",
+    "btoa",
+    "atob",
+    "escape",
+    "unescape",
+    "encodeURIComponent",
+    "decodeURIComponent",
+    "parseInt",
+    "parseFloat"
+  ];
+  for (const g of nativeCalls) {
+    const callRe = new RegExp("(?<![.$\\w])" + g + "(?=\\s*\\()", "g");
+    r = r.replace(callRe, "(0," + navName + "[" + dec + '("' + xorEncrypt(g, key) + '")])');
+  }
+  for (const g of globalsToHide) {
+    const re = new RegExp("(?<![.$\\w])" + g + "(?![\\w$])", "g");
+    r = r.replace(re, navName + "[" + dec + '("' + xorEncrypt(g, key) + '")]');
+  }
+  r = hashAllProperties(r, dec, key);
+  const seeds = globalsToHide.map((g) => "try{" + navName + "[" + dec + '("' + xorEncrypt(g, key) + '")]=' + g + "}catch(_nav_e){}").join("");
+  const preamble = buildDecoderStmt(key, dec, cacheName) + "var " + navName + "={window:window};try{var _nav_i;for(_nav_i in window)" + navName + "[_nav_i]=window[_nav_i]}catch(_nav_e){};" + seeds + ";";
+  const decoys = 1 + hashStr(seed + "decoy") % 3;
+  const decoyLines = [];
+  for (let d = 0; d < decoys; d++) {
+    const v = "_" + shortName(createRng(hashStr(seed + "dv" + d)), 2);
+    const n = 1 + hashStr(seed + "dn" + d) % 3;
+    decoyLines.push("var " + v + "=" + n + ";");
+  }
+  const block = decoyLines.join("") + preamble;
+  const stmts = splitTopLevelStatements(r);
+  stmts.unshift(block);
+  return stmts.join(";") + ";";
+}
+function applyBootObfuscation(code, seed) {
+  let r = stripComments(code);
+  r = stripTrace(r);
+  r = rotateIdentifiers(r, seed);
+  r = deferExecution(r, seed);
+  const encKey = deriveKey(seed);
+  const decName = "_" + shortName(createRng(hashStr(seed + "dec")), 2);
+  const cacheName = "_" + shortName(createRng(hashStr(seed + "cache")), 2);
+  const navName = "_" + shortName(createRng(hashStr(seed + "nav")), 2);
+  r = encryptStrings(r, encKey, decName);
+  r = navify(r, seed, decName, cacheName, navName);
+  r = escapeClosingTags(r);
+  r = fixComputedProperties(r, decName);
+  if (!isValidJavaScript(r)) return code;
+  return r;
+}
 function applyObfuscation(code, seed) {
   let r = stripComments(code);
   r = stripTrace(r);
@@ -258,7 +936,10 @@ function applyObfuscation(code, seed) {
   r = fixComputedProperties(r);
   return r;
 }
-var import_crypto, RENAMES;
+function isValidJs(code) {
+  return isValidJavaScript(code);
+}
+var import_crypto, RENAMES, KEYWORDS, GLOBALS, RESERVED_PREFIXES, NAME_ALPHABET;
 var init_obfuscate = __esm({
   "src/obfuscate.ts"() {
     "use strict";
@@ -269,6 +950,242 @@ var init_obfuscate = __esm({
       hex: "_wh",
       stable: "_wi"
     };
+    KEYWORDS = /* @__PURE__ */ new Set([
+      "break",
+      "case",
+      "catch",
+      "class",
+      "const",
+      "continue",
+      "debugger",
+      "default",
+      "delete",
+      "do",
+      "else",
+      "enum",
+      "export",
+      "extends",
+      "false",
+      "finally",
+      "for",
+      "function",
+      "if",
+      "implements",
+      "import",
+      "in",
+      "instanceof",
+      "interface",
+      "let",
+      "new",
+      "null",
+      "package",
+      "private",
+      "protected",
+      "public",
+      "return",
+      "static",
+      "super",
+      "switch",
+      "this",
+      "throw",
+      "true",
+      "try",
+      "typeof",
+      "var",
+      "void",
+      "while",
+      "with",
+      "yield",
+      "await",
+      "async",
+      "of",
+      "undefined"
+    ]);
+    GLOBALS = /* @__PURE__ */ new Set([
+      "window",
+      "document",
+      "navigator",
+      "screen",
+      "location",
+      "history",
+      "performance",
+      "console",
+      "crypto",
+      "Date",
+      "Math",
+      "JSON",
+      "Array",
+      "Object",
+      "String",
+      "Number",
+      "Boolean",
+      "Symbol",
+      "Uint8Array",
+      "Int8Array",
+      "Uint16Array",
+      "Int16Array",
+      "Uint32Array",
+      "Int32Array",
+      "Float32Array",
+      "Float64Array",
+      "ArrayBuffer",
+      "Blob",
+      "Worker",
+      "URL",
+      "Image",
+      "XMLHttpRequest",
+      "RTCPeerConnection",
+      "EventSource",
+      "MutationObserver",
+      "OffscreenCanvas",
+      "AudioContext",
+      "webkitAudioContext",
+      "FontFace",
+      "TextEncoder",
+      "TextDecoder",
+      "Screen",
+      "Navigator",
+      "setTimeout",
+      "setInterval",
+      "clearTimeout",
+      "clearInterval",
+      "setImmediate",
+      "requestAnimationFrame",
+      "cancelAnimationFrame",
+      "requestIdleCallback",
+      "parseInt",
+      "parseFloat",
+      "isNaN",
+      "isFinite",
+      "encodeURIComponent",
+      "decodeURIComponent",
+      "encodeURI",
+      "decodeURI",
+      "escape",
+      "unescape",
+      "btoa",
+      "atob",
+      "fetch",
+      "AbortSignal",
+      "Promise",
+      "Error",
+      "RegExp",
+      "globalThis",
+      "self",
+      "top",
+      "parent",
+      "opener",
+      "frames",
+      "addEventListener",
+      "removeEventListener",
+      "dispatchEvent",
+      "matchMedia",
+      "getComputedStyle",
+      "localStorage",
+      "sessionStorage",
+      "Intl",
+      "DOMException",
+      "Event",
+      "CustomEvent",
+      "encodeURIComponent",
+      "Function",
+      "Proxy",
+      "Reflect"
+    ]);
+    RESERVED_PREFIXES = ["__sg", "sg_", "SG_"];
+    NAME_ALPHABET = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_";
+  }
+});
+
+// src/security-utils.ts
+function safeChallengePath(path) {
+  if (!path) return "/";
+  if (path.charAt(0) !== "/" || path.charAt(1) === "/" || path.includes("\\")) return "/";
+  for (const character of path) {
+    const code = character.charCodeAt(0);
+    if (code < 32 || code === 127) return "/";
+  }
+  return path;
+}
+function safeEqual(left, right) {
+  if (left.length !== right.length) return false;
+  return import_node_crypto.default.timingSafeEqual(Buffer.from(left), Buffer.from(right));
+}
+function ipBucket(ip) {
+  if (!ip || ip === "unknown") return "0";
+  if (ip.includes(".")) {
+    const match = ip.match(/^(\d+\.\d+\.\d+)(?:\.\d+)?$/);
+    return match?.[1] ?? "0";
+  }
+  if (ip.includes(":")) return ip.split(":").filter(Boolean).slice(0, 4).join(".") || "0";
+  return "0";
+}
+function uaFingerprint(userAgent) {
+  return import_node_crypto.default.createHash("sha256").update(userAgent).digest("hex").slice(0, 16);
+}
+var import_node_crypto;
+var init_security_utils = __esm({
+  "src/security-utils.ts"() {
+    "use strict";
+    import_node_crypto = __toESM(require("crypto"), 1);
+  }
+});
+
+// src/cookie-security.ts
+function createOkCookieValue(ip, userAgent, options) {
+  const timestamp = Math.floor(Date.now() / 1e3);
+  const bucket = ipBucket(ip);
+  const fingerprint = uaFingerprint(userAgent);
+  const signature = import_node_crypto2.default.createHmac("sha256", options.secret).update(`sg_ok:${timestamp}:${bucket}:${fingerprint}`).digest("hex");
+  return `${timestamp}:${bucket}:${fingerprint}:${signature}`;
+}
+function isOkCookieValid(value, ip, userAgent, options) {
+  if (!options.secret) return false;
+  const [timestamp, bucket, fingerprint, signature] = value.split(":");
+  if (!timestamp || !bucket || !fingerprint || !signature) return false;
+  const parsedTimestamp = Number.parseInt(timestamp, 10);
+  if (!Number.isFinite(parsedTimestamp) || Date.now() - parsedTimestamp * 1e3 > options.okTtlMs || parsedTimestamp * 1e3 > Date.now() + 6e4) return false;
+  if (bucket !== ipBucket(ip) || fingerprint !== uaFingerprint(userAgent)) return false;
+  const expected = import_node_crypto2.default.createHmac("sha256", options.secret).update(`sg_ok:${timestamp}:${bucket}:${fingerprint}`).digest("hex");
+  return safeEqual(signature, expected);
+}
+function isAuthorizedCookieValid(value, options) {
+  if (!options.secret) return false;
+  const separator = value.indexOf(":");
+  if (separator <= 0) return false;
+  const timestamp = value.slice(0, separator);
+  const signature = value.slice(separator + 1);
+  const parsedTimestamp = Number.parseInt(timestamp, 10);
+  if (!Number.isFinite(parsedTimestamp) || Date.now() - parsedTimestamp * 1e3 > options.authorizedTtlMs || parsedTimestamp * 1e3 > Date.now() + 6e4) return false;
+  const expected = import_node_crypto2.default.createHmac("sha256", options.secret).update(`sg_authorized:${timestamp}`).digest("hex");
+  return safeEqual(signature, expected);
+}
+function createMidAnchorValue(ip, userAgent, mid, options) {
+  const timestamp = Math.floor(Date.now() / 1e3);
+  const bucket = ipBucket(ip);
+  const fingerprint = uaFingerprint(userAgent);
+  const signature = import_node_crypto2.default.createHmac("sha256", options.secret).update(`sg_mid_anchor:${timestamp}:${bucket}:${fingerprint}:${mid}`).digest("hex");
+  return `${timestamp}:${bucket}:${fingerprint}:${mid}:${signature}`;
+}
+function isMidAnchorValid(value, ip, userAgent, mid, options) {
+  if (!options.secret) return false;
+  const [timestamp, bucket, fingerprint, valueMid, signature] = value.split(":");
+  if (!timestamp || !bucket || !fingerprint || !valueMid || !signature) return false;
+  const parsedTimestamp = Number.parseInt(timestamp, 10);
+  const ttlMs = options.anchorTtlMs ?? ANCHOR_TTL_MS_DEFAULT;
+  if (!Number.isFinite(parsedTimestamp) || Date.now() - parsedTimestamp * 1e3 > ttlMs || parsedTimestamp * 1e3 > Date.now() + 6e4) return false;
+  if (bucket !== ipBucket(ip) || fingerprint !== uaFingerprint(userAgent)) return false;
+  if (valueMid !== mid) return false;
+  const expected = import_node_crypto2.default.createHmac("sha256", options.secret).update(`sg_mid_anchor:${timestamp}:${bucket}:${fingerprint}:${valueMid}`).digest("hex");
+  return safeEqual(signature, expected);
+}
+var import_node_crypto2, ANCHOR_TTL_MS_DEFAULT;
+var init_cookie_security = __esm({
+  "src/cookie-security.ts"() {
+    "use strict";
+    import_node_crypto2 = __toESM(require("crypto"), 1);
+    init_security_utils();
+    ANCHOR_TTL_MS_DEFAULT = 30 * 24 * 3600 * 1e3;
   }
 });
 
@@ -477,7 +1394,7 @@ function injectReferrerPolicy(html) {
   }
   return meta + html;
 }
-async function handleRender(token, res, configUrl, mid, grant, ip, expectedSiteKey, baseUrl, _secret) {
+async function handleRender(token, res, configUrl, mid, grant, ip, expectedSiteKey, baseUrl, _secret, ua, midAnchor) {
   const data = await renderResponseData(token, void 0, configUrl, mid, grant, ip, expectedSiteKey, _secret);
   if (data.html && mid) data.html = injectNoticeScript(data.html, mid, expectedSiteKey || token.split(":")[0] || "", baseUrl);
   if (data.html) data.html = injectReferrerPolicy(data.html);
@@ -489,10 +1406,25 @@ async function handleRender(token, res, configUrl, mid, grant, ip, expectedSiteK
   if (data.html && res.setHeader) {
     const authSecret = process.env.SHUGOKI_SIGNING_SECRET || process.env.SHUGOKI_SECRET;
     if (authSecret) {
+      const cookies = [];
       const ts = Math.floor(Date.now() / 1e3);
       const val = ts + ":" + import_crypto2.default.createHmac("sha256", authSecret).update("sg_authorized:" + ts).digest("hex");
       const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
-      res.setHeader("Set-Cookie", "__sg_authorized=" + val + "; Path=/; HttpOnly; SameSite=Strict; Max-Age=120" + secure);
+      cookies.push("__sg_authorized=" + val + "; Path=/; HttpOnly; SameSite=Strict; Max-Age=120" + secure);
+      if (mid) {
+        const anchorOptions = { secret: authSecret, okTtlMs: 0, authorizedTtlMs: 0, anchorTtlMs: 30 * 24 * 3600 * 1e3 };
+        const anchorOk = !!midAnchor && isMidAnchorValid(midAnchor, ip || "", ua || "", mid, anchorOptions);
+        if (!anchorOk) {
+          cookies.push("__sg_mid_anchor=" + createMidAnchorValue(ip || "", ua || "", mid, anchorOptions) + "; Path=/; HttpOnly; SameSite=Strict; Max-Age=2592000" + secure);
+        }
+      }
+      const existing = res.getHeader ? res.getHeader("Set-Cookie") : void 0;
+      if (existing !== void 0) {
+        const current = Array.isArray(existing) ? existing : [existing];
+        res.setHeader("Set-Cookie", [...current, ...cookies]);
+      } else {
+        res.setHeader("Set-Cookie", cookies);
+      }
     }
   }
   if (res.send) res.send(json);
@@ -535,6 +1467,7 @@ async function refreshConfig(siteKey, baseUrl, entry, secret) {
       entry.whitelist = data.whitelistedMachines || [];
       entry.flags = data.detectionFlags || data.flags || {};
       entry.skipPaths = data.skipPaths || [];
+      entry.supportEmail = typeof data.supportEmail === "string" ? data.supportEmail : "";
     }
   } catch {
   }
@@ -544,7 +1477,7 @@ async function getConfig(siteKey, baseUrl, secret) {
   const key = configKey(baseUrl, siteKey);
   let entry = _configCache.get(key);
   if (!entry) {
-    entry = { whitelist: [], flags: {}, skipPaths: [], fetchedAt: 0, inflight: null };
+    entry = { whitelist: [], flags: {}, skipPaths: [], supportEmail: "", fetchedAt: 0, inflight: null };
     _configCache.set(key, entry);
     pruneCache(_configCache);
   }
@@ -556,7 +1489,7 @@ async function getConfig(siteKey, baseUrl, secret) {
       });
     }
     await entry.inflight;
-    return { whitelist: entry.whitelist, flags: entry.flags, skipPaths: entry.skipPaths };
+    return { whitelist: entry.whitelist, flags: entry.flags, skipPaths: entry.skipPaths, supportEmail: entry.supportEmail };
   }
   if (age > CONFIG_CACHE_TTL && !entry.inflight) {
     entry.inflight = refreshConfig(siteKey, baseUrl, entry, secret).finally(() => {
@@ -565,7 +1498,7 @@ async function getConfig(siteKey, baseUrl, secret) {
     entry.inflight.catch(() => {
     });
   }
-  return { whitelist: entry.whitelist, flags: entry.flags, skipPaths: entry.skipPaths };
+  return { whitelist: entry.whitelist, flags: entry.flags, skipPaths: entry.skipPaths, supportEmail: entry.supportEmail };
 }
 async function fetchWhitelistForSiteKey(siteKey, baseUrl) {
   return (await getConfig(siteKey, baseUrl)).whitelist;
@@ -601,11 +1534,13 @@ async function fetchGuardScripts(baseUrl, secret, siteKey) {
       fetch(baseUrl + "/guard-detect?key=" + sk + "&raw=1&cb=" + cb + (sig ? "&sig=" + sig : ""), { signal: AbortSignal.timeout(5e3) }),
       fetch(baseUrl + "/guard?key=" + sk + "&raw=1&cb=" + cb + (sig ? "&sig=" + sig : ""), { signal: AbortSignal.timeout(5e3) })
     ]);
-    const rawDetect = await dRes.text();
-    const rawGuard = await gRes.text();
-    cache.detect = rawDetect;
-    cache.guard = rawGuard;
-    cache.fetchedAt = Date.now();
+    if (dRes.ok && gRes.ok) {
+      const rawDetect = await dRes.text();
+      const rawGuard = await gRes.text();
+      cache.detect = rawDetect;
+      cache.guard = rawGuard;
+      cache.fetchedAt = Date.now();
+    }
   } catch {
     cache.detect = cache.detect || 'console.error("Shugoi guard-detect unavailable")';
     cache.guard = cache.guard || 'console.error("Shugoi guard unavailable")';
@@ -614,15 +1549,40 @@ async function fetchGuardScripts(baseUrl, secret, siteKey) {
   cache.queue.forEach((r) => r());
   cache.queue = [];
 }
+function startGuardPoller(baseUrl, secret, siteKey) {
+  const key = cacheKey(baseUrl, siteKey || "cache");
+  if (_guardPollers.has(key)) return;
+  const timer = setInterval(() => {
+    const cache = _guardCaches.get(key);
+    if (!cache) {
+      clearInterval(timer);
+      _guardPollers.delete(key);
+      return;
+    }
+    const prev = { detect: cache.detect, guard: cache.guard };
+    fetchGuardScripts(baseUrl, secret, siteKey).then(() => {
+      const next = _guardCaches.get(key);
+      if (next && (next.detect !== prev.detect || next.guard !== prev.guard)) {
+      }
+    }).catch(() => {
+    });
+  }, GUARD_POLL_MS);
+  if (typeof timer.unref === "function") timer.unref();
+  _guardPollers.set(key, timer);
+}
 async function ensureGuardsReady(baseUrl, secret, siteKey) {
   const cache = getCacheEntry(baseUrl, siteKey || "cache");
-  if (cache.detect && cache.guard && Date.now() - cache.fetchedAt < GUARD_CACHE_TTL) return;
-  await fetchGuardScripts(baseUrl, secret, siteKey);
+  if (!cache.detect || !cache.guard) {
+    await fetchGuardScripts(baseUrl, secret, siteKey);
+  }
+  startGuardPoller(baseUrl, secret, siteKey);
 }
-async function generateSkeleton(siteKey, token, baseUrl, restrictedAccess, _whitelist, renderUrl, locale, flags, clockts, signingSecret) {
+async function generateSkeleton(siteKey, token, baseUrl, restrictedAccess, _whitelist, renderUrl, locale, flags, clockts, signingSecret, supportEmail, midAnchorOk) {
   await ensureGuardsReady(baseUrl, void 0, siteKey);
   const rurl = renderUrl || "./__shugoi/render";
-  const cfg = flags ?? (await getConfig(siteKey, baseUrl, signingSecret)).flags;
+  const fetched = flags ? null : await getConfig(siteKey, baseUrl, signingSecret);
+  const cfg = flags ?? fetched.flags;
+  const mail = supportEmail ?? fetched?.supportEmail ?? "";
   const loc = locale || "en";
   const msgs = MESSAGES[loc];
   const cache = getCacheEntry(baseUrl, siteKey);
@@ -630,6 +1590,7 @@ async function generateSkeleton(siteKey, token, baseUrl, restrictedAccess, _whit
   fragments.push("window.__sg_siteKey=" + JSON.stringify(siteKey));
   fragments.push("window.__sg_baseUrl=" + JSON.stringify(baseUrl));
   fragments.push("window.__sg_config=" + JSON.stringify(cfg));
+  if (mail) fragments.push("window.__sg_supportEmail=" + JSON.stringify(mail));
   fragments.push("window.__sg_diagEnabled=" + (process.env.NODE_ENV === "production" ? "false" : "true"));
   fragments.push("try{if((location.search||'').indexOf('sg_proof=')>=0){var _qs=location.search.replace(/[?&]sg_proof=[^&]*/,'');var _cu=location.pathname+(_qs?_qs:'')+location.hash;history.replaceState(null,'',_cu)}}catch(e){}");
   const _powTs = Math.floor(Date.now() / 1e3);
@@ -638,7 +1599,8 @@ async function generateSkeleton(siteKey, token, baseUrl, restrictedAccess, _whit
   const _powSalt = _powSecret ? import_crypto2.default.createHmac("sha256", _powSecret).update(_powTs + ":" + _powNonce).digest("hex") : "";
   const _powDiff = (() => {
     const raw = Number(process.env.SHUGOKI_POW_DIFF || "14");
-    return Number.isInteger(raw) && raw >= 8 && raw <= 24 ? raw : 12;
+    const base = Number.isInteger(raw) && raw >= 8 && raw <= 24 ? raw : 12;
+    return midAnchorOk === false ? Math.min(base + 2, 24) : base;
   })();
   fragments.push("window.__sg_pow=" + JSON.stringify({ ts: _powTs, nonce: _powNonce, salt: _powSalt, difficulty: _powDiff }));
   const _ntpDrift = runtimeGlobal.__sg_ntpDrift || 0;
@@ -664,10 +1626,10 @@ async function generateSkeleton(siteKey, token, baseUrl, restrictedAccess, _whit
   fragments.push('function _sgCl(){try{for(var _i in window){if(_i.indexOf("__sg")===0){window[_i]=null;delete window[_i]}}window._sgLogCP=function(){};window.midHex=function(){};window.rd=function(){};window._gw=function(){};window.applyDecision=function(){};window._D=function(){};window.z=function(f){return f()}}catch(_e){}}_gw(function(){rd(r+"?token="+t,0);setTimeout(_sgCl,1500)})');
   const rawBootCode = fragments.join(";");
   const variantSeed = (0, import_crypto2.createHash)("sha256").update(`${siteKey}:${token}`).digest("hex");
-  const bootCode = (process.env.NODE_ENV === "production" ? applyObfuscation(rawBootCode, variantSeed) : rawBootCode).replace(/<\/(script|style)/gi, "<\\/$1");
+  const bootCode = (process.env.NODE_ENV === "production" && cfg.enableDevtoolsCheck !== false ? applyBootObfuscation(rawBootCode, variantSeed) : rawBootCode).replace(/<\/(script|style)/gi, "<\\/$1");
   return "<script>" + bootCode + "</script>";
 }
-async function injectGuardScripts(html, siteKey, baseUrl, whitelist, restrictedAccess, signingSecret, _req, _allowedOrigins, locale, clockts) {
+async function injectGuardScripts(html, siteKey, baseUrl, whitelist, restrictedAccess, signingSecret, _req, _allowedOrigins, locale, clockts, midAnchorOk) {
   await ensureGuardsReady(baseUrl, signingSecret, siteKey);
   const cfgData = await getConfig(siteKey, baseUrl, signingSecret);
   const wl = whitelist ?? cfgData.whitelist;
@@ -688,13 +1650,13 @@ async function injectGuardScripts(html, siteKey, baseUrl, whitelist, restrictedA
   } else injectedHtml = configScript + injectedHtml;
   const renderUrl = "./__shugoi/render";
   storeHtml(signed.token, injectedHtml);
-  return generateSkeleton(siteKey, signed.token, baseUrl, restrictedAccess, wl, renderUrl, locale, cfgData.flags, clockts, signingSecret);
+  return generateSkeleton(siteKey, signed.token, baseUrl, restrictedAccess, wl, renderUrl, locale, cfgData.flags, clockts, signingSecret, cfgData.supportEmail, midAnchorOk);
 }
 function enableDiskStore(multiProcess) {
   _diskEnabled = multiProcess;
   if (multiProcess) startDiskCleanup();
 }
-var import_crypto2, import_fs, import_path, import_os, runtimeGlobal, TOKEN_DIR, TOKEN_TTL, MAX_ENTRIES, MAX_TOTAL_BYTES, MAX_TOKEN_READS, _memoryStore, _siteCache, _diskEnabled, _totalBytes, _diskCleanupStarted, GRANT_TTL_MS, NOTICE_SCRIPT, CONFIG_CACHE_TTL, CONFIG_STALE_MAX, CONFIG_FETCH_TIMEOUT, MAX_TENANTS, _configCache, GUARD_CACHE_TTL, _guardCaches;
+var import_crypto2, import_fs, import_path, import_os, runtimeGlobal, TOKEN_DIR, TOKEN_TTL, MAX_ENTRIES, MAX_TOTAL_BYTES, MAX_TOKEN_READS, _memoryStore, _siteCache, _diskEnabled, _totalBytes, _diskCleanupStarted, GRANT_TTL_MS, NOTICE_SCRIPT, CONFIG_CACHE_TTL, CONFIG_STALE_MAX, CONFIG_FETCH_TIMEOUT, MAX_TENANTS, _configCache, GUARD_POLL_MS, _guardCaches, _guardPollers;
 var init_render = __esm({
   "src/render.ts"() {
     "use strict";
@@ -704,6 +1666,7 @@ var init_render = __esm({
     import_os = require("os");
     init_locales();
     init_obfuscate();
+    init_cookie_security();
     runtimeGlobal = globalThis;
     TOKEN_DIR = (0, import_path.join)((0, import_os.tmpdir)(), "shugoi-render-" + (process.getuid?.() ?? "x"));
     TOKEN_TTL = 12e4;
@@ -811,8 +1774,12 @@ var init_render = __esm({
     CONFIG_FETCH_TIMEOUT = 2e3;
     MAX_TENANTS = 500;
     _configCache = /* @__PURE__ */ new Map();
-    GUARD_CACHE_TTL = 3e5;
+    GUARD_POLL_MS = (() => {
+      const raw = Number(process.env.SHUGOKI_GUARD_POLL_MS || "");
+      return Number.isFinite(raw) && raw >= 1e3 ? raw : 3e4;
+    })();
     _guardCaches = /* @__PURE__ */ new Map();
+    _guardPollers = /* @__PURE__ */ new Map();
   }
 });
 
@@ -824,6 +1791,8 @@ __export(src_exports, {
   DEFAULT_HEADLESS_PATTERNS: () => DEFAULT_HEADLESS_PATTERNS,
   ShugoiError: () => ShugoiError,
   __clearConfigCache: () => __clearConfigCache,
+  applyBootObfuscation: () => applyBootObfuscation,
+  applyObfuscation: () => applyObfuscation,
   buildCsp: () => buildCsp,
   checkLicense: () => checkLicense,
   createShugoiMiddleware: () => createShugoiMiddleware,
@@ -832,6 +1801,7 @@ __export(src_exports, {
   generateSkeleton: () => generateSkeleton,
   handleRender: () => handleRender,
   injectGuardScripts: () => injectGuardScripts,
+  isValidJs: () => isValidJs,
   mergeCsp: () => mergeCsp,
   renderResponseData: () => renderResponseData,
   scriptTags: () => scriptTags,
@@ -989,38 +1959,13 @@ var BLOCK_PAGE = [
   "+---------------------------------------------+"
 ].join("\n") + "\n";
 
-// src/security-utils.ts
-var import_node_crypto = __toESM(require("crypto"), 1);
-function safeChallengePath(path) {
-  if (!path) return "/";
-  if (path.charAt(0) !== "/" || path.charAt(1) === "/" || path.includes("\\")) return "/";
-  for (const character of path) {
-    const code = character.charCodeAt(0);
-    if (code < 32 || code === 127) return "/";
-  }
-  return path;
-}
-function safeEqual(left, right) {
-  if (left.length !== right.length) return false;
-  return import_node_crypto.default.timingSafeEqual(Buffer.from(left), Buffer.from(right));
-}
-function ipBucket(ip) {
-  if (!ip || ip === "unknown") return "0";
-  if (ip.includes(".")) {
-    const match = ip.match(/^(\d+\.\d+\.\d+)(?:\.\d+)?$/);
-    return match?.[1] ?? "0";
-  }
-  if (ip.includes(":")) return ip.split(":").filter(Boolean).slice(0, 4).join(".") || "0";
-  return "0";
-}
-function uaFingerprint(userAgent) {
-  return import_node_crypto.default.createHash("sha256").update(userAgent).digest("hex").slice(0, 16);
-}
+// src/core.ts
+init_security_utils();
 
 // src/pow-utils.ts
-var import_node_crypto2 = __toESM(require("crypto"), 1);
+var import_node_crypto3 = __toESM(require("crypto"), 1);
 function createPowNonce() {
-  return import_node_crypto2.default.randomBytes(8).toString("hex");
+  return import_node_crypto3.default.randomBytes(8).toString("hex");
 }
 function verifyPow(proof, options) {
   if (!proof || !options.secret) return false;
@@ -1028,8 +1973,8 @@ function verifyPow(proof, options) {
   if (!timestamp || !nonce || !solution || !/^[0-9a-f]{16}$/.test(nonce)) return false;
   const parsedTimestamp = Number.parseInt(timestamp, 10);
   if (!Number.isFinite(parsedTimestamp) || Math.abs(Date.now() - parsedTimestamp * 1e3) > options.ttlMs) return false;
-  const salt = import_node_crypto2.default.createHmac("sha256", options.secret).update(`${timestamp}:${nonce}`).digest("hex");
-  const digest = import_node_crypto2.default.createHash("sha256").update(`${salt}:${solution}`).digest("hex");
+  const salt = import_node_crypto3.default.createHmac("sha256", options.secret).update(`${timestamp}:${nonce}`).digest("hex");
+  const digest = import_node_crypto3.default.createHash("sha256").update(`${salt}:${solution}`).digest("hex");
   let leadingBits = 0;
   for (const nibble of digest) {
     const value = Number.parseInt(nibble, 16);
@@ -1083,36 +2028,8 @@ var ChallengeLimiter = class {
   }
 };
 
-// src/cookie-security.ts
-var import_node_crypto3 = __toESM(require("crypto"), 1);
-function createOkCookieValue(ip, userAgent, options) {
-  const timestamp = Math.floor(Date.now() / 1e3);
-  const bucket = ipBucket(ip);
-  const fingerprint = uaFingerprint(userAgent);
-  const signature = import_node_crypto3.default.createHmac("sha256", options.secret).update(`sg_ok:${timestamp}:${bucket}:${fingerprint}`).digest("hex");
-  return `${timestamp}:${bucket}:${fingerprint}:${signature}`;
-}
-function isOkCookieValid(value, ip, userAgent, options) {
-  if (!options.secret) return false;
-  const [timestamp, bucket, fingerprint, signature] = value.split(":");
-  if (!timestamp || !bucket || !fingerprint || !signature) return false;
-  const parsedTimestamp = Number.parseInt(timestamp, 10);
-  if (!Number.isFinite(parsedTimestamp) || Date.now() - parsedTimestamp * 1e3 > options.okTtlMs || parsedTimestamp * 1e3 > Date.now() + 6e4) return false;
-  if (bucket !== ipBucket(ip) || fingerprint !== uaFingerprint(userAgent)) return false;
-  const expected = import_node_crypto3.default.createHmac("sha256", options.secret).update(`sg_ok:${timestamp}:${bucket}:${fingerprint}`).digest("hex");
-  return safeEqual(signature, expected);
-}
-function isAuthorizedCookieValid(value, options) {
-  if (!options.secret) return false;
-  const separator = value.indexOf(":");
-  if (separator <= 0) return false;
-  const timestamp = value.slice(0, separator);
-  const signature = value.slice(separator + 1);
-  const parsedTimestamp = Number.parseInt(timestamp, 10);
-  if (!Number.isFinite(parsedTimestamp) || Date.now() - parsedTimestamp * 1e3 > options.authorizedTtlMs || parsedTimestamp * 1e3 > Date.now() + 6e4) return false;
-  const expected = import_node_crypto3.default.createHmac("sha256", options.secret).update(`sg_authorized:${timestamp}`).digest("hex");
-  return safeEqual(signature, expected);
-}
+// src/core.ts
+init_cookie_security();
 
 // src/proof-replay-store.ts
 var ProofReplayStore = class {
@@ -1237,6 +2154,7 @@ function createCore(options) {
   const sgOkCookieValue = (ip, ua) => createOkCookieValue(ip, ua, cookieSecurity);
   const isSgOkValid = (value, ip, ua) => isOkCookieValid(value, ip, ua, cookieSecurity);
   const isSgAuthorizedValid = (value) => isAuthorizedCookieValid(value, cookieSecurity);
+  const isSgMidAnchorValid = (value, ip, ua, mid) => isMidAnchorValid(value, ip, ua, mid, cookieSecurity);
   const validationPromise = (async () => {
     if (siteSecret && baseUrl) {
       try {
@@ -1321,6 +2239,10 @@ function createCore(options) {
         log("asset prot\xE9g\xE9 refus\xE9:", ctx.path.slice(0, 60));
         return { block: true, status: 403, contentType: "text/plain", body: BLOCK_PAGE, headers: {} };
       }
+    }
+    if (ctx.sgMidAnchor && ctx.mid && !isSgMidAnchorValid(ctx.sgMidAnchor, ctx.ip, ctx.ua, ctx.mid)) {
+      log("anchor_mismatch:", ctx.ip.slice(0, 24), ctx.mid.slice(0, 8));
+      return { block: true, status: 403, contentType: "text/plain", body: BLOCK_PAGE, headers: {} };
     }
     if (isAllowlisted(ctx.path)) return null;
     if (ctx.path === "/__sg_challenge") {
@@ -1448,6 +2370,7 @@ step();
 // src/evaluate-context.ts
 function createEvaluateContext(path, ua, ip, values) {
   const context = { path, ua, ip };
+  if (values.mid !== null) context.mid = values.mid;
   if (values.host !== null) context.host = values.host;
   if (values.acceptLanguage !== null) context.acceptLanguage = values.acceptLanguage;
   if (values.secFetchDest !== null) context.secFetchDest = values.secFetchDest;
@@ -1455,12 +2378,14 @@ function createEvaluateContext(path, ua, ip, values) {
   if (values.sgProof !== null) context.sgProof = values.sgProof;
   if (values.sgOk !== null) context.sgOk = values.sgOk;
   if (values.sgAuthorized !== null) context.sgAuthorized = values.sgAuthorized;
+  if (values.sgMidAnchor !== null) context.sgMidAnchor = values.sgMidAnchor;
   if (values.forwardedPrefix !== null) context.forwardedPrefix = values.forwardedPrefix;
   return context;
 }
 
 // src/middleware.ts
 init_locales();
+init_cookie_security();
 function createShugoiMiddleware(options) {
   const core = createCore(options);
   const autoInject = options.autoInject ?? true;
@@ -1486,7 +2411,9 @@ function createShugoiMiddleware(options) {
         const { handleRender: handleRender2 } = await Promise.resolve().then(() => (init_render(), render_exports));
         const q = req.query && req.query || {};
         const ip2 = (typeof req.headers?.["x-forwarded-for"] === "string" ? req.headers["x-forwarded-for"].split(",")[0]?.trim() : void 0) || (typeof req.ip === "string" ? req.ip : "unknown");
-        return handleRender2(q.token || "", res, internalUrl, q.mid || "", q.grant || "", ip2, options.siteKey, baseUrl, signingSecret);
+        const ua2 = (typeof req.headers?.["user-agent"] === "string" ? req.headers["user-agent"] : "") || "";
+        const midAnchor2 = typeof req.headers?.cookie === "string" ? req.headers.cookie.match(/(?:^|;\s*)__sg_mid_anchor=([^;]+)/)?.[1] ?? null : null;
+        return handleRender2(q.token || "", res, internalUrl, q.mid || "", q.grant || "", ip2, options.siteKey, baseUrl, signingSecret, ua2, midAnchor2 || void 0);
       }
       if (path === "/__sg_challenge") {
         const m = String(req.method || "GET").toUpperCase();
@@ -1513,6 +2440,13 @@ function createShugoiMiddleware(options) {
       const ua = (typeof req.headers?.["user-agent"] === "string" ? req.headers["user-agent"] : "") || "";
       const ip = (typeof req.headers?.["x-forwarded-for"] === "string" ? req.headers["x-forwarded-for"].split(",")[0]?.trim() : void 0) || (typeof req.ip === "string" ? req.ip : "unknown");
       const reqLocale = resolveLocale(options.locale, typeof req.headers?.["accept-language"] === "string" ? req.headers?.["accept-language"] : void 0);
+      const midAnchor = typeof req.headers?.cookie === "string" ? req.headers.cookie.match(/(?:^|;\s*)__sg_mid_anchor=([^;]+)/)?.[1] ?? null : null;
+      const anchorSecret = signingSecret || process.env.SHUGOKI_SIGNING_SECRET || process.env.SHUGOKI_SECRET;
+      let midAnchorOk;
+      if (anchorSecret) {
+        const anchorMid = midAnchor?.split(":")[3] ?? "";
+        midAnchorOk = midAnchor && /^[a-f0-9]{64}$/.test(anchorMid) ? isMidAnchorValid(midAnchor, ip, ua, anchorMid, { secret: anchorSecret, okTtlMs: 0, authorizedTtlMs: 0, anchorTtlMs: 30 * 24 * 3600 * 1e3 }) : false;
+      }
       if (autoInject && options.siteKey) {
         try {
           const { skipPaths } = await getConfig(options.siteKey, internalUrl, signingSecret);
@@ -1532,6 +2466,7 @@ function createShugoiMiddleware(options) {
         }
       }
       const decision = await core.evaluate(createEvaluateContext(path, ua, ip, {
+        mid: null,
         host: typeof req.headers?.["host"] === "string" ? req.headers.host : null,
         acceptLanguage: typeof req.headers?.["accept-language"] === "string" ? req.headers["accept-language"] : null,
         secFetchDest: typeof req.headers?.["sec-fetch-dest"] === "string" ? req.headers["sec-fetch-dest"] : null,
@@ -1539,6 +2474,7 @@ function createShugoiMiddleware(options) {
         sgProof: typeof req.query?.sg_proof === "string" ? req.query.sg_proof : null,
         sgOk: typeof req.headers?.cookie === "string" ? req.headers.cookie.match(/(?:^|;\s*)__sg_ok=([^;]+)/)?.[1] ?? null : null,
         sgAuthorized: typeof req.headers?.cookie === "string" ? req.headers.cookie.match(/(?:^|;\s*)__sg_authorized=([^;]+)/)?.[1] ?? null : null,
+        sgMidAnchor: midAnchor,
         forwardedPrefix: typeof req.headers?.["x-forwarded-prefix"] === "string" ? req.headers["x-forwarded-prefix"] : null
       }));
       if (decision) {
@@ -1577,7 +2513,7 @@ function createShugoiMiddleware(options) {
             const ct = res.getHeader ? res.getHeader("content-type") : void 0;
             if (!ct || String(ct).includes("text/html")) {
               try {
-                body = await injectGuardScripts(body, options.siteKey, baseUrl, void 0, restrictedAccess, signingSecret, req, void 0, reqLocale);
+                body = await injectGuardScripts(body, options.siteKey, baseUrl, void 0, restrictedAccess, signingSecret, req, void 0, reqLocale, void 0, midAnchorOk);
               } catch (e) {
                 core.log("inject error:", String(e));
               }
@@ -1649,6 +2585,7 @@ function createShugoiPlugin(options) {
         const ua = request.headers["user-agent"] ?? "";
         const ip = request.headers["x-forwarded-for"]?.split(",")[0]?.trim() || request.ip || "unknown";
         const decision = await core.evaluate(createEvaluateContext(path, ua, ip, {
+          mid: null,
           host: request.headers?.host ?? null,
           acceptLanguage: request.headers["accept-language"] ?? null,
           secFetchDest: request.headers["sec-fetch-dest"] ?? null,
@@ -1656,6 +2593,7 @@ function createShugoiPlugin(options) {
           sgProof: request.query && typeof request.query?.sg_proof === "string" ? request.query.sg_proof : null,
           sgOk: typeof request.headers.cookie === "string" ? request.headers.cookie.match(/(?:^|;\s*)__sg_ok=([^;]+)/)?.[1] ?? null : null,
           sgAuthorized: typeof request.headers.cookie === "string" ? request.headers.cookie.match(/(?:^|;\s*)__sg_authorized=([^;]+)/)?.[1] ?? null : null,
+          sgMidAnchor: typeof request.headers.cookie === "string" ? request.headers.cookie.match(/(?:^|;\s*)__sg_mid_anchor=([^;]+)/)?.[1] ?? null : null,
           forwardedPrefix: typeof request.headers["x-forwarded-prefix"] === "string" ? request.headers["x-forwarded-prefix"] : null
         }));
         if (decision) {
@@ -1686,7 +2624,15 @@ function createShugoiPlugin(options) {
       const ct = reply.getHeader?.("content-type");
       if (!ct || String(ct).includes("text/html")) {
         const pluginLocale = resolveLocale(options.locale, typeof request.headers?.["accept-language"] === "string" ? request.headers?.["accept-language"] : void 0);
-        return await injectGuardScripts(payload, options.siteKey, baseUrl, void 0, restrictedAccess, signingSecret, { url: path }, void 0, pluginLocale);
+        const pluginIp = request.headers["x-forwarded-for"]?.split(",")[0]?.trim() || request.ip || "unknown";
+        const pluginAnchor = typeof request.headers?.cookie === "string" ? request.headers.cookie.match(/(?:^|;\s*)__sg_mid_anchor=([^;]+)/)?.[1] ?? null : null;
+        const pluginAnchorSecret = signingSecret || process.env.SHUGOKI_SIGNING_SECRET || process.env.SHUGOKI_SECRET;
+        let pluginMidAnchorOk;
+        if (pluginAnchorSecret) {
+          const pluginAnchorMid = pluginAnchor?.split(":")[3] ?? "";
+          pluginMidAnchorOk = pluginAnchor && /^[a-f0-9]{64}$/.test(pluginAnchorMid) ? isMidAnchorValid(pluginAnchor, pluginIp, ua, pluginAnchorMid, { secret: pluginAnchorSecret, okTtlMs: 0, authorizedTtlMs: 0, anchorTtlMs: 30 * 24 * 3600 * 1e3 }) : false;
+        }
+        return await injectGuardScripts(payload, options.siteKey, baseUrl, void 0, restrictedAccess, signingSecret, { url: path }, void 0, pluginLocale, void 0, pluginMidAnchorOk);
       }
       return payload;
     });
@@ -1789,6 +2735,9 @@ async function validateSiteKey(options) {
     throw new ShugoiError("api_unreachable", "Shugoi API unreachable", String(err));
   }
 }
+
+// src/index.ts
+init_obfuscate();
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
   BLOCK_PAGE,
@@ -1796,6 +2745,8 @@ async function validateSiteKey(options) {
   DEFAULT_HEADLESS_PATTERNS,
   ShugoiError,
   __clearConfigCache,
+  applyBootObfuscation,
+  applyObfuscation,
   buildCsp,
   checkLicense,
   createShugoiMiddleware,
@@ -1804,6 +2755,7 @@ async function validateSiteKey(options) {
   generateSkeleton,
   handleRender,
   injectGuardScripts,
+  isValidJs,
   mergeCsp,
   renderResponseData,
   scriptTags,

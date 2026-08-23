@@ -7,7 +7,7 @@ import { BLOCK_PAGE } from './block-page'
 import { safeChallengePath } from './security-utils'
 import { createPowNonce, verifyPow } from './pow-utils'
 import { ChallengeLimiter } from './challenge-limiter'
-import { createOkCookieValue, isAuthorizedCookieValid, isOkCookieValid } from './cookie-security'
+import { createOkCookieValue, isAuthorizedCookieValid, isMidAnchorValid, isOkCookieValid } from './cookie-security'
 import { ProofReplayStore } from './proof-replay-store'
 import type { EvaluateContext } from './evaluate-context'
 export { BLOCK_PAGE } from './block-page'
@@ -130,6 +130,7 @@ export function createCore(options: ShugoiCoreOptions): ShugoiCore {
   const sgOkCookieValue = (ip: string, ua: string): string => createOkCookieValue(ip, ua, cookieSecurity)
   const isSgOkValid = (value: string, ip: string, ua: string): boolean => isOkCookieValid(value, ip, ua, cookieSecurity)
   const isSgAuthorizedValid = (value: string): boolean => isAuthorizedCookieValid(value, cookieSecurity)
+  const isSgMidAnchorValid = (value: string, ip: string, ua: string, mid: string): boolean => isMidAnchorValid(value, ip, ua, mid, cookieSecurity)
 
   const validationPromise: Promise<void> = (async () => {
     if (siteSecret && baseUrl) {
@@ -221,6 +222,17 @@ export function createCore(options: ShugoiCoreOptions): ShugoiCore {
         log('asset protégé refusé:', ctx.path.slice(0, 60))
         return { block: true, status: 403, contentType: 'text/plain', body: BLOCK_PAGE, headers: {} }
       }
+    }
+
+    // Ancre serveur : si une ancre __sg_mid_anchor existe (machine déjà vue) et qu'un mid est
+    // fourni dans le contexte, tout mid qui ne matche pas l'ancre → block anchor_mismatch.
+    // NB : dans le flux actuel, le contexte de navigation (createEvaluateContext) ne transporte
+    // JAMAIS de mid (c'est un paramètre de /wlc et /__shugoi/render, traités hors evaluate).
+    // La vérification d'ancre réelle est donc faite côté site dans wlCheckHandler ; cette règle
+    // est un filet de sécurité si un jour un contexte porte un mid.
+    if (ctx.sgMidAnchor && ctx.mid && !isSgMidAnchorValid(ctx.sgMidAnchor, ctx.ip, ctx.ua, ctx.mid)) {
+      log('anchor_mismatch:', ctx.ip.slice(0, 24), ctx.mid.slice(0, 8))
+      return { block: true, status: 403, contentType: 'text/plain', body: BLOCK_PAGE, headers: {} }
     }
 
     if (isAllowlisted(ctx.path)) return null

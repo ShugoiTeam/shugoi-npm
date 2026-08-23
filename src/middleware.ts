@@ -5,6 +5,7 @@ import { mergeCsp } from './csp'
 import { createCore } from './core'
 import { createEvaluateContext } from './evaluate-context'
 import { resolveLocale, type Locale } from './locales'
+import { isMidAnchorValid } from './cookie-security'
 
 export interface MinimalRequest {
   path?: string; url?: string; ip?: string; method?: string;
@@ -80,7 +81,9 @@ export function createShugoiMiddleware(options: ShugoiCoreOptions) {
         const ip = (typeof req.headers?.['x-forwarded-for'] === 'string'
           ? req.headers['x-forwarded-for'].split(',')[0]?.trim()
           : undefined) || (typeof req.ip === 'string' ? req.ip : 'unknown');
-        return handleRender(q.token || '', res, internalUrl, q.mid || '', q.grant || '', ip, options.siteKey, baseUrl, signingSecret);
+        const ua = (typeof req.headers?.['user-agent'] === 'string' ? req.headers['user-agent'] : '') || '';
+        const midAnchor = typeof req.headers?.cookie === 'string' ? req.headers.cookie.match(/(?:^|;\s*)__sg_mid_anchor=([^;]+)/)?.[1] ?? null : null;
+        return handleRender(q.token || '', res, internalUrl, q.mid || '', q.grant || '', ip, options.siteKey, baseUrl, signingSecret, ua, midAnchor || undefined);
       }
 
       if (path === '/__sg_challenge') {
@@ -112,6 +115,15 @@ export function createShugoiMiddleware(options: ShugoiCoreOptions) {
         ? req.headers['x-forwarded-for'].split(',')[0]?.trim()
         : undefined) || (typeof req.ip === 'string' ? req.ip : 'unknown');
       const reqLocale: Locale = resolveLocale(options.locale, typeof req.headers?.['accept-language'] === 'string' ? req.headers?.['accept-language'] : undefined);
+      const midAnchor = typeof req.headers?.cookie === 'string' ? req.headers.cookie.match(/(?:^|;\s*)__sg_mid_anchor=([^;]+)/)?.[1] ?? null : null;
+      const anchorSecret = signingSecret || process.env.SHUGOKI_SIGNING_SECRET || process.env.SHUGOKI_SECRET;
+      let midAnchorOk: boolean | undefined;
+      if (anchorSecret) {
+        const anchorMid = midAnchor?.split(':')[3] ?? '';
+        midAnchorOk = midAnchor && /^[a-f0-9]{64}$/.test(anchorMid)
+          ? isMidAnchorValid(midAnchor, ip, ua, anchorMid, { secret: anchorSecret, okTtlMs: 0, authorizedTtlMs: 0, anchorTtlMs: 30 * 24 * 3600 * 1000 })
+          : false;
+      }
 
       if (autoInject && options.siteKey) {
         try {
@@ -132,6 +144,7 @@ export function createShugoiMiddleware(options: ShugoiCoreOptions) {
       }
 
       const decision = await core.evaluate(createEvaluateContext(path, ua, ip, {
+        mid: null,
         host: typeof req.headers?.['host'] === 'string' ? req.headers.host : null,
         acceptLanguage: typeof req.headers?.['accept-language'] === 'string' ? req.headers['accept-language'] : null,
         secFetchDest: typeof req.headers?.['sec-fetch-dest'] === 'string' ? req.headers['sec-fetch-dest'] : null,
@@ -139,6 +152,7 @@ export function createShugoiMiddleware(options: ShugoiCoreOptions) {
         sgProof: typeof req.query?.sg_proof === 'string' ? req.query.sg_proof : null,
         sgOk: typeof req.headers?.cookie === 'string' ? req.headers.cookie.match(/(?:^|;\s*)__sg_ok=([^;]+)/)?.[1] ?? null : null,
         sgAuthorized: typeof req.headers?.cookie === 'string' ? req.headers.cookie.match(/(?:^|;\s*)__sg_authorized=([^;]+)/)?.[1] ?? null : null,
+        sgMidAnchor: midAnchor,
         forwardedPrefix: typeof req.headers?.['x-forwarded-prefix'] === 'string' ? req.headers['x-forwarded-prefix'] : null,
       }));
 
@@ -181,7 +195,7 @@ export function createShugoiMiddleware(options: ShugoiCoreOptions) {
           if (typeof body === 'string') {
             const ct = res.getHeader ? res.getHeader('content-type') : undefined;
             if (!ct || String(ct).includes('text/html')) {
-              try { body = await injectGuardScripts(body, options.siteKey, baseUrl, undefined, restrictedAccess, signingSecret, req, undefined, reqLocale); } catch (e) { core.log('inject error:', String(e)); }
+              try { body = await injectGuardScripts(body, options.siteKey, baseUrl, undefined, restrictedAccess, signingSecret, req, undefined, reqLocale, undefined, midAnchorOk); } catch (e) { core.log('inject error:', String(e)); }
               injected = true;
             }
           }
@@ -262,6 +276,7 @@ export function createShugoiPlugin(options: ShugoiCoreOptions) {
         const ip = request.headers['x-forwarded-for']?.split(',')[0]?.trim() || request.ip || 'unknown';
 
         const decision = await core.evaluate(createEvaluateContext(path, ua, ip, {
+          mid: null,
           host: request.headers?.host ?? null,
           acceptLanguage: request.headers['accept-language'] ?? null,
           secFetchDest: request.headers['sec-fetch-dest'] ?? null,
@@ -269,6 +284,7 @@ export function createShugoiPlugin(options: ShugoiCoreOptions) {
           sgProof: request.query && typeof request.query?.sg_proof === 'string' ? request.query.sg_proof : null,
           sgOk: typeof request.headers.cookie === 'string' ? request.headers.cookie.match(/(?:^|;\s*)__sg_ok=([^;]+)/)?.[1] ?? null : null,
           sgAuthorized: typeof request.headers.cookie === 'string' ? request.headers.cookie.match(/(?:^|;\s*)__sg_authorized=([^;]+)/)?.[1] ?? null : null,
+          sgMidAnchor: typeof request.headers.cookie === 'string' ? request.headers.cookie.match(/(?:^|;\s*)__sg_mid_anchor=([^;]+)/)?.[1] ?? null : null,
           forwardedPrefix: typeof request.headers['x-forwarded-prefix'] === 'string' ? request.headers['x-forwarded-prefix'] : null,
         }));
 
@@ -302,7 +318,17 @@ export function createShugoiPlugin(options: ShugoiCoreOptions) {
       const ct = reply.getHeader?.('content-type');
       if (!ct || String(ct).includes('text/html')) {
         const pluginLocale: Locale = resolveLocale(options.locale, typeof request.headers?.['accept-language'] === 'string' ? request.headers?.['accept-language'] : undefined);
-        return await injectGuardScripts(payload, options.siteKey, baseUrl, undefined, restrictedAccess, signingSecret, { url: path }, undefined, pluginLocale);
+        const pluginIp = request.headers['x-forwarded-for']?.split(',')[0]?.trim() || request.ip || 'unknown';
+        const pluginAnchor = typeof request.headers?.cookie === 'string' ? request.headers.cookie.match(/(?:^|;\s*)__sg_mid_anchor=([^;]+)/)?.[1] ?? null : null;
+        const pluginAnchorSecret = signingSecret || process.env.SHUGOKI_SIGNING_SECRET || process.env.SHUGOKI_SECRET;
+        let pluginMidAnchorOk: boolean | undefined;
+        if (pluginAnchorSecret) {
+          const pluginAnchorMid = pluginAnchor?.split(':')[3] ?? '';
+          pluginMidAnchorOk = pluginAnchor && /^[a-f0-9]{64}$/.test(pluginAnchorMid)
+            ? isMidAnchorValid(pluginAnchor, pluginIp, ua, pluginAnchorMid, { secret: pluginAnchorSecret, okTtlMs: 0, authorizedTtlMs: 0, anchorTtlMs: 30 * 24 * 3600 * 1000 })
+            : false;
+        }
+        return await injectGuardScripts(payload, options.siteKey, baseUrl, undefined, restrictedAccess, signingSecret, { url: path }, undefined, pluginLocale, undefined, pluginMidAnchorOk);
       }
       return payload;
     });
