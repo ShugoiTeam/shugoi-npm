@@ -9,11 +9,13 @@ function run(code: string): EvaluatedValue {
 }
 
 describe("obfuscation", () => {
-  it("préserve les template literals pendant l'encodage des chaînes simples", () => {
+  it("chiffre les template literals (segments statiques) en gardant les interpolations", () => {
     const src = "(function(){var a=\"plain\";var b=`literal \${a}`;out=b})()";
     const out = applyObfuscation(src, "seed-1234");
-    expect(out).toContain("`literal \${a}`");
+    // les segments de texte du template sont chiffrés, l'interpolation ${a} reste
+    expect(out).not.toContain("`literal \${a}`");
     expect(out).not.toContain('"plain"');
+    expect(out).toContain("+(a)"); // interpolation conservée
     expect(run(out)).toBe("literal plain");
   });
   it("définit le décodeur avant les chaînes encodées dans un script d'amorçage", () => {

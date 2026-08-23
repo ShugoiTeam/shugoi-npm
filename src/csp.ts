@@ -3,6 +3,14 @@ export interface CspOptions {
   extraDirectives?: Record<string, string[]>;
   splitRender?: boolean;
   apiOrigin?: string;
+  // Couche "invisible eval" du bootstrap (applyInvisibleEval) : exécute le
+  // bootcode encodé en U+E0000 via eval() → script-src a besoin de
+  // 'unsafe-eval' UNIQUEMENT quand cette couche est active.
+  // bootEval force l'état ; sinon la couche est active par défaut en
+  // production (et désactivée si enableDevtoolsCheck === false), à l'identique
+  // de render.ts.
+  bootEval?: boolean;
+  enableDevtoolsCheck?: boolean;
 }
 
 export function originOf(baseUrl?: string): string | null {
@@ -43,6 +51,12 @@ export function buildCsp(options: CspOptions): string {
     for (const [key, values] of Object.entries(options.extraDirectives)) {
       merged[key] = [...new Set([...(merged[key] ?? []), ...values])];
     }
+  }
+
+  const requireUnsafeEval = options.bootEval ?? (process.env.NODE_ENV === 'production' && options.enableDevtoolsCheck !== false);
+  const scriptSrc = merged['script-src'] ?? [];
+  if (requireUnsafeEval && !scriptSrc.includes("'unsafe-eval'")) {
+    scriptSrc.push("'unsafe-eval'");
   }
 
   return Object.entries(merged)

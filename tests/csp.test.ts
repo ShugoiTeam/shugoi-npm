@@ -44,6 +44,22 @@ describe('buildCsp', () => {
     const csp = buildCsp({ siteKey: 'sg_sk_live_xxx' });
     expect(csp).not.toContain('unsafe-eval');
   });
+
+  it("ajoute 'unsafe-eval' quand la couche invisible-eval est active (bootEval: true)", () => {
+    const csp = buildCsp({ siteKey: 'sg_sk_live_xxx', bootEval: true });
+    const scriptSrc = csp.split('; ').find(s => s.startsWith('script-src'));
+    expect(scriptSrc).toContain("'unsafe-eval'");
+  });
+
+  it("n'ajoute PAS 'unsafe-eval' quand bootEval: false même en production", () => {
+    const csp = buildCsp({ siteKey: 'sg_sk_live_xxx', bootEval: false, enableDevtoolsCheck: true });
+    expect(csp).not.toContain('unsafe-eval');
+  });
+
+  it("n'ajoute PAS 'unsafe-eval' quand enableDevtoolsCheck: false", () => {
+    const csp = buildCsp({ siteKey: 'sg_sk_live_xxx', enableDevtoolsCheck: false });
+    expect(csp).not.toContain('unsafe-eval');
+  });
 });
 
 describe('mergeCsp', () => {

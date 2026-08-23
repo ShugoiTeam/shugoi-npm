@@ -142,7 +142,7 @@ By default (`splitRender: true`), Shugoi replaces the HTML body with a minimal s
 4. Only then loads the real page content via `fetch()` + `document.write()`
 
 This means:
-- **`unsafe-eval` is not required.** The bootstrap is emitted as ordinary JavaScript.
+- **`unsafe-eval` is required** in production. The bootstrap obfuscates the bootcode as invisible characters (U+E0000+, Supplementary Private Use Area-B) and executes it via `eval()`. `buildCsp` adds `'unsafe-eval'` to `script-src` by default in production; set `bootEval: false` (or `enableDevtoolsCheck: false`) in `buildCsp` to opt out. In development the plain bootcode is emitted and no `unsafe-eval` is needed.
 - **Bots get the original HTML**, not the skeleton (Googlebot, Bingbot, etc. — they exit before injection). No SEO impact.
 - **First paint is the skeleton**, not your actual content. The real page loads ~100-300ms after.
 - **Without JavaScript**, the page stays blank (skeleton). This is by design — it blocks non-JS scrapers, with the exception of verified search engine bots (Googlebot, Bingbot…) which receive the original HTML (see `verifyBots` option).

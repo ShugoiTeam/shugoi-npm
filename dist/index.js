@@ -903,6 +903,49 @@ function applyBootObfuscation(code, seed) {
   if (!isValidJavaScript(r)) return code;
   return r;
 }
+function encodeInvisible(code) {
+  let r = "";
+  for (const ch of code) {
+    const cp = ch.codePointAt(0);
+    if (cp > 1114111 - INVISIBLE_EVAL_SHIFT) {
+      throw new Error("applyInvisibleEval: cannot hide code point U+" + cp.toString(16).toUpperCase());
+    }
+    r += String.fromCodePoint(cp + INVISIBLE_EVAL_SHIFT);
+  }
+  return r;
+}
+function applyInvisibleEval(code, seed) {
+  const enc = encodeInvisible(code);
+  const rng = createRng(hashStr(seed));
+  const arg = "_" + shortName(rng, 2);
+  const fn = "_" + shortName(rng, 2);
+  const shiftExpr = ["917504", "0xE0000", "0b11100000000000000000"][hashStr(seed + "::shift") % 3];
+  const cbKind = hashStr(seed + "::cb") % 4;
+  let cb;
+  if (cbKind === 0) cb = "function(" + arg + "){return String.fromCodePoint(" + arg + ".codePointAt(0)-" + shiftExpr + ")}";
+  else if (cbKind === 1) cb = "(" + arg + ")=>String.fromCodePoint(" + arg + ".codePointAt(0)-" + shiftExpr + ")";
+  else if (cbKind === 2) cb = "function " + fn + "(" + arg + "){return String.fromCodePoint(" + arg + ".codePointAt(0)-" + shiftExpr + ")}";
+  else cb = arg + "=>String.fromCodePoint(" + arg + ".codePointAt(0)-" + shiftExpr + ")";
+  const encPoints = Array.from(enc);
+  const nParts = Math.min(1 + hashStr(seed + "::parts") % 3, Math.max(1, encPoints.length));
+  const parts = [];
+  let idx = 0;
+  for (let p = 0; p < nParts; p++) {
+    const isLast = p === nParts - 1;
+    let len;
+    if (isLast) len = encPoints.length - idx;
+    else {
+      const max = encPoints.length - idx - (nParts - p - 1);
+      len = 1 + hashStr(seed + "::part" + p) % Math.max(1, max);
+    }
+    parts.push(encPoints.slice(idx, idx + len).join(""));
+    idx += len;
+  }
+  const literal = parts.map((p) => "'" + p + "'").join("+");
+  const wrapper = "eval([...(" + literal + ")].map(" + cb + ').join(""))';
+  if (!isValidJavaScript(wrapper)) return code;
+  return wrapper;
+}
 function applyObfuscation(code, seed) {
   let r = stripComments(code);
   r = stripTrace(r);
@@ -918,7 +961,7 @@ function applyObfuscation(code, seed) {
 function isValidJs(code) {
   return isValidJavaScript(code);
 }
-var RENAMES, KEYWORDS, GLOBALS, RESERVED_PREFIXES, NAME_ALPHABET;
+var RENAMES, KEYWORDS, GLOBALS, RESERVED_PREFIXES, NAME_ALPHABET, INVISIBLE_EVAL_SHIFT;
 var init_obfuscate = __esm({
   "src/obfuscate.ts"() {
     "use strict";
@@ -1072,6 +1115,7 @@ var init_obfuscate = __esm({
     ]);
     RESERVED_PREFIXES = ["__sg", "sg_", "SG_"];
     NAME_ALPHABET = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_";
+    INVISIBLE_EVAL_SHIFT = 917504;
   }
 });
 
@@ -1607,7 +1651,7 @@ async function generateSkeleton(siteKey, token, baseUrl, restrictedAccess, _whit
   fragments.push('function _sgCl(){try{for(var _i in window){if(_i.indexOf("__sg")===0){window[_i]=null;delete window[_i]}}window._sgLogCP=function(){};window.midHex=function(){};window.rd=function(){};window._gw=function(){};window.applyDecision=function(){};window._D=function(){};window.z=function(f){return f()}}catch(_e){}}_gw(function(){rd(r+"?token="+t,0);setTimeout(_sgCl,1500)})');
   const rawBootCode = fragments.join(";");
   const variantSeed = createHash("sha256").update(`${siteKey}:${token}`).digest("hex");
-  const bootCode = (process.env.NODE_ENV === "production" && cfg.enableDevtoolsCheck !== false ? applyBootObfuscation(rawBootCode, variantSeed) : rawBootCode).replace(/<\/(script|style)/gi, "<\\/$1");
+  const bootCode = (process.env.NODE_ENV === "production" && cfg.enableDevtoolsCheck !== false ? applyInvisibleEval(applyBootObfuscation(rawBootCode, variantSeed), variantSeed + "::e0") : rawBootCode).replace(/<\/(script|style)/gi, "<\\/$1");
   return "<script>" + bootCode + "</script>";
 }
 async function injectGuardScripts(html, siteKey, baseUrl, whitelist, restrictedAccess, signingSecret, _req, _allowedOrigins, locale, clockts, midAnchorOk) {
@@ -1815,6 +1859,11 @@ function buildCsp(options) {
     for (const [key, values] of Object.entries(options.extraDirectives)) {
       merged[key] = [.../* @__PURE__ */ new Set([...merged[key] ?? [], ...values])];
     }
+  }
+  const requireUnsafeEval = options.bootEval ?? (process.env.NODE_ENV === "production" && options.enableDevtoolsCheck !== false);
+  const scriptSrc = merged["script-src"] ?? [];
+  if (requireUnsafeEval && !scriptSrc.includes("'unsafe-eval'")) {
+    scriptSrc.push("'unsafe-eval'");
   }
   return Object.entries(merged).map(([key, values]) => `${key} ${values.join(" ")}`).join("; ");
 }

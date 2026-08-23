@@ -70,6 +70,8 @@ interface CspOptions {
     extraDirectives?: Record<string, string[]>;
     splitRender?: boolean;
     apiOrigin?: string;
+    bootEval?: boolean;
+    enableDevtoolsCheck?: boolean;
 }
 declare function buildCsp(options: CspOptions): string;
 declare function mergeCsp(existing: string | undefined, added: string): string;

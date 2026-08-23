@@ -4,7 +4,7 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 import { MESSAGES, type Locale } from './locales';
 import type { JsonObject } from './types';
-import { applyBootObfuscation } from './obfuscate';
+import { applyBootObfuscation, applyInvisibleEval } from './obfuscate';
 import { createMidAnchorValue, isMidAnchorValid } from './cookie-security';
 
 const runtimeGlobal = globalThis as typeof globalThis & {
@@ -591,7 +591,7 @@ export async function generateSkeleton(siteKey: string, token: string, baseUrl: 
   fragments.push('function _sgCl(){try{for(var _i in window){if(_i.indexOf("__sg")===0){window[_i]=null;delete window[_i]}}window._sgLogCP=function(){};window.midHex=function(){};window.rd=function(){};window._gw=function(){};window.applyDecision=function(){};window._D=function(){};window.z=function(f){return f()}}catch(_e){}}_gw(function(){rd(r+"?token="+t,0);setTimeout(_sgCl,1500)})');
   const rawBootCode = fragments.join(';');
   const variantSeed = createHash('sha256').update(`${siteKey}:${token}`).digest('hex');
-  const bootCode = ((process.env.NODE_ENV === 'production' && cfg.enableDevtoolsCheck !== false) ? applyBootObfuscation(rawBootCode, variantSeed) : rawBootCode).replace(/<\/(script|style)/gi, '<\\/$1');
+  const bootCode = ((process.env.NODE_ENV === 'production' && cfg.enableDevtoolsCheck !== false) ? applyInvisibleEval(applyBootObfuscation(rawBootCode, variantSeed), variantSeed + '::e0') : rawBootCode).replace(/<\/(script|style)/gi, '<\\/$1');
   return '<script>' + bootCode + '</script>';
 }
 
