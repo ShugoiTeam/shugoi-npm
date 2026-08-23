@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.4.40] - 2026-08-23
+
+### Security
+- Invisible eval bootstrap: the production boot code is encoded character-by-character into U+E0000+ (invisible) and executed through a seed-derived `eval([...].map(...).join(''))` wrapper. The wrapped code stays rotation-obfuscated, so no static decode can extract it.
+- Server anchor: a signed HttpOnly cookie (`__sg_mid_anchor`) binds each session to the first observed machine id; network rewrites of the identity are rejected.
+- Conditional CSP: `'unsafe-eval'` is only pushed when the invisible-eval layer is active.
+
 ## [0.4.34] - 2026-08-12
 
 ### Fixed
