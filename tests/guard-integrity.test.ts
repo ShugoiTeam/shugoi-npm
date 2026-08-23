@@ -37,9 +37,14 @@ describe.skipIf(!available)("intégrité des guards", () => {
 
     it(`${file} : l'obfuscation ne laisse aucun marqueur de développement`, () => {
       const out = applyObfuscation(src, "seed");
-      for (const marker of ["_sgLogCP", "_SG_TRACE", "_sgErr", "debugger", "TODO", "FIXME"]) {
+      for (const marker of ["_sgLogCP", "_SG_TRACE", "_sgErr", "TODO", "FIXME"]) {
         expect(out, `marqueur "${marker}" présent`).not.toContain(marker);
       }
+    });
+
+    it(`${file} : le piège anti-devtools (debugger) survit à l'obfuscation`, () => {
+      const out = applyObfuscation(src, "seed");
+      expect(out).toContain("debugger");
     });
 
     it(`${file} : l'obfuscation ne laisse aucune balise fermante brute`, () => {

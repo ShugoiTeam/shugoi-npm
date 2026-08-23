@@ -41,12 +41,14 @@ function signToken(siteKey: string, timestamp: number, secretOverride?: string) 
 }
 
 let _httpGuardCache: { detect: string | null; guard: string | null; fetchedAt: number } = { detect: null, guard: null, fetchedAt: 0 };
+let _httpGuardPolling = false;
 
-async function fetchGuardsHttp(baseUrl: string, siteKey: string, signingSecret?: string): Promise<{ detect: string; guard: string } | null> {
-  const GUARD_CACHE_TTL = 300_000;
-  if (_httpGuardCache.detect && _httpGuardCache.guard && Date.now() - _httpGuardCache.fetchedAt < GUARD_CACHE_TTL) {
-    return { detect: _httpGuardCache.detect, guard: _httpGuardCache.guard };
-  }
+const GUARD_POLL_MS = (() => {
+  const raw = Number(process.env.SHUGOKI_GUARD_POLL_MS || '');
+  return Number.isFinite(raw) && raw >= 1000 ? raw : 30_000;
+})();
+
+async function refreshGuardsHttp(baseUrl: string, siteKey: string, signingSecret?: string): Promise<{ detect: string; guard: string } | null> {
   try {
     const cb = Date.now();
     const sk = siteKey || 'cache';
@@ -57,10 +59,51 @@ async function fetchGuardsHttp(baseUrl: string, siteKey: string, signingSecret?:
       fetch(baseUrl + '/guard?key=' + sk + '&raw=1&cb=' + cb + (sig ? '&sig=' + sig : ''), { signal: AbortSignal.timeout(5000) }),
     ]);
     if (!dRes.ok || !gRes.ok) return null;
-    _httpGuardCache.detect = await dRes.text();
-    _httpGuardCache.guard = await gRes.text();
-    _httpGuardCache.fetchedAt = Date.now();
+    return { detect: await dRes.text(), guard: await gRes.text() };
+  } catch {
+    return null;
+  }
+}
+
+function startHttpGuardPoller(baseUrl: string, siteKey: string, signingSecret?: string): void {
+  if (_httpGuardPolling) return;
+  _httpGuardPolling = true;
+  setInterval(() => {
+    const prev = { detect: _httpGuardCache.detect, guard: _httpGuardCache.guard };
+    refreshGuardsHttp(baseUrl, siteKey, signingSecret).then((next) => {
+      if (next && (next.detect !== prev.detect || next.guard !== prev.guard)) {
+        _httpGuardCache.detect = next.detect;
+        _httpGuardCache.guard = next.guard;
+        _httpGuardCache.fetchedAt = Date.now();
+      }
+    }).catch(() => {});
+  }, GUARD_POLL_MS).unref();
+}
+
+async function fetchGuardsHttp(baseUrl: string, siteKey: string, signingSecret?: string): Promise<{ detect: string; guard: string } | null> {
+  if (_httpGuardCache.detect && _httpGuardCache.guard) {
+    startHttpGuardPoller(baseUrl, siteKey, signingSecret);
     return { detect: _httpGuardCache.detect, guard: _httpGuardCache.guard };
+  }
+  const fresh = await refreshGuardsHttp(baseUrl, siteKey, signingSecret);
+  if (fresh) {
+    _httpGuardCache.detect = fresh.detect;
+    _httpGuardCache.guard = fresh.guard;
+    _httpGuardCache.fetchedAt = Date.now();
+  }
+  startHttpGuardPoller(baseUrl, siteKey, signingSecret);
+  return fresh;
+}
+
+async function fetchSiteConfig(baseUrl: string, siteKey: string, signingSecret?: string): Promise<{ enableDevtoolsCheck?: boolean | undefined; supportEmail?: string | undefined } | null> {
+  try {
+    const cb = Date.now();
+    const secret = signingSecret || process.env.SHUGOKI_SIGNING_SECRET || process.env.SHUGOKI_SECRET;
+    const sig = secret ? crypto.createHmac('sha256', secret).update(cb.toString()).digest('hex') : '';
+    const res = await fetch(baseUrl + '/whitelist?key=' + encodeURIComponent(siteKey) + '&cb=' + cb + (sig ? '&sig=' + sig : ''), { signal: AbortSignal.timeout(5000) });
+    if (!res.ok) return null;
+    const data = await res.json() as { detectionFlags?: Record<string, boolean>; supportEmail?: string };
+    return { enableDevtoolsCheck: data.detectionFlags?.enableDevtoolsCheck, supportEmail: data.supportEmail };
   } catch {
     return null;
   }
@@ -142,10 +185,13 @@ export function createShugoiNextMiddleware(options: ShugoiNextOptions) {
 
       const ts = Date.now();
       const signed = signToken(siteKey, ts, signingSecret);
+      const remoteConfig = await fetchSiteConfig(BASE_URL, siteKey, signingSecret);
       const cfg = JSON.stringify({
         enableWhitelist: true, enableVmCheck: true, enableTorCheck: true,
         enableHeadlessCheck: true, enableAntiDetectCheck: true,
         enableContentReplacementCheck: false,
+        enableDevtoolsCheck: remoteConfig?.enableDevtoolsCheck !== false,
+        ...(remoteConfig?.supportEmail ? { supportEmail: remoteConfig.supportEmail } : {}),
       });
 
       const internalFetch = await fetch(request.url, {

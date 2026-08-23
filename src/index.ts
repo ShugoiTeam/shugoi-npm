@@ -10,3 +10,5 @@ export type {
   ScriptTagsOptions, ScriptTagsResult, BlockPageContext,
   CheckRequest, CheckResponse,
 } from './types';
+
+export { applyObfuscation, applyBootObfuscation, isValidJs } from './obfuscate';
