@@ -2199,13 +2199,45 @@ function createCore(options) {
     return botWhitelist.some((p) => p.test(ua));
   }
   const botIpList = new Set((process.env.SHUGOKI_BOT_IPS || "").split(",").map((s) => s.trim()).filter(Boolean));
+  const LENIENT_WINDOW_MS = 6e4;
+  const LENIENT_MAX_PER_WINDOW = 20;
+  const LENIENT_MAX_IPS = 5e3;
+  const _lenientHits = /* @__PURE__ */ new Map();
+  function lenientBotAllow(ip) {
+    const now = Date.now();
+    if (_lenientHits.size > LENIENT_MAX_IPS && !_lenientHits.has(ip)) {
+      let oldestKey = null;
+      let oldestAt = Infinity;
+      for (const [k, v] of _lenientHits) {
+        const at = v[0] ?? 0;
+        if (at < oldestAt) {
+          oldestAt = at;
+          oldestKey = k;
+        }
+      }
+      if (oldestKey) _lenientHits.delete(oldestKey);
+    }
+    let hits = _lenientHits.get(ip);
+    if (!hits) {
+      hits = [];
+      _lenientHits.set(ip, hits);
+    }
+    while (hits.length) {
+      const first = hits[0];
+      if (first === void 0 || now - first > LENIENT_WINDOW_MS) hits.shift();
+      else break;
+    }
+    if (hits.length >= LENIENT_MAX_PER_WINDOW) return false;
+    hits.push(now);
+    return true;
+  }
   async function botBypass(ua, ip) {
     if (!isWhitelistedBot(ua)) return false;
     if (options.logBotIps !== false) {
       console.log("[shugoi] bot_ua ip=" + ip + " ua=" + String(ua).slice(0, 50));
     }
     if (VERIFIABLE_BOTS.some((p) => p.test(ua))) return await isTrustedBot(ua, ip);
-    return true;
+    return lenientBotAllow(ip);
   }
   async function isTrustedBot(ua, ip) {
     if (!isWhitelistedBot(ua)) return false;

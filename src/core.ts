@@ -182,13 +182,46 @@ export function createCore(options: ShugoiCoreOptions): ShugoiCore {
     return botWhitelist.some(p => p.test(ua))
   }
   const botIpList = new Set((process.env.SHUGOKI_BOT_IPS || '').split(',').map(s => s.trim()).filter(Boolean))
+// Bots sociaux non vérifiables par reverse DNS : rate-limit par IP.
+const LENIENT_WINDOW_MS = 60_000
+const LENIENT_MAX_PER_WINDOW = 20
+const LENIENT_MAX_IPS = 5_000
+const _lenientHits = new Map<string, number[]>()
+function lenientBotAllow(ip: string): boolean {
+  const now = Date.now()
+  if (_lenientHits.size > LENIENT_MAX_IPS && !_lenientHits.has(ip)) {
+    let oldestKey: string | null = null
+    let oldestAt = Infinity
+    for (const [k, v] of _lenientHits) {
+      const at = v[0] ?? 0
+      if (at < oldestAt) { oldestAt = at; oldestKey = k }
+    }
+    if (oldestKey) _lenientHits.delete(oldestKey)
+  }
+  let hits = _lenientHits.get(ip)
+  if (!hits) { hits = []; _lenientHits.set(ip, hits) }
+  while (hits.length) {
+    const first = hits[0]
+    if (first === undefined || now - first > LENIENT_WINDOW_MS) hits.shift()
+    else break
+  }
+  if (hits.length >= LENIENT_MAX_PER_WINDOW) return false
+  hits.push(now)
+  return true
+}
+
   async function botBypass(ua: string, ip: string): Promise<boolean> {
     if (!isWhitelistedBot(ua)) return false
     if (options.logBotIps !== false) {
       console.log('[shugoi] bot_ua ip=' + ip + ' ua=' + String(ua).slice(0, 50))
     }
     if (VERIFIABLE_BOTS.some(p => p.test(ua))) return await isTrustedBot(ua, ip)
-    return true
+    // Bots sociaux non vérifiables par reverse DNS (facebookexternalhit,
+    // Twitterbot, LinkedInBot, Slackbot, WhatsApp…) : l'UA seul est falsifiable.
+    // Rate-limit par IP — les aperçus de liens légitimes sont bas volume ; le
+    // scraping de masse via un UA forgé devient impraticable. Au-delà de la
+    // borne, le trafic repasse dans le flux normal (PoW + challenge).
+    return lenientBotAllow(ip)
   }
 
   async function isTrustedBot(ua: string, ip: string): Promise<boolean> {
