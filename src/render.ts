@@ -561,7 +561,7 @@ export async function generateSkeleton(siteKey: string, token: string, baseUrl: 
   const _powNonce = (typeof crypto.randomBytes === 'function' ? crypto.randomBytes(8).toString('hex') : String(Math.floor(Math.random() * 0xffffffff)).padStart(8, '0') + String(Math.floor(Math.random() * 0xffffffff)).padStart(8, '0'));
   const _powSalt = _powSecret ? crypto.createHmac('sha256', _powSecret).update(_powTs + ':' + _powNonce).digest('hex') : '';
   const _powDiff = (() => {
-    const raw = Number(process.env.SHUGOKI_POW_DIFF || '14');
+    const raw = Number(process.env.SHUGOKI_POW_DIFF || '12');
     const base = Number.isInteger(raw) && raw >= 8 && raw <= 24 ? raw : 12;
     // midAnchorOk === false → machine non reconnue (pas d'ancre valide) → PoW durci +2.
     // true ou undefined → difficulté de base.
