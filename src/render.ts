@@ -6,7 +6,7 @@ import { MESSAGES, type Locale } from './locales';
 import type { JsonObject } from './types';
 
 import { createMidAnchorValue, isMidAnchorValid } from './cookie-security';
-import { applyBootObfuscation, applyInvisibleEval } from './obfuscate';
+import { applyBootObfuscation } from './obfuscate';
 
 const runtimeGlobal = globalThis as typeof globalThis & {
   __sg_ntpDrift?: number;
@@ -613,15 +613,15 @@ export async function generateSkeleton(siteKey: string, token: string, baseUrl: 
   // Obfuscation du bootcode SSR pilotée par le toggle anti-debug
   // (enableDevtoolsCheck) : rotation des identifiants + chiffrement des strings
   // + exécution différée, seedée par siteKey:token (change à chaque page).
-  // Puis couche "invisible eval" (U+E0000) : encode le bootcode obfusqué char
-  // par char en caractères invisibles (Supplementary Private Use Area-B) et
-  // l'exécute via eval() → le bootcode devient UNE seule ligne visuellement
-  // courte. CSP 'unsafe-eval' requis quand la couche est active (csp.ts).
+  // ⚠️ Couche "invisible eval" (U+E0000, applyInvisibleEval) TEMPORAIREMENT
+  // RETIRÉE : elle crash WebKit/Safari (le bootcode encodé s'affiche en <pre>
+  // → page morte). Le code est conservé dans obfuscate.ts (applyInvisibleEval)
+  // pour réactivation future — voir AGENTS.md. Pas d'eval → CSP sans
+  // 'unsafe-eval'.
   const active = process.env.NODE_ENV === 'production' && cfg.enableDevtoolsCheck !== false;
   const variantSeed = createHash('sha256').update(`${siteKey}:${token}`).digest('hex');
-  let bootCode = active ? applyBootObfuscation(rawBootCode, variantSeed) : rawBootCode;
-  if (active) bootCode = applyInvisibleEval(bootCode, variantSeed);
-  bootCode = bootCode.replace(/<\/(script|style)/gi, '<\\/$1');
+  const bootCode = (active ? applyBootObfuscation(rawBootCode, variantSeed) : rawBootCode)
+    .replace(/<\/(script|style)/gi, '<\\/$1');
   return '<script>' + bootCode + '</script>';
 }
 
