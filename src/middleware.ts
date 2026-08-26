@@ -165,8 +165,10 @@ export function createShugoiMiddleware(options: ShugoiCoreOptions) {
         if (res.status) res.status(decision.status);
         if (decision.headers && decision.headers['Content-Type']) {
           if (res.setHeader) res.setHeader('Content-Type', decision.headers['Content-Type']);
+        } else if (res.setHeader) {
+          res.setHeader('Content-Type', decision.contentType);
         } else if (res.type) {
-          res.type(decision.contentType.split('/')[1] ?? 'plain');
+          res.type(decision.contentType);
         }
         if (decision.body) {
           if (res.send) res.send(decision.body);
