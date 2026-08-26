@@ -83,6 +83,7 @@ export function createShugoiMiddleware(options: ShugoiCoreOptions) {
           : undefined) || (typeof req.ip === 'string' ? req.ip : 'unknown');
         const ua = (typeof req.headers?.['user-agent'] === 'string' ? req.headers['user-agent'] : '') || '';
         const midAnchor = typeof req.headers?.cookie === 'string' ? req.headers.cookie.match(/(?:^|;\s*)__sg_mid_anchor=([^;]+)/)?.[1] ?? null : null;
+        try { console.log('[shugoi:render]', 'mid=' + (q.mid || '').slice(0, 8), 'grant=' + (q.grant ? 'YES' : 'NO'), 'token=' + (q.token || '').slice(0, 40), 'tsAge=' + (Date.now() - (parseInt(String(q.token || '').split(':')[1] || '0', 10) || 0)) + 'ms'); } catch {}
         return handleRender(q.token || '', res, internalUrl, q.mid || '', q.grant || '', ip, options.siteKey, baseUrl, signingSecret, ua, midAnchor || undefined);
       }
 
