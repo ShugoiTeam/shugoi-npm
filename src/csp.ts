@@ -3,12 +3,9 @@ export interface CspOptions {
   extraDirectives?: Record<string, string[]>;
   splitRender?: boolean;
   apiOrigin?: string;
-  // Couche "invisible eval" du bootstrap (applyInvisibleEval) : exécute le
-  // bootcode encodé en U+E0000 via eval() → script-src a besoin de
-  // 'unsafe-eval' UNIQUEMENT quand cette couche est active.
-  // bootEval force l'état ; sinon la couche est active par défaut en
-  // production (et désactivée si enableDevtoolsCheck === false), à l'identique
-  // de render.ts.
+  // Legacy : la couche "invisible eval" (U+E0000) a été retirée car elle
+  // faisait crasher WebKit/Safari — le bootcode est obfusqué sans eval.
+  // bootEval reste accepté pour compatibilité mais ne force plus 'unsafe-eval'.
   bootEval?: boolean;
   enableDevtoolsCheck?: boolean;
 }
@@ -53,7 +50,9 @@ export function buildCsp(options: CspOptions): string {
     }
   }
 
-  const requireUnsafeEval = options.bootEval ?? (process.env.NODE_ENV === 'production' && options.enableDevtoolsCheck !== false);
+  // Plus de 'unsafe-eval' : la couche invisible-eval (U+E0000 + eval) a été
+  // retirée (crash WebKit/Safari) — le bootcode obfusqué n'utilise pas eval.
+  const requireUnsafeEval = false;
   const scriptSrc = merged['script-src'] ?? [];
   if (requireUnsafeEval && !scriptSrc.includes("'unsafe-eval'")) {
     scriptSrc.push("'unsafe-eval'");

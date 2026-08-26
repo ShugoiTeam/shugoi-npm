@@ -4,7 +4,7 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 import { MESSAGES, type Locale } from './locales';
 import type { JsonObject } from './types';
-import { applyBootObfuscation, applyInvisibleEval } from './obfuscate';
+import { applyBootObfuscation } from './obfuscate';
 import { createMidAnchorValue, isMidAnchorValid } from './cookie-security';
 
 const runtimeGlobal = globalThis as typeof globalThis & {
@@ -588,7 +588,7 @@ export async function generateSkeleton(siteKey: string, token: string, baseUrl: 
   // Loader anti-flash : visible dès le premier paint (le guard calcule le mid
   // ~300ms), remplacé par le contenu quand rd() écrit. Évite le blanc qui fait
   // mal aux yeux sur connexion lente / mobile.
-  fragments.push('(function(){try{var _o=document.createElement("div");_o.id="__sg_loading";_o.style.cssText="position:fixed;inset:0;z-index:2147483647;background:#faf9f7;display:flex;align-items:center;justify-content:center;flex-direction:column;font-family:system-ui,Arial,sans-serif;color:#9a8b86;font-size:13px";_o.innerHTML=\'<div style="width:30px;height:30px;border:3px solid #e7d8d2;border-top-color:#e87090;border-radius:50%;animation:__sgSpin .8s linear infinite"></div><div style="margin-top:12px;letter-spacing:.04em">V\\u00e9rification\\u2026</div>\';var _st=document.createElement("style");_st.textContent="@keyframes __sgSpin{to{transform:rotate(360deg)}}";(document.head||document.documentElement).appendChild(_st);(document.body||document.documentElement).appendChild(_o)}catch(e){}})();');
+  fragments.push('(function(){try{var _o=document.createElement("div");_o.id="__sg_loading";_o.style.cssText="position:fixed;inset:0;z-index:2147483647;display:flex;align-items:center;justify-content:center;flex-direction:column;font-family:system-ui,Arial,sans-serif;font-size:13px";_o.innerHTML=\'<div style="width:30px;height:30px;border:3px solid #e7d8d2;border-top-color:#e87090;border-radius:50%;animation:__sgSpin .8s linear infinite"></div><div style="margin-top:12px;letter-spacing:.04em;color:#9a8b86">V\\u00e9rification\\u2026</div>\';var _st=document.createElement("style");_st.textContent="#__sg_loading{background:#faf9f7}@media(prefers-color-scheme:dark){#__sg_loading{background:#16101c}#__sg_loading>div{color:#a795b4}#__sg_loading>div:first-child{border-color:#3a2f44;border-top-color:#e9899f}}@keyframes __sgSpin{to{transform:rotate(360deg)}}";(document.head||document.documentElement).appendChild(_st);(document.body||document.documentElement).appendChild(_o)}catch(e){}})();');
   if (cache.detect) fragments.push("try{" + cache.detect + "}catch(e){window.__sg_blocked=true}");
   const jsStr = (s: string) => JSON.stringify(s).slice(1, -1).replace(/</g, '\\x3c');
   const devtoolsMsg = jsStr(msgs.devtoolsBody);
@@ -606,7 +606,10 @@ export async function generateSkeleton(siteKey: string, token: string, baseUrl: 
   const rawBootCode = fragments.join(';');
   const variantSeed = createHash('sha256').update(`${siteKey}:${token}`).digest('hex');
   const bootCode = (process.env.NODE_ENV === 'production' && cfg.enableDevtoolsCheck !== false
-    ? applyInvisibleEval(applyBootObfuscation(rawBootCode, variantSeed), variantSeed + '::e0')
+    // Obfuscation (identifiants + strings) SANS la couche invisible-eval :
+    // l'encodage U+E0000 + eval() fait CRASHER WebKit/Safari (le bootcode
+    // s'affiche alors en <pre> sur mobile). L'obfuscation seule reste efficace.
+    ? applyBootObfuscation(rawBootCode, variantSeed)
     : rawBootCode).replace(/<\/(script|style)/gi, '<\\/$1');
   return '<script>' + bootCode + '</script>';
 }
