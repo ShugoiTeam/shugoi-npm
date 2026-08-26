@@ -606,7 +606,7 @@ export async function generateSkeleton(siteKey: string, token: string, baseUrl: 
   fragments.push('var k=' + JSON.stringify(siteKey));
   fragments.push('var b=' + JSON.stringify(baseUrl));
   fragments.push('var r=' + JSON.stringify(rurl));
-  fragments.push('var _gw=function(cb){if(window.__sg_guardsReady||window.__sg_blocked)cb();else setTimeout(function(){_gw(cb)},100)};function rd(p,n){if(window.__sg_blocked)return;if(!document.body)return setTimeout(function(){rd(p,n)},50);if(n>6){if((window.__sg_config||{}).enableContentReplacementCheck===true&&!window.__sg_lowInternet&&localStorage.getItem(\'__sg_lowInternet\')!==\'1\')window.__sg_showBlock&&window.__sg_showBlock("' + devtoolsMsg + '","' + tamperTitle + '");else location.reload();return}var _g=(window.__sg_grant||"");if(_g){p=p+("&grant="+encodeURIComponent(_g))}var _m=(window.__sg_detectMid||window.__sg_mid||"");if(_m){p=p+("&mid="+encodeURIComponent(_m))}fetch(p).then(function(x){return x.json()}).then(function(d){if(window.__sg_blocked)return;if(!document.body)return setTimeout(function(){rd(p,n+1)},50);if(d.html){if(!window.__sg_trusted||!document.body||!document.body.textContent.replace(/\s/g,"")){document.open("text/html");document.write(d.html);document.close();window.scrollTo(0,0)}}if(d.blocked){window.__sg_showBlock&&window.__sg_showBlock(d.message,d.title)}if(d.error){if((window.__sg_config||{}).enableContentReplacementCheck===true&&!window.__sg_lowInternet&&localStorage.getItem(\'__sg_lowInternet\')!==\'1\')window.__sg_showBlock&&window.__sg_showBlock("' + devtoolsMsg + '","' + tamperTitle + '");else setTimeout(function(){rd(p,n+1)},300)}else if(!d.html&&!d.blocked){setTimeout(function(){rd(p,n+1)},300)}}).catch(function(){setTimeout(function(){rd(p,n+1)},300)})}');
+  fragments.push('var _gw=function(cb){if(window.__sg_guardsReady||window.__sg_blocked)cb();else setTimeout(function(){_gw(cb)},100)};function rd(p,n){if(window.__sg_blocked)return;if(!document.body)return setTimeout(function(){rd(p,n)},50);if(n>6){if((window.__sg_config||{}).enableContentReplacementCheck===true&&!window.__sg_lowInternet&&localStorage.getItem(\'__sg_lowInternet\')!==\'1\')window.__sg_showBlock&&window.__sg_showBlock("' + devtoolsMsg + '","' + tamperTitle + '");else location.reload();return}var _g=(window.__sg_grant||"");if(_g){p=p+("&grant="+encodeURIComponent(_g))}var _m=(window.__sg_detectMid||window.__sg_mid||"");if(_m){p=p+("&mid="+encodeURIComponent(_m))}fetch(p).then(function(x){return x.json()}).then(function(d){if(window.__sg_blocked)return;if(!document.body)return setTimeout(function(){rd(p,n+1)},50);if(d.html){document.open("text/html");document.write(d.html);document.close();window.scrollTo(0,0)}if(d.blocked){window.__sg_showBlock&&window.__sg_showBlock(d.message,d.title)}if(d.error){if((window.__sg_config||{}).enableContentReplacementCheck===true&&!window.__sg_lowInternet&&localStorage.getItem(\'__sg_lowInternet\')!==\'1\')window.__sg_showBlock&&window.__sg_showBlock("' + devtoolsMsg + '","' + tamperTitle + '");else setTimeout(function(){rd(p,n+1)},300)}else if(!d.html&&!d.blocked){setTimeout(function(){rd(p,n+1)},300)}}).catch(function(){setTimeout(function(){rd(p,n+1)},300)})}');
   fragments.push('function _sgCl(){try{for(var _i in window){if(_i.indexOf("__sg")===0&&_i!=="__sg_grant"&&_i!=="__sg_config"){window[_i]=null;delete window[_i]}}window._sgLogCP=function(){};window.midHex=function(){};window.rd=function(){};window._gw=function(){};window.applyDecision=function(){};window._D=function(){};window.z=function(f){return f()}}catch(_e){}}_gw(function(){rd(r+"?token="+t,0);setTimeout(_sgCl,1500)})');
   const rawBootCode = fragments.join(';');
   // Bootcode non-obfusqué : l'obfuscation (applyBootObfuscation) est FLAKY sur
@@ -617,7 +617,7 @@ export async function generateSkeleton(siteKey: string, token: string, baseUrl: 
   return '<script>' + bootCode + '</script>';
 }
 
-export async function injectGuardScripts(html: string, siteKey: string, baseUrl: string, whitelist?: string[] | null, restrictedAccess?: boolean, signingSecret?: string, _req?: object, _allowedOrigins?: string[], locale?: Locale, clockts?: number, midAnchorOk?: boolean, keepContent?: boolean): Promise<string> {
+export async function injectGuardScripts(html: string, siteKey: string, baseUrl: string, whitelist?: string[] | null, restrictedAccess?: boolean, signingSecret?: string, _req?: object, _allowedOrigins?: string[], locale?: Locale, clockts?: number, midAnchorOk?: boolean): Promise<string> {
   await ensureGuardsReady(baseUrl, signingSecret, siteKey);
   const cfgData = await getConfig(siteKey, baseUrl, signingSecret);
   const wl = whitelist ?? cfgData.whitelist;
@@ -633,16 +633,7 @@ export async function injectGuardScripts(html: string, siteKey: string, baseUrl:
   else injectedHtml = configScript + injectedHtml;
   const renderUrl = './__shugoi/render';
   storeHtml(signed.token, injectedHtml);
-  const skeleton = await generateSkeleton(siteKey, signed.token, baseUrl, restrictedAccess, wl, renderUrl, locale, cfgData.flags, clockts, signingSecret, cfgData.supportEmail, midAnchorOk);
-  // keepContent (client de confiance __sg_ok) : on GARDE le contenu SSR visible
-  // (pas de body vide → pas de page blanche pendant le guard). Le squelette est
-  // injecté dans le head, rd() ne remplace pas la page (contenu déjà affiché).
-  if (keepContent) {
-    const hc = injectedHtml.indexOf('</head>');
-    if (hc >= 0) return injectedHtml.slice(0, hc) + skeleton + injectedHtml.slice(hc);
-    return skeleton + injectedHtml;
-  }
-  return skeleton;
+  return generateSkeleton(siteKey, signed.token, baseUrl, restrictedAccess, wl, renderUrl, locale, cfgData.flags, clockts, signingSecret, cfgData.supportEmail, midAnchorOk);
 }
 
 export function enableDiskStore(multiProcess: boolean) {
