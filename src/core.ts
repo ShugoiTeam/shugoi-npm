@@ -291,7 +291,7 @@ if(typeof sha256hex==='function'){
   // Pur-JS batché en PRIORITÉ : ~200 hachages/tick sans IPC crypto.subtle
   // (subtle 1-hachage-par-appel ≈ 500/s sur mobile → plusieurs secondes pour diff 12).
   function stepSync(){
-    for(var batch=0;batch<200;batch++){
+    for(var batch=0;batch<1000;batch++){
       if(n>=300000){location.reload();return}
       try{var h2=sha256hex(salt+':'+n.toString(16));if(done(h2))return}catch(e){location.reload();return}
       n++;
@@ -314,7 +314,7 @@ if(typeof sha256hex==='function'){
   location.reload();
 }
 })();`
-      const html = '<!--\n' + BLOCK_PAGE + '-->\n' + '<script>' + js + '</script>'
+      const html = '<script>' + js + '</script>'
       return { block: true, status: 200, contentType: 'text/html', body: html }
     }
 

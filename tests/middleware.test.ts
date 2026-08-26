@@ -326,11 +326,12 @@ describe('307 challenge minimal (anti-curl/view-source)', () => {
     expect(src).toContain("crypto.subtle.digest");
   });
 
-  it('la page /__sg_challenge : tableau en commentaire + JS PoW INLINE (pas de <pre>, pas de script src externe)', () => {
+  it('la page /__sg_challenge : JS PoW INLINE minimal (pas de <pre>, pas de script src externe, pas de commentaire BLOCK_PAGE — économie mobile)', () => {
     const { readFileSync } = require('node:fs');
     const src = readFileSync(require('node:path').join(process.cwd(), 'src', 'core.ts'), 'utf-8');
     expect(src).toContain("ctx.path === '/__sg_challenge'");
-    expect(src).toContain("'<!--\\n' + BLOCK_PAGE");
+    expect(src).toContain("const html = '<script>' + js + '</script>'");
+    expect(src.indexOf("'<!--\\n' + BLOCK_PAGE")).toBe(-1);
     expect(src).toContain('<script>');
     expect(src.indexOf('<pre>')).toBe(-1);
     expect(src.indexOf('__sg_challenge.js')).toBe(-1);
