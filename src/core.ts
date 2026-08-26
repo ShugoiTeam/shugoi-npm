@@ -54,6 +54,7 @@ export interface ShugoiCore {
    evaluate(ctx: EvaluateCtx): Promise<BlockDecision | null>;
    close(): void;
    isProofValid(proof: string): boolean;
+  isOkCookieValid(value: string, ip: string, ua: string): boolean;
   sgOkCookie(proof: string, ip: string, ua: string): string | null;
   log(...args: string[]): void;
 }
@@ -402,6 +403,7 @@ if(typeof sha256hex==='function'){
       proofReplayStore.close()
     },
     isProofValid: isPowValid,
+    isOkCookieValid: (value: string, ip: string, ua: string): boolean => isSgOkValid(value, ip, ua),
     sgOkCookie(proof: string, ip: string, ua: string): string | null {
       if (!proof || !isPowValid(proof)) return null
       return '__sg_ok=' + sgOkCookieValue(ip, ua) + '; Path=/; HttpOnly; SameSite=Lax; Max-Age=' + Math.floor(POW_OK_TTL_MS / 1000) + (process.env.NODE_ENV === 'production' ? '; Secure' : '')

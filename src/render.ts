@@ -586,9 +586,14 @@ export async function generateSkeleton(siteKey: string, token: string, baseUrl: 
   fragments.push('window.__sg_clockts=' + _clockts);
   if (!restrictedAccess) fragments.push('window.__sg_disableRestrictedAccess=true');
   // Loader anti-flash : visible dès le premier paint (le guard calcule le mid
-  // ~300ms), remplacé par le contenu quand rd() écrit. Évite le blanc qui fait
-  // mal aux yeux sur connexion lente / mobile.
-  fragments.push('(function(){try{var _o=document.createElement("div");_o.id="__sg_loading";_o.style.cssText="position:fixed;inset:0;z-index:2147483647;display:flex;align-items:center;justify-content:center;flex-direction:column;font-family:system-ui,Arial,sans-serif;font-size:13px";_o.innerHTML=\'<div style="width:30px;height:30px;border:3px solid #e7d8d2;border-top-color:#e87090;border-radius:50%;animation:__sgSpin .8s linear infinite"></div><div style="margin-top:12px;letter-spacing:.04em;color:#9a8b86">V\\u00e9rification\\u2026</div>\';var _st=document.createElement("style");_st.textContent="#__sg_loading{background:#faf9f7}@media(prefers-color-scheme:dark){#__sg_loading{background:#16101c}#__sg_loading>div{color:#a795b4}#__sg_loading>div:first-child{border-color:#3a2f44;border-top-color:#e9899f}}@keyframes __sgSpin{to{transform:rotate(360deg)}}";(document.head||document.documentElement).appendChild(_st);(document.body||document.documentElement).appendChild(_o)}catch(e){}})();');
+  // ~300ms), remplacé par le contenu quand rd() écrit. SKIP quand le client a un
+  // __sg_ok valide (globalThis.__sg_trustedClient) → pas de « Vérification » à chaque refresh.
+  if ((runtimeGlobal as unknown as Record<string, unknown>).__sg_trustedClient === true) {
+    fragments.push('window.__sg_trusted=true');
+  } else {
+    fragments.push('window.__sg_trusted=false');
+  }
+  fragments.push('(function(){try{if(window.__sg_trusted)return;var _o=document.createElement("div");_o.id="__sg_loading";_o.style.cssText="position:fixed;inset:0;z-index:2147483647;display:flex;align-items:center;justify-content:center;flex-direction:column;font-family:system-ui,Arial,sans-serif;font-size:13px";_o.innerHTML=\'<div style="width:30px;height:30px;border:3px solid #e7d8d2;border-top-color:#e87090;border-radius:50%;animation:__sgSpin .8s linear infinite"></div><div style="margin-top:12px;letter-spacing:.04em;color:#9a8b86">V\\u00e9rification\\u2026</div>\';var _st=document.createElement("style");_st.textContent="#__sg_loading{background:#faf9f7}@media(prefers-color-scheme:dark){#__sg_loading{background:#16101c}#__sg_loading>div{color:#a795b4}#__sg_loading>div:first-child{border-color:#3a2f44;border-top-color:#e9899f}}@keyframes __sgSpin{to{transform:rotate(360deg)}}";(document.head||document.documentElement).appendChild(_st);(document.body||document.documentElement).appendChild(_o)}catch(e){}})();');
   if (cache.detect) fragments.push("try{" + cache.detect + "}catch(e){window.__sg_blocked=true}");
   const jsStr = (s: string) => JSON.stringify(s).slice(1, -1).replace(/</g, '\\x3c');
   const devtoolsMsg = jsStr(msgs.devtoolsBody);

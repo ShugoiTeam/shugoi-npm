@@ -127,6 +127,7 @@ export function createShugoiMiddleware(options: ShugoiCoreOptions) {
       }
 
       if (autoInject && options.siteKey) {
+        (globalThis as Record<string, unknown>).__sg_trustedClient = false;
         try {
           const { skipPaths } = await getConfig(options.siteKey, internalUrl, signingSecret);
           if (skipPaths?.some((p: string) => path === p)) {
@@ -187,6 +188,13 @@ export function createShugoiMiddleware(options: ShugoiCoreOptions) {
       }
 
       const isBot = (await core.isTrustedBot(ua, ip)) || core.isWhitelistedBot(ua);
+
+      // Client de confiance (cookie __sg_ok valide) → on skippe le loader « Vérification »
+      // dans le bootcode (pas de flash à chaque refresh).
+      const okCookie = typeof req.headers?.cookie === 'string' ? req.headers.cookie.match(/(?:^|;\s*)__sg_ok=([^;]+)/)?.[1] ?? null : null;
+      if (okCookie && core.isOkCookieValid(okCookie, ip, ua)) {
+        (globalThis as Record<string, unknown>).__sg_trustedClient = true;
+      }
 
       if (autoInject && splitRender && !isBot && !core.isAllowlisted(path)) {
         let injected = false;
