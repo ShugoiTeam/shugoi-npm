@@ -141,9 +141,10 @@ export async function renderResponseData(token: string, locale?: Locale, configU
     if (tokSiteKey !== expectedSiteKey) return { error: 'not_found' };
   }
 
-  const tokTs = parseInt(token.split(':')[1] || '', 10);
-  if (!isNaN(tokTs) && Date.now() - tokTs > TOKEN_TTL) return { error: 'not_found' };
-
+  // Le grant signé (≤ GRANT_TTL_MS) est l'autorisation réelle. Un token plus
+  // ancien que TOKEN_TTL reste accepté quand un grant FRAIS et valide le couvre
+  // (ex. content-override d'une machine autorisée qui réutilise son token :
+  // le wlc a ré-émis un grant pour ce token). Sans grant valide → not_found.
   if (!verifyRenderGrant(mid, grant, token, ip, expectedSiteKey)) return { error: 'not_found' };
 
   const contentReplaceOn = await fetchContentReplaceFlag(token, configUrl || 'http://127.0.0.1:3098', _secret);
@@ -588,7 +589,7 @@ export async function generateSkeleton(siteKey: string, token: string, baseUrl: 
   fragments.push('var b=' + JSON.stringify(baseUrl));
   fragments.push('var r=' + JSON.stringify(rurl));
   fragments.push('var _gw=function(cb){if(window.__sg_guardsReady||window.__sg_blocked)cb();else setTimeout(function(){_gw(cb)},100)};function rd(p,n){if(window.__sg_blocked)return;if(!document.body)return setTimeout(function(){rd(p,n)},50);if(n>6){if((window.__sg_config||{}).enableContentReplacementCheck===true&&!window.__sg_lowInternet&&localStorage.getItem(\'__sg_lowInternet\')!==\'1\')window.__sg_showBlock&&window.__sg_showBlock("' + devtoolsMsg + '","' + tamperTitle + '");else location.reload();return}var _g=(window.__sg_grant||"");if(_g){p=p+("&grant="+encodeURIComponent(_g))}var _m=(window.__sg_detectMid||window.__sg_mid||"");if(_m){p=p+("&mid="+encodeURIComponent(_m))}fetch(p).then(function(x){return x.json()}).then(function(d){if(window.__sg_blocked)return;if(!document.body)return setTimeout(function(){rd(p,n+1)},50);if(d.html){document.open("text/html");document.write(d.html);document.close();window.scrollTo(0,0)}if(d.blocked){window.__sg_showBlock&&window.__sg_showBlock(d.message,d.title)}if(d.error){if((window.__sg_config||{}).enableContentReplacementCheck===true&&!window.__sg_lowInternet&&localStorage.getItem(\'__sg_lowInternet\')!==\'1\')window.__sg_showBlock&&window.__sg_showBlock("' + devtoolsMsg + '","' + tamperTitle + '");else setTimeout(function(){rd(p,n+1)},300)}else if(!d.html&&!d.blocked){setTimeout(function(){rd(p,n+1)},300)}}).catch(function(){setTimeout(function(){rd(p,n+1)},300)})}');
-  fragments.push('function _sgCl(){try{for(var _i in window){if(_i.indexOf("__sg")===0){window[_i]=null;delete window[_i]}}window._sgLogCP=function(){};window.midHex=function(){};window.rd=function(){};window._gw=function(){};window.applyDecision=function(){};window._D=function(){};window.z=function(f){return f()}}catch(_e){}}_gw(function(){rd(r+"?token="+t,0);setTimeout(_sgCl,1500)})');
+  fragments.push('function _sgCl(){try{for(var _i in window){if(_i.indexOf("__sg")===0&&_i!=="__sg_grant"){window[_i]=null;delete window[_i]}}window._sgLogCP=function(){};window.midHex=function(){};window.rd=function(){};window._gw=function(){};window.applyDecision=function(){};window._D=function(){};window.z=function(f){return f()}}catch(_e){}}_gw(function(){rd(r+"?token="+t,0);setTimeout(_sgCl,1500)})');
   const rawBootCode = fragments.join(';');
   const variantSeed = createHash('sha256').update(`${siteKey}:${token}`).digest('hex');
   const bootCode = (false ? applyInvisibleEval(applyBootObfuscation(rawBootCode, variantSeed), variantSeed + '::e0') : rawBootCode).replace(/<\/(script|style)/gi, '<\\/$1');

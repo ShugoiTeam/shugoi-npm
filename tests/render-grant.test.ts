@@ -193,7 +193,7 @@ describe('§7bis CRITIQUE 1 — grant cross-site (siteKey lié)', () => {
 });
 
 describe('passe 8 — expiration du token (verifyTokenAndRead)', () => {
-  it('refuse un token signé mais daté au-delà du TTL (store disque rejoué)', async () => {
+  it('un grant FRAIS et valide couvre un token daté au-delà du TTL (content-override autorisé)', async () => {
     const { signToken, storeHtml, renderResponseData } = await import('../src/render');
     const SITE = 'sg_sk_live_render_grant_test';
     const old = Date.now() - 180_000;
@@ -201,6 +201,16 @@ describe('passe 8 — expiration du token (verifyTokenAndRead)', () => {
     storeHtml(signed.token, '<html>expired-token</html>');
     const grant = makeGrant(mid, signed.token, '1.2.3.4');
     const res = await renderResponseData(signed.token, undefined, undefined, mid, grant, '1.2.3.4', SITE);
+    expect(res.html).toBeDefined();
+  });
+
+  it('refuse un token sans grant valide', async () => {
+    const { signToken, storeHtml, renderResponseData } = await import('../src/render');
+    const SITE = 'sg_sk_live_render_grant_test2';
+    const old = Date.now() - 180_000;
+    const signed = signToken(SITE, old);
+    storeHtml(signed.token, '<html>expired-token</html>');
+    const res = await renderResponseData(signed.token, undefined, undefined, mid, '', '1.2.3.4', SITE);
     expect(res.error).toBe('not_found');
   });
 });
