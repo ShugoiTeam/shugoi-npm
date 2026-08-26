@@ -460,6 +460,12 @@ export async function fetchConfigForSiteKey(siteKey: string, baseUrl: string, se
 }
 
 export function __clearConfigCache(): void { _configCache.clear(); }
+export function __clearGuardCache(siteKey?: string, baseUrl?: string): void {
+  if (siteKey && baseUrl) _guardCaches.delete(cacheKey(baseUrl, siteKey));
+  else if (siteKey) {
+    for (const k of [..._guardCaches.keys()]) if (k.endsWith("::" + siteKey)) _guardCaches.delete(k);
+  } else _guardCaches.clear();
+}
 
 const GUARD_POLL_MS = (() => {
   const raw = Number(process.env.SHUGOKI_GUARD_POLL_MS || '');
