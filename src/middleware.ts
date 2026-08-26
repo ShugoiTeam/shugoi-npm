@@ -206,7 +206,7 @@ export function createShugoiMiddleware(options: ShugoiCoreOptions) {
           if (typeof body === 'string') {
             const ct = res.getHeader ? res.getHeader('content-type') : undefined;
             if (!ct || String(ct).includes('text/html')) {
-              try { body = await injectGuardScripts(body, options.siteKey, baseUrl, undefined, restrictedAccess, signingSecret, req, undefined, reqLocale, undefined, midAnchorOk); } catch (e) { core.log('inject error:', String(e)); }
+              try { body = await injectGuardScripts(body, options.siteKey, baseUrl, undefined, restrictedAccess, signingSecret, req, undefined, reqLocale, undefined, midAnchorOk, (globalThis as Record<string, unknown>).__sg_trustedClient === true && !restrictedAccess); } catch (e) { core.log('inject error:', String(e)); }
               injected = true;
             }
           }
