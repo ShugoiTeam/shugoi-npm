@@ -459,12 +459,26 @@ function findIdentifiers(code: string): Array<{ start: number; end: number; valu
       const start = i;
       while (i < n && /[A-Za-z0-9_$]/.test(code[i]!)) i++;
       const value = code.slice(start, i);
+      // Identifiant avec escape Unicode (\uXXXX ou \u{...}) : on consomme les
+      // escapes mais on NE RENOMME PAS (une clé d'objet `Bloqu\u00E9:` est
+      // référencée via string — renommer casserait la correspondance).
+      let hasUnicodeEscape = false;
+      while (code[i] === '\\' && code[i + 1] === 'u') {
+        hasUnicodeEscape = true;
+        if (code[i + 2] === '{') {
+          let k = i + 3;
+          while (k < n && code[k] !== '}') k++;
+          i = k + 1;
+        } else {
+          i += 6;
+        }
+      }
       const isProp = prevSig === ".";
       const isKey = code[i] === ":" && (prevSig === "{" || prevSig === ",");
       const isKeyword = KEYWORDS.has(value);
       const isGlobal = GLOBALS.has(value);
       const isReserved = RESERVED_PREFIXES.some((p) => value.startsWith(p));
-      if (!isProp && !isKeyword && !isGlobal && !isReserved && !isKey) {
+      if (!isProp && !isKeyword && !isGlobal && !isReserved && !isKey && !hasUnicodeEscape) {
         spans.push({ start, end: i, value });
       }
       prevSig = KEYWORDS.has(value) ? value : "id";
@@ -628,7 +642,7 @@ function deferExecution(code: string, seed: string, qName = '_q', iName = '_i'):
   for (const o of order) {
     lines.push(qName + '[' + o + ']=function(){' + (execs[o] ?? '') + '};');
   }
-  lines.push('for(var ' + iName + '=0;' + iName + '<' + qName + '.length;' + iName + '++){' + qName + '[' + iName + ']&&' + qName + '[' + iName + ']()}');
+  lines.push('for(var ' + iName + '=0;' + iName + '<' + qName + '.length;' + iName + '++){if(' + qName + '[' + iName + ']){try{' + qName + '[' + iName + ']()}catch(_sg_e){window.__sg_deferError=String(_sg_e&&_sg_e.message||_sg_e)}}}');
   return lines.join('');
 }
 
