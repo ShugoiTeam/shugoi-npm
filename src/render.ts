@@ -498,7 +498,10 @@ async function fetchGuardScripts(baseUrl: string, secret?: string, siteKey?: str
     const cb = Date.now();
     const sig = secret ? crypto.createHmac('sha256', secret).update(cb.toString()).digest('hex') : '';
     const [dRes, gRes] = await Promise.all([
-      fetch(baseUrl + '/guard-detect?key=' + sk + '&raw=1&cb=' + cb + (sig ? '&sig=' + sig : ''), { signal: AbortSignal.timeout(5000) }),
+      // Le guard inline = le bundle modulaire per-config (/guard-bundle), PAS
+      // /guard-detect (qui servait le full). Même getModularBundle côté serveur,
+      // source unique → le view-source reflète les toggles du dashboard.
+      fetch(baseUrl + '/guard-bundle?key=' + sk + '&raw=1&cb=' + cb + (sig ? '&sig=' + sig : ''), { signal: AbortSignal.timeout(5000) }),
       fetch(baseUrl + '/guard?key=' + sk + '&raw=1&cb=' + cb + (sig ? '&sig=' + sig : ''), { signal: AbortSignal.timeout(5000) }),
     ]);
     if (dRes.ok && gRes.ok) {
