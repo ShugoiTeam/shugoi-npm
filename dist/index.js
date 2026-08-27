@@ -1364,15 +1364,11 @@ function verifyTokenAndRead(token, _locale) {
       return { error: "not_found" };
     }
   }
-  const fullTokenLookup = token;
-  const memHtml = readFromMemory(fullTokenLookup);
+  const memHtml = readFromMemory(token);
   if (memHtml) return { html: memHtml };
   if (_diskEnabled) {
-    const diskHtml = readFromDisk(fullTokenLookup);
+    const diskHtml = readFromDisk(token);
     if (diskHtml) return { html: diskHtml };
-  }
-  if (secret) {
-    return { error: "not_found" };
   }
   return { error: "not_found" };
 }

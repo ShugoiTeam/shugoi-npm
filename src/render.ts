@@ -214,19 +214,16 @@ function verifyTokenAndRead(token: string, _locale?: Locale): { html?: string; e
     }
   }
 
-  const fullTokenLookup = token;
-  const memHtml = readFromMemory(fullTokenLookup);
+  const memHtml = readFromMemory(token);
   if (memHtml) return { html: memHtml };
 
   if (_diskEnabled) {
-    const diskHtml = readFromDisk(fullTokenLookup);
+    const diskHtml = readFromDisk(token);
     if (diskHtml) return { html: diskHtml };
   }
 
-  if (secret) {
-    return { error: 'not_found' };
-  }
-
+  // Signature valide mais contenu expiré/purgé (TTL mémoire/disque) → not_found.
+  // rd() côté client retente ensuite (nouveau token au prochain chargement).
   return { error: 'not_found' };
 }
 
