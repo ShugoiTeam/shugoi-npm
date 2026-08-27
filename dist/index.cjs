@@ -78,6 +78,98 @@ var init_locales = __esm({
   }
 });
 
+// src/security-utils.ts
+function safeChallengePath(path) {
+  if (!path) return "/";
+  if (path.charAt(0) !== "/" || path.charAt(1) === "/" || path.includes("\\")) return "/";
+  for (const character of path) {
+    const code = character.charCodeAt(0);
+    if (code < 32 || code === 127) return "/";
+  }
+  return path;
+}
+function safeEqual(left, right) {
+  if (left.length !== right.length) return false;
+  return import_node_crypto.default.timingSafeEqual(Buffer.from(left), Buffer.from(right));
+}
+function ipBucket(ip) {
+  if (!ip || ip === "unknown") return "0";
+  if (ip.includes(".")) {
+    const match = ip.match(/^(\d+\.\d+\.\d+)(?:\.\d+)?$/);
+    return match?.[1] ?? "0";
+  }
+  if (ip.includes(":")) return ip.split(":").filter(Boolean).slice(0, 4).join(".") || "0";
+  return "0";
+}
+function uaFingerprint(userAgent) {
+  return import_node_crypto.default.createHash("sha256").update(userAgent).digest("hex").slice(0, 16);
+}
+var import_node_crypto;
+var init_security_utils = __esm({
+  "src/security-utils.ts"() {
+    "use strict";
+    import_node_crypto = __toESM(require("crypto"), 1);
+  }
+});
+
+// src/cookie-security.ts
+function createOkCookieValue(ip, userAgent, options) {
+  const timestamp = Math.floor(Date.now() / 1e3);
+  const bucket = ipBucket(ip);
+  const fingerprint = uaFingerprint(userAgent);
+  const signature = import_node_crypto2.default.createHmac("sha256", options.secret).update(`sg_ok:${timestamp}:${bucket}:${fingerprint}`).digest("hex");
+  return `${timestamp}:${bucket}:${fingerprint}:${signature}`;
+}
+function isOkCookieValid(value, ip, userAgent, options) {
+  if (!options.secret) return false;
+  const [timestamp, bucket, fingerprint, signature] = value.split(":");
+  if (!timestamp || !bucket || !fingerprint || !signature) return false;
+  const parsedTimestamp = Number.parseInt(timestamp, 10);
+  if (!Number.isFinite(parsedTimestamp) || Date.now() - parsedTimestamp * 1e3 > options.okTtlMs || parsedTimestamp * 1e3 > Date.now() + 6e4) return false;
+  if (bucket !== ipBucket(ip) || fingerprint !== uaFingerprint(userAgent)) return false;
+  const expected = import_node_crypto2.default.createHmac("sha256", options.secret).update(`sg_ok:${timestamp}:${bucket}:${fingerprint}`).digest("hex");
+  return safeEqual(signature, expected);
+}
+function isAuthorizedCookieValid(value, options) {
+  if (!options.secret) return false;
+  const separator = value.indexOf(":");
+  if (separator <= 0) return false;
+  const timestamp = value.slice(0, separator);
+  const signature = value.slice(separator + 1);
+  const parsedTimestamp = Number.parseInt(timestamp, 10);
+  if (!Number.isFinite(parsedTimestamp) || Date.now() - parsedTimestamp * 1e3 > options.authorizedTtlMs || parsedTimestamp * 1e3 > Date.now() + 6e4) return false;
+  const expected = import_node_crypto2.default.createHmac("sha256", options.secret).update(`sg_authorized:${timestamp}`).digest("hex");
+  return safeEqual(signature, expected);
+}
+function createMidAnchorValue(ip, userAgent, mid, options) {
+  const timestamp = Math.floor(Date.now() / 1e3);
+  const bucket = ipBucket(ip);
+  const fingerprint = uaFingerprint(userAgent);
+  const signature = import_node_crypto2.default.createHmac("sha256", options.secret).update(`sg_mid_anchor:${timestamp}:${bucket}:${fingerprint}:${mid}`).digest("hex");
+  return `${timestamp}:${bucket}:${fingerprint}:${mid}:${signature}`;
+}
+function isMidAnchorValid(value, ip, userAgent, mid, options) {
+  if (!options.secret) return false;
+  const [timestamp, bucket, fingerprint, valueMid, signature] = value.split(":");
+  if (!timestamp || !bucket || !fingerprint || !valueMid || !signature) return false;
+  const parsedTimestamp = Number.parseInt(timestamp, 10);
+  const ttlMs = options.anchorTtlMs ?? ANCHOR_TTL_MS_DEFAULT;
+  if (!Number.isFinite(parsedTimestamp) || Date.now() - parsedTimestamp * 1e3 > ttlMs || parsedTimestamp * 1e3 > Date.now() + 6e4) return false;
+  if (bucket !== ipBucket(ip) || fingerprint !== uaFingerprint(userAgent)) return false;
+  if (valueMid !== mid) return false;
+  const expected = import_node_crypto2.default.createHmac("sha256", options.secret).update(`sg_mid_anchor:${timestamp}:${bucket}:${fingerprint}:${valueMid}`).digest("hex");
+  return safeEqual(signature, expected);
+}
+var import_node_crypto2, ANCHOR_TTL_MS_DEFAULT;
+var init_cookie_security = __esm({
+  "src/cookie-security.ts"() {
+    "use strict";
+    import_node_crypto2 = __toESM(require("crypto"), 1);
+    init_security_utils();
+    ANCHOR_TTL_MS_DEFAULT = 30 * 24 * 3600 * 1e3;
+  }
+});
+
 // src/obfuscate.ts
 function hash(s) {
   let h = 0;
@@ -105,7 +197,7 @@ function xorEncrypt(str, hexKey) {
   let enc = "";
   for (let i = 0; i < str.length; i++) {
     const cc = str.charCodeAt(i) ^ (kb[i % kb.length] ?? 0);
-    enc += cc.toString(16).padStart(2, "0");
+    enc += cc.toString(16).padStart(4, "0");
   }
   return enc;
 }
@@ -420,7 +512,7 @@ function injectDecoder(hexKey, dec = "_D", cacheName = "_Dx") {
 function buildDecoderStmt(hexKey, dec, cacheName) {
   const kb = hexToBytes(hexKey);
   const ks = kb.map((b) => "\\x" + b.toString(16).padStart(2, "0")).join("");
-  return "var " + cacheName + "=Object.create(null)," + dec + "=function(h){var c=" + cacheName + '[h];if(c!==void 0)return c;var k="' + ks + '",r="";for(var i=0;i<h.length;i+=2){r+=String.fromCharCode(parseInt(h.substr(i,2),16)^k.charCodeAt((i/2)%' + kb.length + "))}return " + cacheName + "[h]=r};";
+  return "var " + cacheName + "=Object.create(null)," + dec + "=function(h){var c=" + cacheName + '[h];if(c!==void 0)return c;var k="' + ks + '",r="";for(var i=0;i<h.length;i+=4){r+=String.fromCharCode(parseInt(h.substr(i,4),16)^k.charCodeAt((i/4)%' + kb.length + "))}return " + cacheName + "[h]=r};";
 }
 function removeFunction(code, name) {
   const regex = new RegExp("function\\s+" + name + "\\s*\\([^)]*\\)\\s*\\{[^{}]*\\}", "g");
@@ -547,12 +639,23 @@ function findIdentifiers(code) {
       const start = i;
       while (i < n && /[A-Za-z0-9_$]/.test(code[i])) i++;
       const value = code.slice(start, i);
+      let hasUnicodeEscape = false;
+      while (code[i] === "\\" && code[i + 1] === "u") {
+        hasUnicodeEscape = true;
+        if (code[i + 2] === "{") {
+          let k = i + 3;
+          while (k < n && code[k] !== "}") k++;
+          i = k + 1;
+        } else {
+          i += 6;
+        }
+      }
       const isProp = prevSig === ".";
       const isKey = code[i] === ":" && (prevSig === "{" || prevSig === ",");
       const isKeyword = KEYWORDS.has(value);
       const isGlobal = GLOBALS.has(value);
       const isReserved = RESERVED_PREFIXES.some((p) => value.startsWith(p));
-      if (!isProp && !isKeyword && !isGlobal && !isReserved && !isKey) {
+      if (!isProp && !isKeyword && !isGlobal && !isReserved && !isKey && !hasUnicodeEscape) {
         spans.push({ start, end: i, value });
       }
       prevSig = KEYWORDS.has(value) ? value : "id";
@@ -726,7 +829,7 @@ function deferExecution(code, seed, qName = "_q", iName = "_i") {
   for (const o of order) {
     lines.push(qName + "[" + o + "]=function(){" + (execs[o] ?? "") + "};");
   }
-  lines.push("for(var " + iName + "=0;" + iName + "<" + qName + ".length;" + iName + "++){" + qName + "[" + iName + "]&&" + qName + "[" + iName + "]()}");
+  lines.push("for(var " + iName + "=0;" + iName + "<" + qName + ".length;" + iName + "++){if(" + qName + "[" + iName + "]){try{" + qName + "[" + iName + "]()}catch(_sg_e){window.__sg_deferError=String(_sg_e&&_sg_e.message||_sg_e)}}}");
   return lines.join("");
 }
 function hashAllProperties(code, dec, key) {
@@ -1097,102 +1200,11 @@ var init_obfuscate = __esm({
   }
 });
 
-// src/security-utils.ts
-function safeChallengePath(path) {
-  if (!path) return "/";
-  if (path.charAt(0) !== "/" || path.charAt(1) === "/" || path.includes("\\")) return "/";
-  for (const character of path) {
-    const code = character.charCodeAt(0);
-    if (code < 32 || code === 127) return "/";
-  }
-  return path;
-}
-function safeEqual(left, right) {
-  if (left.length !== right.length) return false;
-  return import_node_crypto.default.timingSafeEqual(Buffer.from(left), Buffer.from(right));
-}
-function ipBucket(ip) {
-  if (!ip || ip === "unknown") return "0";
-  if (ip.includes(".")) {
-    const match = ip.match(/^(\d+\.\d+\.\d+)(?:\.\d+)?$/);
-    return match?.[1] ?? "0";
-  }
-  if (ip.includes(":")) return ip.split(":").filter(Boolean).slice(0, 4).join(".") || "0";
-  return "0";
-}
-function uaFingerprint(userAgent) {
-  return import_node_crypto.default.createHash("sha256").update(userAgent).digest("hex").slice(0, 16);
-}
-var import_node_crypto;
-var init_security_utils = __esm({
-  "src/security-utils.ts"() {
-    "use strict";
-    import_node_crypto = __toESM(require("crypto"), 1);
-  }
-});
-
-// src/cookie-security.ts
-function createOkCookieValue(ip, userAgent, options) {
-  const timestamp = Math.floor(Date.now() / 1e3);
-  const bucket = ipBucket(ip);
-  const fingerprint = uaFingerprint(userAgent);
-  const signature = import_node_crypto2.default.createHmac("sha256", options.secret).update(`sg_ok:${timestamp}:${bucket}:${fingerprint}`).digest("hex");
-  return `${timestamp}:${bucket}:${fingerprint}:${signature}`;
-}
-function isOkCookieValid(value, ip, userAgent, options) {
-  if (!options.secret) return false;
-  const [timestamp, bucket, fingerprint, signature] = value.split(":");
-  if (!timestamp || !bucket || !fingerprint || !signature) return false;
-  const parsedTimestamp = Number.parseInt(timestamp, 10);
-  if (!Number.isFinite(parsedTimestamp) || Date.now() - parsedTimestamp * 1e3 > options.okTtlMs || parsedTimestamp * 1e3 > Date.now() + 6e4) return false;
-  if (bucket !== ipBucket(ip) || fingerprint !== uaFingerprint(userAgent)) return false;
-  const expected = import_node_crypto2.default.createHmac("sha256", options.secret).update(`sg_ok:${timestamp}:${bucket}:${fingerprint}`).digest("hex");
-  return safeEqual(signature, expected);
-}
-function isAuthorizedCookieValid(value, options) {
-  if (!options.secret) return false;
-  const separator = value.indexOf(":");
-  if (separator <= 0) return false;
-  const timestamp = value.slice(0, separator);
-  const signature = value.slice(separator + 1);
-  const parsedTimestamp = Number.parseInt(timestamp, 10);
-  if (!Number.isFinite(parsedTimestamp) || Date.now() - parsedTimestamp * 1e3 > options.authorizedTtlMs || parsedTimestamp * 1e3 > Date.now() + 6e4) return false;
-  const expected = import_node_crypto2.default.createHmac("sha256", options.secret).update(`sg_authorized:${timestamp}`).digest("hex");
-  return safeEqual(signature, expected);
-}
-function createMidAnchorValue(ip, userAgent, mid, options) {
-  const timestamp = Math.floor(Date.now() / 1e3);
-  const bucket = ipBucket(ip);
-  const fingerprint = uaFingerprint(userAgent);
-  const signature = import_node_crypto2.default.createHmac("sha256", options.secret).update(`sg_mid_anchor:${timestamp}:${bucket}:${fingerprint}:${mid}`).digest("hex");
-  return `${timestamp}:${bucket}:${fingerprint}:${mid}:${signature}`;
-}
-function isMidAnchorValid(value, ip, userAgent, mid, options) {
-  if (!options.secret) return false;
-  const [timestamp, bucket, fingerprint, valueMid, signature] = value.split(":");
-  if (!timestamp || !bucket || !fingerprint || !valueMid || !signature) return false;
-  const parsedTimestamp = Number.parseInt(timestamp, 10);
-  const ttlMs = options.anchorTtlMs ?? ANCHOR_TTL_MS_DEFAULT;
-  if (!Number.isFinite(parsedTimestamp) || Date.now() - parsedTimestamp * 1e3 > ttlMs || parsedTimestamp * 1e3 > Date.now() + 6e4) return false;
-  if (bucket !== ipBucket(ip) || fingerprint !== uaFingerprint(userAgent)) return false;
-  if (valueMid !== mid) return false;
-  const expected = import_node_crypto2.default.createHmac("sha256", options.secret).update(`sg_mid_anchor:${timestamp}:${bucket}:${fingerprint}:${valueMid}`).digest("hex");
-  return safeEqual(signature, expected);
-}
-var import_node_crypto2, ANCHOR_TTL_MS_DEFAULT;
-var init_cookie_security = __esm({
-  "src/cookie-security.ts"() {
-    "use strict";
-    import_node_crypto2 = __toESM(require("crypto"), 1);
-    init_security_utils();
-    ANCHOR_TTL_MS_DEFAULT = 30 * 24 * 3600 * 1e3;
-  }
-});
-
 // src/render.ts
 var render_exports = {};
 __export(render_exports, {
   __clearConfigCache: () => __clearConfigCache,
+  __clearGuardCache: () => __clearGuardCache,
   enableDiskStore: () => enableDiskStore,
   ensureGuardsReady: () => ensureGuardsReady,
   fetchConfigForSiteKey: () => fetchConfigForSiteKey,
@@ -1315,8 +1327,6 @@ async function renderResponseData(token, locale, configUrl, mid, grant, ip, expe
     const tokSiteKey = token.split(":")[0];
     if (tokSiteKey !== expectedSiteKey) return { error: "not_found" };
   }
-  const tokTs = parseInt(token.split(":")[1] || "", 10);
-  if (!isNaN(tokTs) && Date.now() - tokTs > TOKEN_TTL) return { error: "not_found" };
   if (!verifyRenderGrant(mid, grant, token, ip, expectedSiteKey)) return { error: "not_found" };
   const contentReplaceOn = await fetchContentReplaceFlag(token, configUrl || "http://127.0.0.1:3098", _secret);
   const memHtml = readFromMemory(token);
@@ -1509,6 +1519,12 @@ async function fetchConfigForSiteKey(siteKey, baseUrl, secret) {
 function __clearConfigCache() {
   _configCache.clear();
 }
+function __clearGuardCache(siteKey, baseUrl) {
+  if (siteKey && baseUrl) _guardCaches.delete(cacheKey(baseUrl, siteKey));
+  else if (siteKey) {
+    for (const k of [..._guardCaches.keys()]) if (k.endsWith("::" + siteKey)) _guardCaches.delete(k);
+  } else _guardCaches.clear();
+}
 function cacheKey(baseUrl, siteKey) {
   return `${baseUrl}::${siteKey}`;
 }
@@ -1531,7 +1547,10 @@ async function fetchGuardScripts(baseUrl, secret, siteKey) {
     const cb = Date.now();
     const sig = secret ? import_crypto2.default.createHmac("sha256", secret).update(cb.toString()).digest("hex") : "";
     const [dRes, gRes] = await Promise.all([
-      fetch(baseUrl + "/guard-detect?key=" + sk + "&raw=1&cb=" + cb + (sig ? "&sig=" + sig : ""), { signal: AbortSignal.timeout(5e3) }),
+      // Le guard inline = le bundle modulaire per-config (/guard-bundle), PAS
+      // /guard-detect (qui servait le full). Même getModularBundle côté serveur,
+      // source unique → le view-source reflète les toggles du dashboard.
+      fetch(baseUrl + "/guard-bundle?key=" + sk + "&raw=1&cb=" + cb + (sig ? "&sig=" + sig : ""), { signal: AbortSignal.timeout(5e3) }),
       fetch(baseUrl + "/guard?key=" + sk + "&raw=1&cb=" + cb + (sig ? "&sig=" + sig : ""), { signal: AbortSignal.timeout(5e3) })
     ]);
     if (dRes.ok && gRes.ok) {
@@ -1610,23 +1629,30 @@ async function generateSkeleton(siteKey, token, baseUrl, restrictedAccess, _whit
   fragments.push("window.__sg_serverTime=" + _clockts);
   fragments.push("window.__sg_clockts=" + _clockts);
   if (!restrictedAccess) fragments.push("window.__sg_disableRestrictedAccess=true");
+  if (runtimeGlobal.__sg_trustedClient === true) {
+    fragments.push("window.__sg_trusted=true");
+  } else {
+    fragments.push("window.__sg_trusted=false");
+  }
+  fragments.push(`(function(){try{if(window.__sg_trusted)return;var _o=document.createElement("div");_o.id="__sg_loading";_o.style.cssText="position:fixed;inset:0;z-index:2147483647;display:flex;align-items:center;justify-content:center;pointer-events:none;background:transparent";_o.innerHTML='<div style="width:28px;height:28px;border:2px solid rgba(0,0,0,.08);border-top-color:#e87090;border-radius:50%;animation:__sgSpin .8s linear infinite"></div>';var _st=document.createElement("style");_st.textContent="@keyframes __sgSpin{to{transform:rotate(360deg)}}";(document.head||document.documentElement).appendChild(_st);(document.body||document.documentElement).appendChild(_o)}catch(e){}})();`);
   if (cache.detect) fragments.push("try{" + cache.detect + "}catch(e){window.__sg_blocked=true}");
   const jsStr = (s) => JSON.stringify(s).slice(1, -1).replace(/</g, "\\x3c");
   const devtoolsMsg = jsStr(msgs.devtoolsBody);
   const tamperTitle = jsStr(msgs.tamperTitle);
   const fbBadge = jsStr(msgs.blockedBadge);
   const fbTitle = jsStr(msgs.blockedTitle);
-  fragments.push('window.__sg_showBlock=function(msg,title,badge){var h="<head><meta charset=UTF-8><meta name=viewport content=width=device-width,initial-scale=1><style>@font-face{font-family:\\x27Alex Brush\\x27;src:url(https://shugoi.com/alex-brush.woff2?v=2) format(\\x27woff2\\x27);font-display:swap}*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}html,body{height:100%;background:#fcf9f5}body{font-family:system-ui,-apple-system,\\\\x27Segoe UI\\\\x27,Roboto,sans-serif;display:flex;align-items:center;justify-content:center;padding:1.2rem}#c{max-width:460px;width:100%;background:#fff;border:4px solid #000;border-radius:28px 6px 32px 10px;box-shadow:12px 12px 0 #000;padding:3rem 2.4rem 2.8rem;text-align:center}#c .l{width:80px;height:80px;pointer-events:none;transform:rotate(-2.5deg);margin:0 auto .6rem;display:block}#c .b{display:block;margin:0 auto .2rem;pointer-events:none;max-width:100%;height:auto}#c .bdg{display:inline-block;border:2px solid #000;border-radius:10px 2px 14px 4px;padding:.3rem .9rem;font-size:.6rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#E87090;margin-bottom:1.4rem}#c h2{font-family:\\x27Alex Brush\\x27,Georgia,\\\\x27Times New Roman\\\\x27,serif;font-size:2.2rem;color:#E87090;font-weight:400;margin:0 auto .6rem}#c p.desc{font-size:.9rem;color:#555;line-height:1.8;max-width:380px;margin:0 auto}#c p.ft{font-size:.55rem;color:#E87090;margin-top:1.8rem}@media (prefers-color-scheme:dark){html,body{background:#16101c}#c{background:#241a30;border-color:rgba(241,232,245,.14);box-shadow:0 10px 30px rgba(0,0,0,.4)}#c .bdg{background:rgba(233,137,159,.16);border-color:rgba(233,137,159,.5);color:#e9899f}#c h2{color:#e9899f}#c p.desc{color:#a795b4}#c p.ft{color:#e9899f}}</style></head><body><div id=c><img src=https://shugoi.com/favicon-block.png class=l><img src=https://shugoi.com/brand-block.png class=b><div class=bdg>"+(badge||"' + fbBadge + '")+"</div><h2>"+(title||"' + fbTitle + '")+"</h2><p class=desc>"+(msg||"")+"</p><p class=ft>"+location.hostname+" \\u00b7 Shugoi</p></div></body>";document.documentElement.innerHTML=h}');
+  fragments.push('window.__sg_showBlock=window.__sg_showBlock||function(msg,title,badge){var h="<head><meta charset=UTF-8><meta name=viewport content=width=device-width,initial-scale=1><style>@font-face{font-family:\\x27Alex Brush\\x27;src:url(https://shugoi.com/alex-brush.woff2?v=2) format(\\x27woff2\\x27);font-display:swap}*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}html,body{height:100%;background:#fcf9f5}body{font-family:system-ui,-apple-system,\\\\x27Segoe UI\\\\x27,Roboto,sans-serif;display:flex;align-items:center;justify-content:center;padding:1.2rem}#c{max-width:460px;width:100%;background:#fff;border:4px solid #000;border-radius:28px 6px 32px 10px;box-shadow:12px 12px 0 #000;padding:3rem 2.4rem 2.8rem;text-align:center}#c .l{width:80px;height:80px;pointer-events:none;transform:rotate(-2.5deg);margin:0 auto .6rem;display:block}#c .b{display:block;margin:0 auto .2rem;pointer-events:none;max-width:100%;height:auto}#c .bdg{display:inline-block;border:2px solid #000;border-radius:10px 2px 14px 4px;padding:.3rem .9rem;font-size:.6rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#E87090;margin-bottom:1.4rem}#c h2{font-family:\\x27Alex Brush\\x27,Georgia,\\\\x27Times New Roman\\\\x27,serif;font-size:2.2rem;color:#E87090;font-weight:400;margin:0 auto .6rem}#c p.desc{font-size:.9rem;color:#555;line-height:1.8;max-width:380px;margin:0 auto}#c p.ft{font-size:.55rem;color:#E87090;margin-top:1.8rem}@media (prefers-color-scheme:dark){html,body{background:#16101c}#c{background:#241a30;border-color:rgba(241,232,245,.14);box-shadow:0 10px 30px rgba(0,0,0,.4)}#c .bdg{background:rgba(233,137,159,.16);border-color:rgba(233,137,159,.5);color:#e9899f}#c h2{color:#e9899f}#c p.desc{color:#a795b4}#c p.ft{color:#e9899f}}</style></head><body><div id=c><img src=https://shugoi.com/favicon-block.png class=l><img src=https://shugoi.com/brand-block.png class=b><div class=bdg>"+(badge||"' + fbBadge + '")+"</div><h2>"+(title||"' + fbTitle + '")+"</h2><p class=desc>"+(msg||"")+"</p><p class=ft>"+location.hostname+" \\u00b7 Shugoi</p></div></body>";document.documentElement.innerHTML=h}');
   fragments.push("var t=" + JSON.stringify(token));
   fragments.push("window.__sg_token=" + JSON.stringify(token));
   fragments.push("var k=" + JSON.stringify(siteKey));
   fragments.push("var b=" + JSON.stringify(baseUrl));
   fragments.push("var r=" + JSON.stringify(rurl));
-  fragments.push(`var _gw=function(cb){if(window.__sg_guardsReady||window.__sg_blocked)cb();else setTimeout(function(){_gw(cb)},100)};function rd(p,n){if(window.__sg_blocked)return;if(!document.body)return setTimeout(function(){rd(p,n)},50);if(n>6){if((window.__sg_config||{}).enableContentReplacementCheck===true&&!window.__sg_lowInternet&&localStorage.getItem('__sg_lowInternet')!=='1')window.__sg_showBlock&&window.__sg_showBlock("` + devtoolsMsg + '","' + tamperTitle + `");else location.reload();return}var _g=(window.__sg_grant||"");if(_g){p=p+("&grant="+encodeURIComponent(_g))}var _m=(window.__sg_detectMid||window.__sg_mid||"");if(_m){p=p+("&mid="+encodeURIComponent(_m))}fetch(p).then(function(x){return x.json()}).then(function(d){if(window.__sg_blocked)return;if(!document.body)return setTimeout(function(){rd(p,n+1)},50);if(d.html){document.open("text/html");document.write(d.html);document.close();window.scrollTo(0,0)}if(d.blocked){window.__sg_showBlock&&window.__sg_showBlock(d.message,d.title)}if(d.error){if((window.__sg_config||{}).enableContentReplacementCheck===true&&!window.__sg_lowInternet&&localStorage.getItem('__sg_lowInternet')!=='1')window.__sg_showBlock&&window.__sg_showBlock("` + devtoolsMsg + '","' + tamperTitle + '");else setTimeout(function(){rd(p,n+1)},300)}else if(!d.html&&!d.blocked){setTimeout(function(){rd(p,n+1)},300)}}).catch(function(){setTimeout(function(){rd(p,n+1)},300)})}');
-  fragments.push('function _sgCl(){try{for(var _i in window){if(_i.indexOf("__sg")===0){window[_i]=null;delete window[_i]}}window._sgLogCP=function(){};window.midHex=function(){};window.rd=function(){};window._gw=function(){};window.applyDecision=function(){};window._D=function(){};window.z=function(f){return f()}}catch(_e){}}_gw(function(){rd(r+"?token="+t,0);setTimeout(_sgCl,1500)})');
+  fragments.push(`var _gw=function(cb){if(window.__sg_guardsReady||window.__sg_blocked)cb();else setTimeout(function(){_gw(cb)},100)};function rd(p,n){if(window.__sg_blocked)return;if(!document.body)return setTimeout(function(){rd(p,n)},50);if(n>6){if((window.__sg_config||{}).enableContentReplacementCheck===true&&!window.__sg_lowInternet&&!window.__sg_powRequired&&localStorage.getItem('__sg_lowInternet')!=='1')window.__sg_showBlock&&window.__sg_showBlock("` + devtoolsMsg + '","' + tamperTitle + '");else if(window.__sg_showBlock)window.__sg_showBlock("' + devtoolsMsg + '","' + tamperTitle + `");return}var _g=(window.__sg_grant||"");if(_g){p=p+("&grant="+encodeURIComponent(_g))}var _m=(window.__sg_detectMid||window.__sg_mid||"");if(_m){p=p+("&mid="+encodeURIComponent(_m))}fetch(p).then(function(x){return x.json()}).then(function(d){if(window.__sg_blocked)return;if(!document.body)return setTimeout(function(){rd(p,n+1)},50);if(d.html){document.open("text/html");document.write(d.html);document.close();window.scrollTo(0,0)}if(d.blocked){window.__sg_showBlock&&window.__sg_showBlock(d.message,d.title)}if(d.error){if((window.__sg_config||{}).enableContentReplacementCheck===true&&!window.__sg_powRequired&&!window.__sg_lowInternet&&localStorage.getItem('__sg_lowInternet')!=='1')window.__sg_showBlock&&window.__sg_showBlock("` + devtoolsMsg + '","' + tamperTitle + '");else if(window.__sg_showBlock)window.__sg_showBlock("' + devtoolsMsg + '","' + tamperTitle + '");else setTimeout(function(){rd(p,n+1)},300)}else if(!d.html&&!d.blocked){if(window.__sg_showBlock)window.__sg_showBlock("' + devtoolsMsg + '","' + tamperTitle + '");else setTimeout(function(){rd(p,n+1)},300)}}).catch(function(){if(window.__sg_showBlock)window.__sg_showBlock("' + devtoolsMsg + '","' + tamperTitle + '");else setTimeout(function(){rd(p,n+1)},300)})}');
+  fragments.push('function _sgCl(){try{for(var _i in window){if(_i.indexOf("__sg")===0&&_i!=="__sg_grant"&&_i!=="__sg_config"&&_i!=="__sg_pow"&&_i!=="__sg_powRequired"&&_i!=="__sg_token"&&_i!=="__sg_siteKey"&&_i!=="__sg_mid"&&_i!=="__sg_detectMid"){window[_i]=null;delete window[_i]}}window._sgLogCP=function(){};window.midHex=function(){};window.rd=function(){};window._gw=function(){};window.applyDecision=function(){};window._D=function(){};window.z=function(f){return f()}}catch(_e){}}_gw(function(){rd(r+"?token="+t,0);setTimeout(_sgCl,1500)})');
   const rawBootCode = fragments.join(";");
+  const active = process.env.NODE_ENV === "production" && cfg.enableDevtoolsCheck !== false;
   const variantSeed = (0, import_crypto2.createHash)("sha256").update(`${siteKey}:${token}`).digest("hex");
-  const bootCode = (false ? applyInvisibleEval(applyBootObfuscation(rawBootCode, variantSeed), variantSeed + "::e0") : rawBootCode).replace(/<\/(script|style)/gi, "<\\/$1");
+  const bootCode = (active ? applyBootObfuscation(rawBootCode, variantSeed) : rawBootCode).replace(/<\/(script|style)/gi, "<\\/$1");
   return "<script>" + bootCode + "</script>";
 }
 async function injectGuardScripts(html, siteKey, baseUrl, whitelist, restrictedAccess, signingSecret, _req, _allowedOrigins, locale, clockts, midAnchorOk) {
@@ -1666,6 +1692,7 @@ var init_render = __esm({
     import_os = require("os");
     init_locales();
     init_cookie_security();
+    init_obfuscate();
     runtimeGlobal = globalThis;
     TOKEN_DIR = (0, import_path.join)((0, import_os.tmpdir)(), "shugoi-render-" + (process.getuid?.() ?? "x"));
     TOKEN_TTL = 12e4;
@@ -1790,6 +1817,7 @@ __export(src_exports, {
   DEFAULT_HEADLESS_PATTERNS: () => DEFAULT_HEADLESS_PATTERNS,
   ShugoiError: () => ShugoiError,
   __clearConfigCache: () => __clearConfigCache,
+  __clearGuardCache: () => __clearGuardCache,
   applyBootObfuscation: () => applyBootObfuscation,
   applyObfuscation: () => applyObfuscation,
   buildCsp: () => buildCsp,
@@ -1867,7 +1895,7 @@ function buildCsp(options) {
       merged[key] = [.../* @__PURE__ */ new Set([...merged[key] ?? [], ...values])];
     }
   }
-  const requireUnsafeEval = options.bootEval ?? (process.env.NODE_ENV === "production" && options.enableDevtoolsCheck !== false);
+  const requireUnsafeEval = false;
   const scriptSrc = merged["script-src"] ?? [];
   if (requireUnsafeEval && !scriptSrc.includes("'unsafe-eval'")) {
     scriptSrc.push("'unsafe-eval'");
@@ -2291,30 +2319,28 @@ function createCore(options) {
 var P=new URLSearchParams(location.search);
 var salt=P.get('salt')||'', ts=P.get('ts')||'', nonce=P.get('nonce')||'', diff=parseInt(P.get('diff')||'12',10), path=P.get('path')||'/';
 if(path.charAt(0)!=='/'||path.charAt(1)==='/'||path.indexOf('\\\\')>=0)path='/';
-var msg=document.createElement('div');msg.style.cssText='position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);font-family:sans-serif;text-align:center;color:#333';msg.innerHTML='<div style="font-size:14px;margin-bottom:8px">V\xE9rification en cours...</div><div style="font-size:11px;color:#888" id="__sg_pow_progress"></div>';try{document.documentElement.appendChild(msg)}catch(e){}
+try{history.replaceState(null,'',path)}catch(e){}
+var msg=document.createElement('div');msg.id='__sg_cmsg';msg.style.cssText='position:fixed;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;font-family:sans-serif;text-align:center;color:#333;pointer-events:none';msg.innerHTML='<div style="width:36px;height:36px;border:3px solid rgba(0,0,0,.12);border-top-color:#e87090;border-radius:50%;animation:sgspin .9s linear infinite"></div>';try{var _st=document.createElement('style');_st.textContent='html,body{background:#faf9f7;margin:0}@keyframes sgspin{to{transform:rotate(360deg)}}@media(prefers-color-scheme:dark){html,body{background:#16101c}}';document.head.appendChild(_st);document.documentElement.appendChild(msg)}catch(e){}
 var enc=(typeof TextEncoder!=='undefined'?new TextEncoder():{encode:function(s){var a=new Uint8Array(s.length);for(var i=0;i<s.length;i++)a[i]=s.charCodeAt(i);return a}});
 function bits(d){var l=0;for(var i=0;i<d.length;i++){var b=parseInt(d[i],16);if(b===0){l+=4;continue}l+=(b&8)?0:(b&4)?1:(b&2)?2:3;break}return l}
 function sha256hex(s){var K=[1116352408,1899447441,3049323471,3921009573,961987163,1508970993,2453635748,2870763221,3624381080,310598401,607225278,1426881987,1925078388,2162078206,2614888103,3248222580,3835390401,4022224774,264347078,604807628,770255983,1249150122,1555081692,1996064986,2554220882,2821834349,2952996808,3210313671,3336571891,3584528711,113926993,338241895,666307205,773529912,1294757372,1396182291,1695183700,1986661051,2177026350,2456956037,2730485921,2820302411,3259730800,3345764771,3516065817,3600352804,4094571909,275423344,430227734,506948616,659060556,883997877,958139571,1322822218,1537002063,1747873779,1955562222,2024104815,2227730452,2361852424,2428436474,2756734187,3204031479,3329325298];var H=[1779033703,3144134277,1013904242,2773480762,1359893119,2600822924,528734635,1541459225];var W=new Array(64);function rotr(n,x){return (x>>>n)|(x<<(32-n));}var m=s;var ml=m.length;var len=ml*8;var pad=new Uint8Array(((ml+9+63)>>6<<6));for(var i=0;i<ml;i++)pad[i]=m.charCodeAt(i);pad[ml]=128;var dv=new DataView(pad.buffer);dv.setUint32(pad.length-8,Math.floor(len/0x100000000),false);dv.setUint32(pad.length-4,len,false);for(var i2=0;i2<pad.length;i2+=64){for(var j=0;j<16;j++)W[j]=dv.getUint32(i2+j*4,false);for(var jj=16;jj<64;jj++){var s0=rotr(7,W[jj-15])^rotr(18,W[jj-15])^(W[jj-15]>>>3);var s1=rotr(17,W[jj-2])^rotr(19,W[jj-2])^(W[jj-2]>>>10);W[jj]=(W[jj-16]+s0+W[jj-7]+s1)|0;}var a=H[0],b=H[1],c=H[2],d=H[3],e=H[4],f=H[5],g=H[6],h=H[7];for(var j3=0;j3<64;j3++){var S1=rotr(6,e)^rotr(11,e)^rotr(25,e);var ch=(e&f)^(~e&g);var temp1=(h+S1+ch+K[j3]+W[j3])|0;var S0=rotr(2,a)^rotr(13,a)^rotr(22,a);var maj=(a&b)^(a&c)^(b&c);var temp2=(S0+maj)|0;h=g;g=f;f=e;e=(d+temp1)|0;d=c;c=b;b=a;a=(temp1+temp2)|0;}for(var j4=0;j4<8;j4++)H[j4]=(H[j4]+[a,b,c,d,e,f,g,h][j4])|0;}var out="";for(var k=0;k<8;k++)out+=(H[k]>>>0).toString(16).padStart(8,"0");return out;}
 var n=0;
 function done(h){if(bits(h)>=diff){var base=path;var q=(base.indexOf('?')>=0?'&':'?')+'sg_proof='+ts+':'+nonce+':'+n.toString(16);location.replace(base+q);return true}return false}
-function updateProgress(){try{var el=document.getElementById('__sg_pow_progress');if(el)el.textContent=n+' essais...'}catch(e){}}
 if(typeof sha256hex==='function'){
   // Pur-JS batch\xE9 en PRIORIT\xC9 : ~200 hachages/tick sans IPC crypto.subtle
   // (subtle 1-hachage-par-appel \u2248 500/s sur mobile \u2192 plusieurs secondes pour diff 12).
   function stepSync(){
-    for(var batch=0;batch<200;batch++){
+    for(var batch=0;batch<1000;batch++){
       if(n>=300000){location.reload();return}
       try{var h2=sha256hex(salt+':'+n.toString(16));if(done(h2))return}catch(e){location.reload();return}
       n++;
     }
-    updateProgress();
     setTimeout(stepSync,0);
   }
   stepSync();
 } else if(typeof crypto!=='undefined'&&crypto.subtle&&crypto.subtle.digest){
   function stepSubtle(){
     if(n>=300000){location.reload();return}
-    if(n%500===0)updateProgress();
     crypto.subtle.digest('SHA-256',enc.encode(salt+':'+n.toString(16))).then(function(buf){
       var h=Array.from(new Uint8Array(buf)).map(function(v){return v.toString(16).padStart(2,'0')}).join('');
       if(!done(h)){n++;setTimeout(stepSubtle,0)}
@@ -2325,7 +2351,7 @@ if(typeof sha256hex==='function'){
   location.reload();
 }
 })();`;
-      const html = "<!--\n" + BLOCK_PAGE + "-->\n<script>" + js + "</script>";
+      const html = '<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body><script>' + js + "</script></body></html>";
       return { block: true, status: 200, contentType: "text/html", body: html };
     }
     const isPage = !ctx.path.includes("/__shugoi/") && !ctx.path.startsWith("/api/");
@@ -2418,6 +2444,7 @@ if(typeof sha256hex==='function'){
       proofReplayStore.close();
     },
     isProofValid: isPowValid,
+    isOkCookieValid: (value, ip, ua) => isSgOkValid(value, ip, ua),
     sgOkCookie(proof, ip, ua) {
       if (!proof || !isPowValid(proof)) return null;
       return "__sg_ok=" + sgOkCookieValue(ip, ua) + "; Path=/; HttpOnly; SameSite=Lax; Max-Age=" + Math.floor(POW_OK_TTL_MS / 1e3) + (process.env.NODE_ENV === "production" ? "; Secure" : "");
@@ -2471,6 +2498,10 @@ function createShugoiMiddleware(options) {
         const ip2 = (typeof req.headers?.["x-forwarded-for"] === "string" ? req.headers["x-forwarded-for"].split(",")[0]?.trim() : void 0) || (typeof req.ip === "string" ? req.ip : "unknown");
         const ua2 = (typeof req.headers?.["user-agent"] === "string" ? req.headers["user-agent"] : "") || "";
         const midAnchor2 = typeof req.headers?.cookie === "string" ? req.headers.cookie.match(/(?:^|;\s*)__sg_mid_anchor=([^;]+)/)?.[1] ?? null : null;
+        try {
+          console.log("[shugoi:render]", "mid=" + (q.mid || "").slice(0, 8), "grant=" + (q.grant ? "YES" : "NO"), "token=" + (q.token || "").slice(0, 40), "tsAge=" + (Date.now() - (parseInt(String(q.token || "").split(":")[1] || "0", 10) || 0)) + "ms");
+        } catch {
+        }
         return handleRender2(q.token || "", res, internalUrl, q.mid || "", q.grant || "", ip2, options.siteKey, baseUrl, signingSecret, ua2, midAnchor2 || void 0);
       }
       if (path === "/__sg_challenge") {
@@ -2506,6 +2537,7 @@ function createShugoiMiddleware(options) {
         midAnchorOk = midAnchor && /^[a-f0-9]{64}$/.test(anchorMid) ? isMidAnchorValid(midAnchor, ip, ua, anchorMid, { secret: anchorSecret, okTtlMs: 0, authorizedTtlMs: 0, anchorTtlMs: 30 * 24 * 3600 * 1e3 }) : false;
       }
       if (autoInject && options.siteKey) {
+        globalThis.__sg_trustedClient = false;
         try {
           const { skipPaths } = await getConfig(options.siteKey, internalUrl, signingSecret);
           if (skipPaths?.some((p) => path === p)) {
@@ -2559,10 +2591,14 @@ function createShugoiMiddleware(options) {
       }
       const sgProofQ = typeof req.query?.sg_proof === "string" ? req.query.sg_proof : void 0;
       if (sgProofQ && res.setHeader) {
-        const okCookie = core.sgOkCookie(sgProofQ, ip, ua);
-        if (okCookie) res.setHeader("Set-Cookie", okCookie);
+        const okCookie2 = core.sgOkCookie(sgProofQ, ip, ua);
+        if (okCookie2) res.setHeader("Set-Cookie", okCookie2);
       }
       const isBot = await core.isTrustedBot(ua, ip) || core.isWhitelistedBot(ua);
+      const okCookie = typeof req.headers?.cookie === "string" ? req.headers.cookie.match(/(?:^|;\s*)__sg_ok=([^;]+)/)?.[1] ?? null : null;
+      if (okCookie && core.isOkCookieValid(okCookie, ip, ua)) {
+        globalThis.__sg_trustedClient = true;
+      }
       if (autoInject && splitRender && !isBot && !core.isAllowlisted(path)) {
         let injected = false;
         const originalSend = res.send?.bind(res);
@@ -2805,6 +2841,7 @@ init_obfuscate();
   DEFAULT_HEADLESS_PATTERNS,
   ShugoiError,
   __clearConfigCache,
+  __clearGuardCache,
   applyBootObfuscation,
   applyObfuscation,
   buildCsp,

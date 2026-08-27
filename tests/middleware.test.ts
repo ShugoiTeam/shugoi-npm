@@ -330,7 +330,9 @@ describe('307 challenge minimal (anti-curl/view-source)', () => {
     const { readFileSync } = require('node:fs');
     const src = readFileSync(require('node:path').join(process.cwd(), 'src', 'core.ts'), 'utf-8');
     expect(src).toContain("ctx.path === '/__sg_challenge'");
-    expect(src).toContain("const html = '<script>' + js + '</script>'");
+    expect(src).toContain('<!DOCTYPE html>');
+    expect(src).toContain('meta charset="utf-8"');
+    expect(src).toContain('history.replaceState');
     expect(src.indexOf("'<!--\\n' + BLOCK_PAGE")).toBe(-1);
     expect(src).toContain('<script>');
     expect(src.indexOf('<pre>')).toBe(-1);

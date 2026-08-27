@@ -225,7 +225,7 @@ function xorEncrypt(str, hexKey) {
   let enc = "";
   for (let i = 0; i < str.length; i++) {
     const cc = str.charCodeAt(i) ^ (kb[i % kb.length] ?? 0);
-    enc += cc.toString(16).padStart(2, "0");
+    enc += cc.toString(16).padStart(4, "0");
   }
   return enc;
 }
@@ -540,7 +540,7 @@ function injectDecoder(hexKey, dec = "_D", cacheName = "_Dx") {
 function buildDecoderStmt(hexKey, dec, cacheName) {
   const kb = hexToBytes(hexKey);
   const ks = kb.map((b) => "\\x" + b.toString(16).padStart(2, "0")).join("");
-  return "var " + cacheName + "=Object.create(null)," + dec + "=function(h){var c=" + cacheName + '[h];if(c!==void 0)return c;var k="' + ks + '",r="";for(var i=0;i<h.length;i+=2){r+=String.fromCharCode(parseInt(h.substr(i,2),16)^k.charCodeAt((i/2)%' + kb.length + "))}return " + cacheName + "[h]=r};";
+  return "var " + cacheName + "=Object.create(null)," + dec + "=function(h){var c=" + cacheName + '[h];if(c!==void 0)return c;var k="' + ks + '",r="";for(var i=0;i<h.length;i+=4){r+=String.fromCharCode(parseInt(h.substr(i,4),16)^k.charCodeAt((i/4)%' + kb.length + "))}return " + cacheName + "[h]=r};";
 }
 function removeFunction(code, name) {
   const regex = new RegExp("function\\s+" + name + "\\s*\\([^)]*\\)\\s*\\{[^{}]*\\}", "g");
@@ -668,12 +668,23 @@ function findIdentifiers(code) {
       const start = i;
       while (i < n && /[A-Za-z0-9_$]/.test(code[i])) i++;
       const value = code.slice(start, i);
+      let hasUnicodeEscape = false;
+      while (code[i] === "\\" && code[i + 1] === "u") {
+        hasUnicodeEscape = true;
+        if (code[i + 2] === "{") {
+          let k = i + 3;
+          while (k < n && code[k] !== "}") k++;
+          i = k + 1;
+        } else {
+          i += 6;
+        }
+      }
       const isProp = prevSig === ".";
       const isKey = code[i] === ":" && (prevSig === "{" || prevSig === ",");
       const isKeyword = KEYWORDS.has(value);
       const isGlobal = GLOBALS.has(value);
       const isReserved = RESERVED_PREFIXES.some((p) => value.startsWith(p));
-      if (!isProp && !isKeyword && !isGlobal && !isReserved && !isKey) {
+      if (!isProp && !isKeyword && !isGlobal && !isReserved && !isKey && !hasUnicodeEscape) {
         spans.push({ start, end: i, value });
       }
       prevSig = KEYWORDS.has(value) ? value : "id";
@@ -847,7 +858,7 @@ function deferExecution(code, seed, qName = "_q", iName = "_i") {
   for (const o of order) {
     lines.push(qName + "[" + o + "]=function(){" + (execs[o] ?? "") + "};");
   }
-  lines.push("for(var " + iName + "=0;" + iName + "<" + qName + ".length;" + iName + "++){" + qName + "[" + iName + "]&&" + qName + "[" + iName + "]()}");
+  lines.push("for(var " + iName + "=0;" + iName + "<" + qName + ".length;" + iName + "++){if(" + qName + "[" + iName + "]){try{" + qName + "[" + iName + "]()}catch(_sg_e){window.__sg_deferError=String(_sg_e&&_sg_e.message||_sg_e)}}}");
   return lines.join("");
 }
 function hashAllProperties(code, dec, key) {

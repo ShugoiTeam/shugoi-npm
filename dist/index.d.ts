@@ -33,6 +33,7 @@ declare function signToken(siteKey: string, timestamp: number, secretOverride?: 
 };
 declare function fetchWhitelistForSiteKey(siteKey: string, baseUrl: string): Promise<string[]>;
 declare function __clearConfigCache(): void;
+declare function __clearGuardCache(siteKey?: string, baseUrl?: string): void;
 declare function generateSkeleton(siteKey: string, token: string, baseUrl: string, restrictedAccess?: boolean, _whitelist?: string[], renderUrl?: string, locale?: Locale, flags?: Record<string, boolean>, clockts?: number, signingSecret?: string, supportEmail?: string, midAnchorOk?: boolean): Promise<string>;
 declare function injectGuardScripts(html: string, siteKey: string, baseUrl: string, whitelist?: string[] | null, restrictedAccess?: boolean, signingSecret?: string, _req?: object, _allowedOrigins?: string[], locale?: Locale, clockts?: number, midAnchorOk?: boolean): Promise<string>;
 
@@ -106,4 +107,4 @@ declare function validateSiteKey(options: ValidateSiteKeyOptions): Promise<{
     error?: string;
 }>;
 
-export { BLOCK_PAGE, CheckResponse, DEFAULT_BOT_WHITELIST, DEFAULT_HEADLESS_PATTERNS, ScriptTagsOptions, ScriptTagsResult, ShugoiCoreOptions, ShugoiError, __clearConfigCache, buildCsp, checkLicense, createShugoiMiddleware, createShugoiPlugin, fetchWhitelistForSiteKey, generateSkeleton, handleRender, injectGuardScripts, mergeCsp, renderResponseData, scriptTags, signToken, storeHtml, validateSiteKey, verifyRenderGrant };
+export { BLOCK_PAGE, CheckResponse, DEFAULT_BOT_WHITELIST, DEFAULT_HEADLESS_PATTERNS, ScriptTagsOptions, ScriptTagsResult, ShugoiCoreOptions, ShugoiError, __clearConfigCache, __clearGuardCache, buildCsp, checkLicense, createShugoiMiddleware, createShugoiPlugin, fetchWhitelistForSiteKey, generateSkeleton, handleRender, injectGuardScripts, mergeCsp, renderResponseData, scriptTags, signToken, storeHtml, validateSiteKey, verifyRenderGrant };
