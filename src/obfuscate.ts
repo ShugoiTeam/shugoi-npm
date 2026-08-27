@@ -61,8 +61,12 @@ function xorEncrypt(str: string, hexKey: string): string {
   const kb = hexToBytes(hexKey);
   let enc = '';
   for (let i = 0; i < str.length; i++) {
+    // Toujours 4 hex par code unit : un char > 0xFF (é/è/’/…) XORé avec un
+    // octet reste sur 2 octets → sans padStart(4), le décodeur (qui lit 2 hex
+    // par char) désalignait et corrompait tout le reste de la string (bug du
+    // texte français dans les pages de bloc). padStart(4) → 1 char = 4 hex.
     const cc = str.charCodeAt(i) ^ (kb[i % kb.length] ?? 0);
-    enc += cc.toString(16).padStart(2, '0');
+    enc += cc.toString(16).padStart(4, '0');
   }
   return enc;
 }
@@ -342,7 +346,7 @@ function injectDecoder(hexKey: string, dec = '_D', cacheName = '_Dx'): string {
 function buildDecoderStmt(hexKey: string, dec: string, cacheName: string): string {
   const kb = hexToBytes(hexKey);
   const ks = kb.map((b) => '\\x' + b.toString(16).padStart(2, '0')).join('');
-  return 'var ' + cacheName + '=Object.create(null),' + dec + '=function(h){var c=' + cacheName + '[h];if(c!==void 0)return c;var k="' + ks + '",r="";for(var i=0;i<h.length;i+=2){r+=String.fromCharCode(parseInt(h.substr(i,2),16)^k.charCodeAt((i/2)%' + kb.length + '))}return ' + cacheName + '[h]=r};';
+  return 'var ' + cacheName + '=Object.create(null),' + dec + '=function(h){var c=' + cacheName + '[h];if(c!==void 0)return c;var k="' + ks + '",r="";for(var i=0;i<h.length;i+=4){r+=String.fromCharCode(parseInt(h.substr(i,4),16)^k.charCodeAt((i/4)%' + kb.length + '))}return ' + cacheName + '[h]=r};';
 }
 
 function removeFunction(code: string, name: string): string {
