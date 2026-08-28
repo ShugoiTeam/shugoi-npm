@@ -1082,6 +1082,7 @@ var init_obfuscate = __esm({
       "undefined"
     ]);
     GLOBALS = /* @__PURE__ */ new Set([
+      "arguments",
       "window",
       "document",
       "navigator",

@@ -192,6 +192,7 @@ var KEYWORDS = /* @__PURE__ */ new Set([
   "undefined"
 ]);
 var GLOBALS = /* @__PURE__ */ new Set([
+  "arguments",
   "window",
   "document",
   "navigator",

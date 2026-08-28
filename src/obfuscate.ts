@@ -17,6 +17,7 @@ const KEYWORDS = new Set([
 ]);
 
 const GLOBALS = new Set([
+  "arguments",
   "window","document","navigator","screen","location","history","performance","console",
   "crypto","Date","Math","JSON","Array","Object","String","Number","Boolean","Symbol",
   "Uint8Array","Int8Array","Uint16Array","Int16Array","Uint32Array","Int32Array",
