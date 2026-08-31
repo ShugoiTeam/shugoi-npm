@@ -787,8 +787,68 @@ function navify(code: string, seed: string, dec = '_D', cacheName = '_Dx', navNa
   return stmts.join(';') + ';';
 }
 
+// --- Preservation des fonctions serialisees en Worker (blob) --------------
+// Une fonction executee via `'(' + fn + ')()'` dans un Blob/Worker tourne dans un
+// contexte ISOLE (pas de closure). Si l'obfuscation chiffre ses strings (-> appels
+// au decodeur du scope exterieur) ou navifie ses globals, le blob reference des
+// symboles absents -> "X is not defined" (la page de verification affiche du
+// charabia / le worker crashe). Ces corps sont de toute facon lisibles dans le blob :
+// on les EXTRAIT avant obfuscation et on les RESTAURE verbatim apres (le NOM de fn est
+// rote normalement, ref+def, donc reste coherent). Marqueur numerique (les nombres
+// traversent toutes les passes intacts).
+function _sgExtractBalancedBody(out: string, braceStart: number): number {
+  let depth = 0, inStr: string | null = null;
+  for (let j = braceStart; j < out.length; j++) {
+    const ch = out[j];
+    if (inStr) { if (ch === '\\') { j++; continue; } if (ch === inStr) inStr = null; continue; }
+    if (ch === '"' || ch === "'" || ch === '`') { inStr = ch; continue; }
+    if (ch === '{') depth++;
+    else if (ch === '}') { depth--; if (depth === 0) return j; }
+  }
+  return -1;
+}
+function _sgExtractWorkers(code: string): { code: string; map: string[] } {
+  const map: string[] = [];
+  const re = /["'`]\(["'`]\s*\+\s*([A-Za-z_$][\w$]*)\s*\+\s*["'`]\)\(\)["'`]/g;
+  const uses: { name: string; pos: number }[] = [];
+  let mm: RegExpExecArray | null;
+  while ((mm = re.exec(code))) uses.push({ name: mm[1], pos: mm.index });
+  let out = code, shift = 0;
+  for (const u of uses) {
+    const name = u.name, usagePos = u.pos + shift;
+    const region = out.slice(0, usagePos);
+    const cands: number[] = [];
+    const reDef = new RegExp('(?:\\bfunction\\s+' + name + '\\s*\\(|[=,;([{\\s]' + name + '\\s*=\\s*function\\b)', 'g');
+    let dm: RegExpExecArray | null;
+    while ((dm = reDef.exec(region))) cands.push(dm.index + dm[0].length);
+    for (let c = cands.length - 1; c >= 0; c--) {
+      const braceStart = out.indexOf('{', cands[c]);
+      if (braceStart < 0 || braceStart >= usagePos) continue;
+      const end = _sgExtractBalancedBody(out, braceStart);
+      if (end < 0) continue;
+      const body = out.slice(braceStart, end + 1);
+      if (body.indexOf('self.') < 0 && body.indexOf('postMessage') < 0 && body.indexOf('onmessage') < 0) continue;
+      const marker = 918273640000 + map.length;
+      map.push(body);
+      const repl = '{return ' + marker + '}';
+      out = out.slice(0, braceStart) + repl + out.slice(end + 1);
+      shift += repl.length - body.length;
+      break;
+    }
+  }
+  return { code: out, map };
+}
+function _sgRestoreWorkers(code: string, map: string[]): string {
+  for (let i = 0; i < map.length; i++) {
+    const marker = 918273640000 + i;
+    code = code.replace(new RegExp('\\{\\s*return\\s+' + marker + '\\s*;?\\s*\\}'), () => map[i]);
+  }
+  return code;
+}
 export function applyBootObfuscation(code: string, seed: string): string {
   let r = stripComments(code);
+  const _wk = _sgExtractWorkers(r);
+  r = _wk.code;
   r = stripTrace(r);
   r = rotateIdentifiers(r, seed);
   r = deferExecution(r, seed);
@@ -798,6 +858,7 @@ export function applyBootObfuscation(code: string, seed: string): string {
   const navName = '_' + shortName(createRng(hashStr(seed + 'nav')), 2);
   r = encryptStrings(r, encKey, decName);
   r = navify(r, seed, decName, cacheName, navName);
+  r = _sgRestoreWorkers(r, _wk.map);
   r = escapeClosingTags(r);
   r = fixComputedProperties(r, decName);
   if (!isValidJavaScript(r)) return code;
