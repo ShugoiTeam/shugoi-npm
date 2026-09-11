@@ -3,6 +3,7 @@ import { createShugoiMiddleware } from '../src/middleware';
 import { __clearConfigCache } from '../src/render';
 import type { MinimalRequest, ResponseBody, MinimalResponse } from '../src/middleware';
 import type { ShugoiCoreOptions } from '../src/types';
+import { signAvailabilitySnapshot } from '../src/availability';
 
 describe('createShugoiMiddleware', () => {
   beforeEach(() => {
@@ -34,6 +35,10 @@ describe('createShugoiMiddleware', () => {
 
   function mockGuardFetch() {
     globalThis.fetch = vi.fn().mockImplementation((url: string) => {
+      if (url.includes('/whitelist')) {
+        const snapshot = signAvailabilitySnapshot({ version: 1, siteKey: 'sg_sk_live_xxx', fetchedAt: Date.now(), flags: {}, skipPaths: [] }, 'test-secret-32bytes-long!');
+        return Promise.resolve({ ok: true, json: async () => ({ whitelistedMachines: [], detectionFlags: {}, skipPaths: [], availabilitySnapshot: snapshot }) });
+      }
       if (url.includes('guard-detect') || url.includes('guard?')) {
         return Promise.resolve({
           ok: true,
