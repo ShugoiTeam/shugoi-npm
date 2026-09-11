@@ -10,7 +10,7 @@ export interface ValidateSiteKeyOptions {
 export async function validateSiteKey(
   options: ValidateSiteKeyOptions
 ): Promise<{ valid: boolean; mode?: 'live' | 'test'; error?: string }> {
-  const baseUrl = options.baseUrl ?? 'https://shugoi.com/api/v1';
+  const baseUrl = options.baseUrl ?? 'https://api.shugoi.com/api/v1';
   const timeout = options.timeout ?? 5000;
 
   try {

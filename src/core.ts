@@ -1,5 +1,5 @@
 import type { JsonObject, ShugoiCoreOptions } from './types'
-import { ensureGuardsReady, fetchConfigForSiteKey } from './render'
+import { ensureGuardsReady, fetchConfigForSiteKey, isConfigAvailable } from './render'
 import { buildCsp, originOf } from './csp'
 import { resolveLocale, type Locale, MESSAGES } from './locales'
 import { verifyBotIp, VERIFIABLE_BOTS } from './verify-bot'
@@ -73,16 +73,21 @@ function shieldPage(title: string, msg: string, badge: string, host: string, rem
   const htmlHost = escapeHtml((host || 'shugoi.com').slice(0, 120))
   const htmlDesc = escapeHtml(desc)
   const htmlLang = locale === 'fr' ? 'fr' : 'en'
-  return '<!DOCTYPE html><html lang="' + htmlLang + '"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>@font-face{font-family:\'Alex Brush\';src:url(https://shugoi.com/alex-brush.woff2?v=2) format(\'woff2\');font-display:swap}*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}html,body{height:100%;background:#fcf9f5}body{font-family:system-ui,-apple-system,\'Segoe UI\',Roboto,sans-serif;display:flex;align-items:center;justify-content:center;padding:1.2rem}#c{max-width:460px;width:100%;background:#fff;border:4px solid #000;border-radius:28px 6px 32px 10px;box-shadow:12px 12px 0 #000;padding:3rem 2.4rem 2.8rem;text-align:center}#c .l{width:80px;height:80px;pointer-events:none;transform:rotate(-2.5deg);margin:0 auto .6rem;display:block}#c .b{display:block;margin:0 auto .2rem;pointer-events:none;max-width:100%;height:auto}#c .bdg{display:inline-block;border:2px solid #000;border-radius:10px 2px 14px 4px;padding:.3rem .9rem;font-size:.6rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#E87090;margin-bottom:1.4rem}#c h2{font-family:\'Alex Brush\',Georgia,"Times New Roman",serif;font-size:2.2rem;color:#E87090;font-weight:400;margin:0 auto .6rem}#c p.desc{font-size:.9rem;color:#555;line-height:1.8;max-width:380px;margin:0 auto}#c p.ft{font-size:.55rem;color:#E87090;margin-top:1.8rem}</style></head><body><div id=c><img src=https://shugoi.com/favicon.png alt class=l><img src=https://shugoi.com/brand.png alt class=b><div class=bdg>' + htmlBadge + '</div><h2>' + htmlTitle + '</h2><p class=desc>' + htmlDesc + '</p><p class=ft>' + htmlHost + ' \u00b7 Shugoi</p></div>' + countdownScript + '</body></html>'
+  return '<!DOCTYPE html><html lang="' + htmlLang + '"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>@font-face{font-family:\'Reggae One\';src:url(https://shugoi.com/reggae-one.woff2) format(\'woff2\');font-display:swap}*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}html,body{height:100%;background:#fcf9f5;color:#555}@media(prefers-color-scheme:dark){html,body{background:#16101c;color:#f1e8f5}#c{background:#241a30;border-color:rgba(241,232,245,.14);box-shadow:0 10px 30px rgba(0,0,0,.4)}#c h2{color:#e9899f}#c p.desc{color:#a795b4}#c p.ft{color:#e9899f}}body{font-family:system-ui,-apple-system,\'Segoe UI\',Roboto,sans-serif;display:flex;align-items:center;justify-content:center;padding:1.2rem}#c{max-width:460px;width:100%;background:#fff;border:4px solid #000;border-radius:28px 6px 32px 10px;box-shadow:12px 12px 0 #000;padding:3rem 2.4rem 2.8rem;text-align:center}#c .l{width:80px;height:80px;pointer-events:none;transform:rotate(-2.5deg);margin:0 auto .6rem;display:block}#c .b{display:block;margin:0 auto .2rem;pointer-events:none;max-width:100%;height:auto}#c .bdg{display:inline-block;border:2px solid #000;border-radius:10px 2px 14px 4px;padding:.3rem .9rem;font-size:.6rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#E87090;margin-bottom:1.4rem}#c h2{font-family:\'Reggae One\',Georgia,"Times New Roman",serif;font-size:2.2rem;color:#E87090;font-weight:400;margin:0 auto .6rem}#c p.desc{font-size:.9rem;color:#555;line-height:1.8;max-width:380px;margin:0 auto}#c p.ft{font-size:.55rem;color:#E87090;margin-top:1.8rem}</style></head><body><div id=c><img src=https://shugoi.com/favicon.png alt class=l><img src=https://shugoi.com/brand.png alt class=b><div class=bdg>' + htmlBadge + '</div><h2>' + htmlTitle + '</h2><p class=desc>' + htmlDesc + '</p><p class=ft>' + htmlHost + ' \u00b7 Shugoi</p></div>' + countdownScript + '</body></html>'
 }
 
 export function createCore(options: ShugoiCoreOptions): ShugoiCore {
   const allowlist = options.allowlist ?? ['/api', '/legal']
   const headlessPatterns = options.headlessPatterns ?? DEFAULT_HEADLESS_PATTERNS
   const botWhitelist = options.botWhitelist ?? DEFAULT_BOT_WHITELIST
-  const baseUrl = options.baseUrl ?? 'https://shugoi.com/api/v1'
+  const baseUrl = options.baseUrl ?? 'https://api.shugoi.com/api/v1'
+  const internalUrl = options.internalUrl || baseUrl
   const debug = options.debug ?? false
   const siteSecret = options.signingSecret || options.secret
+  // Each integration needs its own issued secret. Reading a process-wide
+  // environment fallback here would let a mistakenly configured tenant share
+  // signing authority with every other tenant in that process.
+  if (!siteSecret) throw new Error('Shugoi requires an explicit site secret')
   const blockStatus = options.blockStatus ?? 403
   const blockPage = options.blockPage ?? null
   const cspEnabled = options.csp ?? true
@@ -108,7 +113,8 @@ export function createCore(options: ShugoiCoreOptions): ShugoiCore {
     return Number.isInteger(raw) && raw >= 8 && raw <= 24 ? raw : 12;
   })();
   const POW_OK_TTL_MS = 24 * 3600 * 1000;
-  const powSecret = process.env.SHUGOKI_SIGNING_SECRET || process.env.SHUGOKI_SECRET || ''
+  // Bind proof and continuity cookies to this integration's enrolled secret.
+  const powSecret = siteSecret
 
   const POW_TTL_MS = 120_000;
 
@@ -134,9 +140,9 @@ export function createCore(options: ShugoiCoreOptions): ShugoiCore {
   const isSgMidAnchorValid = (value: string, ip: string, ua: string, mid: string): boolean => isMidAnchorValid(value, ip, ua, mid, cookieSecurity)
 
   const validationPromise: Promise<void> = (async () => {
-    if (siteSecret && baseUrl) {
+    if (siteSecret && internalUrl) {
       try {
-        const res = await fetch(baseUrl + '/validate-key', {
+        const res = await fetch(internalUrl + '/validate-key', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ siteKey: options.siteKey, secret: siteSecret }),
@@ -159,12 +165,10 @@ export function createCore(options: ShugoiCoreOptions): ShugoiCore {
         _validationFailed = true
         _validationFailedReason = 'réseau: ' + (e instanceof Error ? e.message : String(e))
       }
-    } else if (debug) {
-      console.log('[shugoi] no secret provided, skipping key validation')
-    }
+  }
   })()
 
-  ensureGuardsReady(baseUrl, siteSecret, options.siteKey).catch(() => {})
+  ensureGuardsReady(internalUrl, siteSecret, options.siteKey).catch(() => {})
 
   async function ensureValidated(): Promise<void> {
     if (!siteSecret) return
@@ -243,20 +247,18 @@ function lenientBotAllow(ip: string): boolean {
         '[shugoi] La protection reste active, mais cette installation n\'est pas authentifiée.\n' +
         '[shugoi] Vérifiez `siteKey` et `secret` : https://shugoi.com/docs#validation'
       )
-      fetch(baseUrl + '/event', {
+      fetch(internalUrl + '/event', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ siteKey: options.siteKey, reason: 'validation_failed' }),
         signal: AbortSignal.timeout(2000),
       }).catch(() => {})
     }
 
-    if (/\/assets\/[^?#]+\.(js|css)(\?|$)/.test(ctx.path)) {
-      const authOk = !!ctx.sgAuthorized && isSgAuthorizedValid(ctx.sgAuthorized)
-      if (!authOk) {
-        log('asset protégé refusé:', ctx.path.slice(0, 60))
-        return { block: true, status: 403, contentType: 'text/plain', body: BLOCK_PAGE, headers: {} }
-      }
-    }
+    // Static resources are dependencies of the protected document. They must
+    // remain fetchable before the browser has completed the WLC handshake;
+    // otherwise the initial HTML shell receives 403/text/plain for its JS/CSS
+    // and can never reach the guard. The document itself remains protected by
+    // the normal decision path below.
 
     // Ancre serveur : si une ancre __sg_mid_anchor existe (machine déjà vue) et qu'un mid est
     // fourni dans le contexte, tout mid qui ne matche pas l'ancre → block anchor_mismatch.
@@ -317,9 +319,19 @@ if(typeof sha256hex==='function'){
       return { block: true, status: 200, contentType: 'text/html', body: html }
     }
 
+    // Resolve the site's policy before the generic PoW gate. A site that
+    // explicitly disables headless protection must be able to serve its
+    // SSR/React HTML to curl and AI crawlers; otherwise this global gate
+    // prevents those clients from ever reaching the site configuration.
+    const flags = await fetchConfigForSiteKey(options.siteKey, internalUrl, options.signingSecret || options.secret)
+    if (options.failOpenOnUnavailable && !isConfigAvailable(options.siteKey, internalUrl)) {
+      log('Shugoi indisponible; passage en mode fail-open')
+      return null
+    }
+    const headlessEnabled = flags.enableHeadlessCheck !== false
     const isPage = !ctx.path.includes('/__shugoi/') && !ctx.path.startsWith('/api/')
 
-    if (isPage && powSecret && ctx.ua) {
+    if (isPage && powSecret && ctx.ua && headlessEnabled) {
       if (/Mozilla/i.test(ctx.ua) && !(await botBypass(ctx.ua, ctx.ip))) {
         const sfd = ctx.secFetchDest ?? ''
         const sfm = ctx.secFetchMode ?? ''
@@ -354,13 +366,9 @@ if(typeof sha256hex==='function'){
       }
     }
 
-    const flags = await fetchConfigForSiteKey(options.siteKey, baseUrl, options.signingSecret || options.secret)
-
-    const headlessEnabled = flags.enableHeadlessCheck !== false
-
     if (flags.enableRateLimit === true) {
       try {
-        const rlRes = await fetch(baseUrl + '/rate-limit-check', {
+        const rlRes = await fetch(internalUrl + '/rate-limit-check', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -391,7 +399,7 @@ if(typeof sha256hex==='function'){
 
     if (headlessEnabled && ctx.ua && !(await botBypass(ctx.ua, ctx.ip)) && headlessPatterns.some(p => p.test(ctx.ua))) {
       log('headless block:', ctx.ua.slice(0, 40))
-      fetch(baseUrl + '/event', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ siteKey: options.siteKey, reason: 'headless' }), signal: AbortSignal.timeout(2000) }).catch(() => {})
+      fetch(internalUrl + '/event', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ siteKey: options.siteKey, reason: 'headless' }), signal: AbortSignal.timeout(2000) }).catch(() => {})
       return { block: true, status: blockStatus, contentType: 'text/plain', body: BLOCK_PAGE }
     }
 

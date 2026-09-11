@@ -1,4 +1,5 @@
-import { f as JsonValue } from '../types-NuVrJ21J.cjs';
+import { k as JsonValue } from '../types-CeZ7hqRi.cjs';
+import * as next_server from 'next/server';
 import { NextRequest, NextResponse } from 'next/server.js';
 
 interface WithShugoiOptions {
@@ -18,27 +19,27 @@ interface NextHeaderRule {
 type NextHeaders = NextHeaderRule[] | (() => Promise<NextHeaderRule[]> | NextHeaderRule[]);
 interface NextConfigShape {
     headers?: NextHeaders;
-    [key: string]: JsonValue | NextHeaders;
+    [key: string]: JsonValue | NextHeaders | undefined;
 }
 declare function withShugoi(opts: WithShugoiOptions, nextConfig?: NextConfigShape): NextConfigShape;
-
-interface ShugoiProxyOptions {
-    siteKey: string;
-    allowlist?: string[];
-    whitelist?: string[];
-    headlessPatterns?: RegExp[];
-    target?: string;
-}
-declare function createShugoiProxy(options: ShugoiProxyOptions): (request: NextRequest) => Promise<NextResponse<unknown>>;
 
 interface ShugoiNextOptions {
     siteKey: string;
     baseUrl?: string;
+    /** Trusted origin of the application, configured by its operator (never from Host). */
+    origin?: string | undefined;
     allowlist?: string[];
     whitelist?: string[];
     signingSecret?: string;
+    headlessPatterns?: RegExp[];
 }
 declare function createShugoiNextMiddleware(options: ShugoiNextOptions): (request: NextRequest) => Promise<NextResponse<unknown>>;
+
+interface ShugoiProxyOptions extends ShugoiNextOptions {
+    /** Trusted application origin; retained as an alias for origin. */
+    target?: string;
+}
+declare function createShugoiProxy(options: ShugoiProxyOptions): (request: next_server.NextRequest) => Promise<next_server.NextResponse<unknown>>;
 
 interface ShugoiGuardProps {
     siteKey: string;

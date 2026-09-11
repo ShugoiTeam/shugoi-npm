@@ -17,7 +17,7 @@ export interface CheckLicenseOptions {
 export async function checkLicense(
   options: CheckLicenseOptions
 ): Promise<CheckResponse> {
-  const baseUrl = options.baseUrl ?? 'https://shugoi.com/api/v1';
+  const baseUrl = options.baseUrl ?? 'https://api.shugoi.com/api/v1';
   const timeout = options.timeout ?? 5000;
   const serverUa = options.serverUa ?? 'ShugoiNode/0.1.0';
 

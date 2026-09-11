@@ -1041,8 +1041,78 @@ function navify(code, seed, dec = "_D", cacheName = "_Dx", navName = "nav") {
   stmts.unshift(block);
   return stmts.join(";") + ";";
 }
+function _sgExtractBalancedBody(out, braceStart) {
+  let depth = 0, inStr = null;
+  for (let j = braceStart; j < out.length; j++) {
+    const ch = out[j];
+    if (inStr) {
+      if (ch === "\\") {
+        j++;
+        continue;
+      }
+      if (ch === inStr) inStr = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === "`") {
+      inStr = ch;
+      continue;
+    }
+    if (ch === "{") depth++;
+    else if (ch === "}") {
+      depth--;
+      if (depth === 0) return j;
+    }
+  }
+  return -1;
+}
+function _sgExtractWorkers(code) {
+  const map = [];
+  const re = /["'`]\(["'`]\s*\+\s*([A-Za-z_$][\w$]*)\s*\+\s*["'`]\)\(\)["'`]/g;
+  const uses = [];
+  let mm;
+  while (mm = re.exec(code)) {
+    const name = mm[1];
+    if (name) uses.push({ name, pos: mm.index });
+  }
+  let out = code, shift = 0;
+  for (const u of uses) {
+    const name = u.name, usagePos = u.pos + shift;
+    const region = out.slice(0, usagePos);
+    const cands = [];
+    const reDef = new RegExp("(?:\\bfunction\\s+" + name + "\\s*\\(|[=,;([{\\s]" + name + "\\s*=\\s*function\\b)", "g");
+    let dm;
+    while (dm = reDef.exec(region)) cands.push(dm.index + dm[0].length);
+    for (let c = cands.length - 1; c >= 0; c--) {
+      const braceStart = out.indexOf("{", cands[c]);
+      if (braceStart < 0 || braceStart >= usagePos) continue;
+      const end = _sgExtractBalancedBody(out, braceStart);
+      if (end < 0) continue;
+      const body = out.slice(braceStart, end + 1);
+      if (body.indexOf("self.") < 0 && body.indexOf("postMessage") < 0 && body.indexOf("onmessage") < 0) continue;
+      const marker = 91827364e4 + map.length;
+      map.push(body);
+      const repl = "{return " + marker + "}";
+      out = out.slice(0, braceStart) + repl + out.slice(end + 1);
+      shift += repl.length - body.length;
+      break;
+    }
+  }
+  return { code: out, map };
+}
+function _sgRestoreWorkers(code, map) {
+  for (let i = 0; i < map.length; i++) {
+    const marker = 91827364e4 + i;
+    const body = map[i];
+    if (body !== void 0) {
+      code = code.replace(new RegExp("\\{\\s*return\\s+" + marker + "\\s*;?\\s*\\}"), () => body);
+    }
+  }
+  return code;
+}
 function applyBootObfuscation(code, seed) {
   let r = stripComments(code);
+  const _wk = _sgExtractWorkers(r);
+  r = _wk.code;
   r = stripTrace(r);
   r = rotateIdentifiers(r, seed);
   r = deferExecution(r, seed);
@@ -1052,6 +1122,7 @@ function applyBootObfuscation(code, seed) {
   const navName = "_" + shortName(createRng(hashStr(seed + "nav")), 2);
   r = encryptStrings(r, encKey, decName);
   r = navify(r, seed, decName, cacheName, navName);
+  r = _sgRestoreWorkers(r, _wk.map);
   r = escapeClosingTags(r);
   r = fixComputedProperties(r, decName);
   if (!isValidJavaScript(r)) return code;

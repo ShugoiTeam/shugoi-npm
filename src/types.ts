@@ -24,6 +24,12 @@ export interface ShugoiCoreOptions {
   verifyBots?: boolean
   logBotIps?: boolean
   renderSkipPath?: (path: string) => string | Promise<string>
+  /** Delivery transport for protected SSR documents. */
+  renderTransport?: 'http' | 'websocket'
+  /** Continue serving the application when Shugoi configuration is unavailable. */
+  failOpenOnUnavailable?: boolean
+  degradedAvailability?: import('./availability').DegradedAvailabilityOptions
+  availabilityDiagnostics?: boolean
 }
 
 export interface BlockPageContext {

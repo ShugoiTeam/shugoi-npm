@@ -23,11 +23,20 @@ const SHUGOI_ORIGIN = 'https://shugoi.com';
 
 function baseDirectives(apiOrigin: string): Record<string, string[]> {
   const api = [...new Set([SHUGOI_ORIGIN, apiOrigin].filter(Boolean))];
+  const websocket = api.map((origin) => {
+    try {
+      const url = new URL(origin);
+      url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+      return url.origin;
+    } catch { return ''; }
+  }).filter(Boolean);
   return {
     'default-src': ["'self'"],
     'script-src': ["'self'", "'unsafe-inline'", ...api],
     'worker-src': ["'self'", 'blob:', ...api],
-    'connect-src': ["'self'", ...api],
+    // `https:` does not authorize a `wss:` connection in every browser/CSP
+    // implementation. Declare the exact transport origins used by WLC.
+    'connect-src': ["'self'", ...api, ...websocket],
     'style-src': ["'self'", "'unsafe-inline'", ...api],
     'font-src': ["'self'", ...api, 'data:'],
     'img-src': ["'self'", ...api, 'data:', 'blob:'],

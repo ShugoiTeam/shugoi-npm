@@ -2,7 +2,8 @@ import type { ScriptTagsOptions, ScriptTagsResult } from './types'
 import { signToken, generateSkeleton } from './render'
 
 export async function scriptTags(options: ScriptTagsOptions): Promise<ScriptTagsResult> {
-  const base = options.baseUrl ?? 'https://shugoi.com/api/v1';
+  if (!options.signingSecret) throw new Error('Shugoi requires an explicit site signing secret');
+  const base = options.baseUrl ?? 'https://api.shugoi.com/api/v1';
   const key = options.siteKey;
   const ts = Date.now();
   const signed = signToken(key, ts, options.signingSecret);

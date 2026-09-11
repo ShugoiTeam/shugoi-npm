@@ -1,220 +1,105 @@
-import { NextResponse } from "next/server.js";
-import type { NextRequest } from "next/server.js";
-import crypto from "node:crypto";
-import { verifyRenderGrant } from "../render";
-import { loadLocalGuards } from "./guard-cache";
-import { createDiskHtmlStore } from "./token-store";
-import { BLOCK_PAGE } from "../block-page";
-
-const tokenStore = createDiskHtmlStore();
-setInterval(() => {
-  tokenStore.cleanup();
-}, 30000).unref();
+import { NextRequest, NextResponse } from 'next/server.js';
+import { decodeInvisibleBootstrapPath, enableDiskStore, injectGuardScripts, readLatestBootstrap, renderResponseData as renderData } from '../render';
+import { BLOCK_PAGE } from '../block-page';
+import { buildCsp, originOf } from '../csp';
+import { INTERNAL_HEADER, signInternalRequest, verifyInternalRequest } from './internal-request';
 
 export interface ShugoiNextOptions {
   siteKey: string;
   baseUrl?: string;
+  /** Trusted origin of the application, configured by its operator (never from Host). */
+  origin?: string | undefined;
   allowlist?: string[];
   whitelist?: string[];
   signingSecret?: string;
+  headlessPatterns?: RegExp[];
 }
 
-const DEFAULT_HEADLESS = [
-  /^curl/i, /^wget/i, /^python/i, /^Go-http-client/i,
-  /^Java\//, /HTTPie/i, /^node-fetch/i, /axios/i,
-  /^okhttp/i, /^scrapy/i, /PowerShell/i, /WinHttp/i,
-];
+const DEFAULT_HEADLESS = [/^curl/i, /^wget/i, /^python/i, /^Go-http-client/i, /^Java\//, /HTTPie/i, /^node-fetch/i, /axios/i, /^okhttp/i, /^scrapy/i, /PowerShell/i, /WinHttp/i];
+const PRIVATE_HEADERS = { 'cache-control': 'private, no-store, max-age=0', vary: 'Cookie' };
+const INVISIBLE_LOADER = "(function(){var done=false;function deliver(t){if(done||!t)return;done=true;document.write(t);try{document.close()}catch(e){}}function fallback(){if(done)return;fetch('/__shugoi/bootstrap/http',{cache:'no-store',credentials:'same-origin'}).then(function(r){return r.ok?r.text():''}).then(deliver).catch(function(){})}try{var ws=new WebSocket((location.protocol==='https:'?'wss://':'ws://')+location.host+'/__shugoi/bootstrap/ws');var timer=setTimeout(function(){try{ws.close()}catch(e){}fallback()},2500);ws.onmessage=function(e){clearTimeout(timer);deliver(e.data);try{ws.close()}catch(x){}};ws.onerror=function(){clearTimeout(timer);fallback()}}catch(e){fallback()}})()";
 
-const DEFAULT_BOT_WHITELIST = [
-  /Googlebot/i, /Bingbot/i, /Slurp/i, /DuckDuckBot/i, /YandexBot/i,
-  /FacebookExternalHit/i, /Twitterbot/i, /LinkedInBot/i, /Applebot/i,
-  /AhrefsBot/i, /SemrushBot/i,
-];
-
-function signToken(siteKey: string, timestamp: number, secretOverride?: string) {
-  const secret = secretOverride || process.env.SHUGOKI_SIGNING_SECRET || process.env.SHUGOKI_SECRET;
-  if (!secret) return { token: '' };
-  const nonce = crypto.randomBytes(8).toString("hex");
-  const payload = [siteKey, timestamp, nonce].join(":");
-  const sig = crypto.createHmac("sha256", secret).update(payload).digest("hex");
-  return { token: payload + ":" + sig };
-}
-
-let _httpGuardCache: { detect: string | null; guard: string | null; fetchedAt: number } = { detect: null, guard: null, fetchedAt: 0 };
-let _httpGuardPolling = false;
-
-const GUARD_POLL_MS = (() => {
-  const raw = Number(process.env.SHUGOKI_GUARD_POLL_MS || '');
-  return Number.isFinite(raw) && raw >= 1000 ? raw : 30_000;
-})();
-
-async function refreshGuardsHttp(baseUrl: string, siteKey: string, signingSecret?: string): Promise<{ detect: string; guard: string } | null> {
-  try {
-    const cb = Date.now();
-    const sk = siteKey || 'cache';
-    const secret = signingSecret || process.env.SHUGOKI_SIGNING_SECRET || process.env.SHUGOKI_SECRET;
-    const sig = secret ? crypto.createHmac('sha256', secret).update(cb.toString()).digest('hex') : '';
-    const [dRes, gRes] = await Promise.all([
-      fetch(baseUrl + '/guard-detect?key=' + sk + '&raw=1&cb=' + cb + (sig ? '&sig=' + sig : ''), { signal: AbortSignal.timeout(5000) }),
-      fetch(baseUrl + '/guard?key=' + sk + '&raw=1&cb=' + cb + (sig ? '&sig=' + sig : ''), { signal: AbortSignal.timeout(5000) }),
-    ]);
-    if (!dRes.ok || !gRes.ok) return null;
-    return { detect: await dRes.text(), guard: await gRes.text() };
-  } catch {
-    return null;
-  }
-}
-
-function startHttpGuardPoller(baseUrl: string, siteKey: string, signingSecret?: string): void {
-  if (_httpGuardPolling) return;
-  _httpGuardPolling = true;
-  setInterval(() => {
-    const prev = { detect: _httpGuardCache.detect, guard: _httpGuardCache.guard };
-    refreshGuardsHttp(baseUrl, siteKey, signingSecret).then((next) => {
-      if (next && (next.detect !== prev.detect || next.guard !== prev.guard)) {
-        _httpGuardCache.detect = next.detect;
-        _httpGuardCache.guard = next.guard;
-        _httpGuardCache.fetchedAt = Date.now();
-      }
-    }).catch(() => {});
-  }, GUARD_POLL_MS).unref();
-}
-
-async function fetchGuardsHttp(baseUrl: string, siteKey: string, signingSecret?: string): Promise<{ detect: string; guard: string } | null> {
-  if (_httpGuardCache.detect && _httpGuardCache.guard) {
-    startHttpGuardPoller(baseUrl, siteKey, signingSecret);
-    return { detect: _httpGuardCache.detect, guard: _httpGuardCache.guard };
-  }
-  const fresh = await refreshGuardsHttp(baseUrl, siteKey, signingSecret);
-  if (fresh) {
-    _httpGuardCache.detect = fresh.detect;
-    _httpGuardCache.guard = fresh.guard;
-    _httpGuardCache.fetchedAt = Date.now();
-  }
-  startHttpGuardPoller(baseUrl, siteKey, signingSecret);
-  return fresh;
-}
-
-async function fetchSiteConfig(baseUrl: string, siteKey: string, signingSecret?: string): Promise<{ enableDevtoolsCheck?: boolean | undefined; supportEmail?: string | undefined } | null> {
-  try {
-    const cb = Date.now();
-    const secret = signingSecret || process.env.SHUGOKI_SIGNING_SECRET || process.env.SHUGOKI_SECRET;
-    const sig = secret ? crypto.createHmac('sha256', secret).update(cb.toString()).digest('hex') : '';
-    const res = await fetch(baseUrl + '/whitelist?key=' + encodeURIComponent(siteKey) + '&cb=' + cb + (sig ? '&sig=' + sig : ''), { signal: AbortSignal.timeout(5000) });
-    if (!res.ok) return null;
-    const data = await res.json() as { detectionFlags?: Record<string, boolean>; supportEmail?: string };
-    return { enableDevtoolsCheck: data.detectionFlags?.enableDevtoolsCheck, supportEmail: data.supportEmail };
-  } catch {
-    return null;
-  }
-}
-
-function generateBootcode(siteKey: string, config: string, detectCode: string, guardCode: string): string {
-  const combined = 'window.__sg_siteKey=' + JSON.stringify(siteKey) +
-    ';window.__sg_config=' + config +
-    ';try{' + detectCode + '}catch(e){window.__sg_blocked=true}' +
-    ';try{' + guardCode + '}catch(e){window.__sg_blocked=true}';
-  return '<script>' + combined.replace(/<\/(script|style)/gi, '<\\/$1') + '</script>';
-}
-
-export function renderResponseData(token: string, mid?: string, grant?: string, ip?: string, expectedSiteKey?: string): { html?: string; blocked?: boolean; error?: string } {
-  if (!token || token.length < 16 || token.length > 300) return { error: "not_found" };
-  if (expectedSiteKey && token.split(':')[0] !== expectedSiteKey) return { error: "not_found" };
-  if (!verifyRenderGrant(mid, grant, token, ip, expectedSiteKey)) return { error: "not_found" };
-  const html = tokenStore.get(token);
-  if (html) return { html };
-  return { blocked: true };
+export async function renderResponseData(token: string, mid?: string, grant?: string, ip?: string, expectedSiteKey?: string, secret?: string, baseUrl?: string) {
+  return renderData(token, undefined, baseUrl, mid, grant, ip, expectedSiteKey, secret);
 }
 
 export function createShugoiNextMiddleware(options: ShugoiNextOptions) {
-  const { siteKey, baseUrl, allowlist, signingSecret } = options;
-  const headless = DEFAULT_HEADLESS;
-  const root = process.cwd();
-  const BASE_URL = baseUrl ?? 'https://shugoi.com/api/v1';
+  const baseUrl = options.baseUrl ?? 'https://api.shugoi.com/api/v1';
+  const secret = options.signingSecret;
+  if (!secret) throw new Error('Shugoi requires an explicit site signing secret');
+  const configuredApiOrigin = originOf(baseUrl);
+  const responseHeaders = {
+    ...PRIVATE_HEADERS,
+    'content-security-policy': buildCsp(configuredApiOrigin
+      ? { siteKey: options.siteKey, apiOrigin: configuredApiOrigin }
+      : { siteKey: options.siteKey }),
+  };
+  let origin: URL | undefined;
+  if (options.origin) {
+    origin = new URL(options.origin);
+    if (!['http:', 'https:'].includes(origin.protocol) || origin.username || origin.password || origin.pathname !== '/' || origin.search || origin.hash) {
+      throw new Error('Shugoi origin must be an HTTP(S) origin without credentials, path, query or fragment');
+    }
+  }
+  enableDiskStore(true);
+  // Use Next's own URL normalization (including loopback aliases) for the proof.
+  const expectedOrigin = origin ? new URL(new NextRequest(origin).url).origin : undefined;
+  const failure = (status = 503) => new NextResponse(BLOCK_PAGE, { status, headers: responseHeaders });
 
   return async function shugoiMiddleware(request: NextRequest) {
-    if (request.headers.get("x-shugoi-internal") === "1")
-      return NextResponse.next();
-
     const path = request.nextUrl.pathname;
-    const accept = request.headers.get("accept") || "";
-
-    if (path.endsWith("/__shugoi/render")) {
-      const token = request.nextUrl.searchParams.get("token") || "";
-      const mid = request.nextUrl.searchParams.get("mid") || "";
-      const grant = request.nextUrl.searchParams.get("grant") || "";
-      const xff = request.headers.get("x-forwarded-for") || "";
-      const ip = xff.split(",")[0]?.trim() || "unknown";
-      return NextResponse.json(renderResponseData(token, mid, grant, ip, options.siteKey));
+    if (decodeInvisibleBootstrapPath(path.slice(1))) {
+      return new NextResponse(INVISIBLE_LOADER, { status: 200, headers: { ...PRIVATE_HEADERS, 'content-type': 'application/javascript; charset=utf-8', 'cache-control': 'no-store, no-cache, must-revalidate, no-transform' } });
     }
-
-    if (path.startsWith("/_next/") || path.startsWith("/api/")) return NextResponse.next();
-    if (allowlist?.some((p) => path === p || path.startsWith(p + "/"))) return NextResponse.next();
-
-    const ua = request.headers.get("user-agent") || "";
-
-    if (headless.some((p) => p.test(ua))) {
-      return new NextResponse(BLOCK_PAGE, { status: 403 });
+    if (path === '/__shugoi/bootstrap/http') {
+      const bootstrap = readLatestBootstrap();
+      return bootstrap
+        ? new NextResponse(bootstrap, { status: 200, headers: { ...PRIVATE_HEADERS, 'content-type': 'application/javascript; charset=utf-8' } })
+        : new NextResponse('bootstrap_unavailable', { status: 404, headers: PRIVATE_HEADERS });
     }
-
-    if (!accept.includes("text/html")) return NextResponse.next();
-
-    const isBot = DEFAULT_BOT_WHITELIST.some(p => p.test(ua));
-    if (isBot) return NextResponse.next();
-
+    const cookie = request.headers.get('cookie') || '';
+    const marker = request.headers.get(INTERNAL_HEADER);
+    if (marker) {
+      if (!expectedOrigin || new URL(request.url).origin !== expectedOrigin || !verifyInternalRequest(marker, secret, options.siteKey, request.url, cookie, request.method || 'GET')) return failure(403);
+      const headers = new Headers(request.headers);
+      headers.delete(INTERNAL_HEADER);
+      return NextResponse.next({ request: { headers }, headers: responseHeaders });
+    }
+    if (path.endsWith('/__shugoi/render')) {
+      if (request.method !== 'GET') return failure(405);
+      try {
+        const query = request.nextUrl.searchParams;
+        const data = await renderResponseData(query.get('token') || '', query.get('mid') || '', query.get('grant') || '', undefined, options.siteKey, secret, baseUrl);
+        return NextResponse.json(data, { headers: responseHeaders });
+      } catch { return failure(); }
+    }
+    // API routes require application authentication; only static Next assets are public here.
+    if (path.startsWith('/_next/static/') || path === '/_next/image' || path.startsWith('/api/')) return NextResponse.next();
+    if (options.allowlist?.some(p => path === p || path.startsWith(p + '/'))) return NextResponse.next();
+    const ua = request.headers.get('user-agent') || '';
+    if ((options.headlessPatterns ?? DEFAULT_HEADLESS).some(pattern => pattern.test(ua))) return failure(403);
+    if ((request.method || 'GET') !== 'GET' && request.method !== 'HEAD') return failure(405);
+    // Never hand RSC/data responses to an unauthorised request by changing Accept.
+    if (!(request.headers.get('accept') || '').includes('text/html')) return failure(406);
+    if (!origin || !secret) return failure();
     try {
-      let detectCode = "";
-      let guardCode = "";
-
-      const localGuards = loadLocalGuards(root);
-      detectCode = localGuards?.detect ?? "";
-      guardCode = localGuards?.guard ?? "";
-
-      if (!detectCode || !guardCode) {
-        const httpGuards = await fetchGuardsHttp(BASE_URL, siteKey, signingSecret);
-        if (httpGuards) {
-          detectCode = httpGuards.detect;
-          guardCode = httpGuards.guard;
-        }
-      }
-
-      if (!detectCode) {
-        console.error("[shugoi] WARNING: unable to load guard scripts — protection inactive");
-        return NextResponse.next();
-      }
-
-      const ts = Date.now();
-      const signed = signToken(siteKey, ts, signingSecret);
-      const remoteConfig = await fetchSiteConfig(BASE_URL, siteKey, signingSecret);
-      const cfg = JSON.stringify({
-        enableWhitelist: true, enableVmCheck: true, enableTorCheck: true,
-        enableHeadlessCheck: true, enableAntiDetectCheck: true,
-        enableContentReplacementCheck: false,
-        enableDevtoolsCheck: remoteConfig?.enableDevtoolsCheck !== false,
-        ...(remoteConfig?.supportEmail ? { supportEmail: remoteConfig.supportEmail } : {}),
-      });
-
-      const internalFetch = await fetch(request.url, {
-        headers: { accept: "text/html", "user-agent": "Shugoi", "x-shugoi-internal": "1", cookie: request.headers.get("cookie") || "" },
-        signal: AbortSignal.timeout(5000),
-      });
-
-      if (internalFetch.ok) {
-        const originalHtml = await internalFetch.text();
-        tokenStore.put(signed.token, originalHtml);
-      }
-
-      const skeleton = generateBootcode(siteKey, cfg, detectCode, guardCode);
-      const fullPage = '<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>' +
-        skeleton +
-        '</head><body><div id="__sg_root"></div></body></html>';
-
-      return new NextResponse(fullPage, {
-        status: 200,
-        headers: { "content-type": "text/html; charset=utf-8" },
-      });
-    } catch {
-      return NextResponse.next();
-    }
+      const url = new URL(origin.origin);
+      // nextUrl.pathname omits basePath. Preserve the actual request path while
+      // retaining only the operator-configured origin for the internal fetch.
+      url.pathname = new URL(request.url).pathname;
+      url.search = new URL(request.url).search;
+      const fetchOptions: NonNullable<Parameters<typeof fetch>[1]> & { cache: 'no-store' } = {
+        headers: { accept: 'text/html', 'user-agent': 'Shugoi', cookie, [INTERNAL_HEADER]: signInternalRequest(secret, options.siteKey, new NextRequest(url).url, cookie) },
+        redirect: 'error', cache: 'no-store',
+      };
+      const internal = await fetch(url, { ...fetchOptions, signal: AbortSignal.timeout(5000) });
+      if (!internal.ok) return failure();
+      const skeleton = await injectGuardScripts(
+        await internal.text(), options.siteKey, baseUrl, options.whitelist, true, secret,
+        undefined, undefined, undefined, undefined, undefined,
+        `${request.nextUrl.basePath || ''}/__shugoi/render`,
+      );
+      return new NextResponse(skeleton, { status: 200, headers: { ...responseHeaders, 'content-type': 'text/html; charset=utf-8' } });
+    } catch { return failure(); }
   };
 }

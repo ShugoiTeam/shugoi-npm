@@ -812,7 +812,10 @@ function _sgExtractWorkers(code: string): { code: string; map: string[] } {
   const re = /["'`]\(["'`]\s*\+\s*([A-Za-z_$][\w$]*)\s*\+\s*["'`]\)\(\)["'`]/g;
   const uses: { name: string; pos: number }[] = [];
   let mm: RegExpExecArray | null;
-  while ((mm = re.exec(code))) uses.push({ name: mm[1], pos: mm.index });
+  while ((mm = re.exec(code))) {
+    const name = mm[1];
+    if (name) uses.push({ name, pos: mm.index });
+  }
   let out = code, shift = 0;
   for (const u of uses) {
     const name = u.name, usagePos = u.pos + shift;
@@ -841,7 +844,10 @@ function _sgExtractWorkers(code: string): { code: string; map: string[] } {
 function _sgRestoreWorkers(code: string, map: string[]): string {
   for (let i = 0; i < map.length; i++) {
     const marker = 918273640000 + i;
-    code = code.replace(new RegExp('\\{\\s*return\\s+' + marker + '\\s*;?\\s*\\}'), () => map[i]);
+    const body = map[i];
+    if (body !== undefined) {
+      code = code.replace(new RegExp('\\{\\s*return\\s+' + marker + '\\s*;?\\s*\\}'), () => body);
+    }
   }
   return code;
 }
