@@ -54,7 +54,7 @@ describe("cache de configuration", () => {
     let n = 0;
     vi.stubGlobal("fetch", vi.fn(async () => { n++; throw new Error("down"); }));
     const { createCore } = await import("../src/core");
-    const core = createCore({ siteKey: "sg_sk_live_t", baseUrl: "http://api.test/v1" });
+    const core = createCore({ siteKey: "sg_sk_live_t", signingSecret: "test-secret-32bytes-long!", baseUrl: "http://api.test/v1" });
     for (let i = 0; i < 20; i++) {
       await core.evaluate({ path: "/x", ua: "Mozilla/5.0", ip: "1.2.3.4", acceptLanguage: "fr", secFetchDest: "document" });
     }

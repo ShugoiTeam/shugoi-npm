@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import express from 'express';
 import http from 'http';
 import { createShugoiMiddleware } from '../../src/middleware';
+import { signAvailabilitySnapshot } from '../../src/availability';
 
 function httpGet(url: string, headers: Record<string, string>): Promise<{ body: string; headers: http.IncomingHttpHeaders }> {
   return new Promise((resolve, reject) => {
@@ -26,6 +27,13 @@ describe('Express integration', () => {
 
   beforeAll(async () => {
     globalThis.fetch = vi.fn().mockImplementation((url: string) => {
+      if (url.includes('validate-key')) {
+        return Promise.resolve({ ok: true, json: async () => ({ valid: true }) });
+      }
+      if (url.includes('/whitelist')) {
+        const snapshot = signAvailabilitySnapshot({ version: 1, siteKey: 'sg_sk_live_test', fetchedAt: Date.now(), flags: {}, skipPaths: [] }, 'test-secret-32bytes-long!');
+        return Promise.resolve({ ok: true, json: async () => ({ whitelistedMachines: [], detectionFlags: {}, skipPaths: [], availabilitySnapshot: snapshot }) });
+      }
       if (url.includes('guard-detect') || url.includes('guard?')) {
         return Promise.resolve({
           ok: true,
@@ -41,6 +49,7 @@ describe('Express integration', () => {
     const app = express();
     app.use(createShugoiMiddleware({
       siteKey: 'sg_sk_live_test',
+      signingSecret: 'test-secret-32bytes-long!',
       allowlist: ['/legal'],
       verifyBots: false,
     }));
@@ -105,7 +114,7 @@ describe('Express integration', () => {
     const prev = process.env.SHUGOKI_SIGNING_SECRET;
     process.env.SHUGOKI_SIGNING_SECRET = 'test-secret-pow';
     try {
-      const core = createCore({ siteKey: 'sg_sk_live_test', verifyBots: false, allowlist: [] });
+      const core = createCore({ siteKey: 'sg_sk_live_test', signingSecret: 'test-secret-pow', verifyBots: false, allowlist: [] });
       const bot = await core.evaluate({ path: '/', ua: 'facebookexternalhit/1.1', ip: '1.2.3.4' });
       expect(bot).toBeNull();
       const tw = await core.evaluate({ path: '/', ua: 'Twitterbot/1.0', ip: '1.2.3.4' });
@@ -123,7 +132,7 @@ describe('Express integration', () => {
     const prev = process.env.SHUGOKI_SIGNING_SECRET;
     process.env.SHUGOKI_SIGNING_SECRET = 'test-secret-pow';
     try {
-      const core = createCore({ siteKey: 'sg_sk_live_test', allowlist: [] });
+      const core = createCore({ siteKey: 'sg_sk_live_test', signingSecret: 'test-secret-pow', allowlist: [] });
       const fakeDiscord = await core.evaluate({ path: '/', ua: 'Mozilla/5.0 (compatible; Discordbot/2.0; +https://discordapp.com)', ip: '1.2.3.5' });
       expect(fakeDiscord?.status).toBe(403);
       const fb = await core.evaluate({ path: '/', ua: 'facebookexternalhit/1.1', ip: '1.2.3.5' });
@@ -139,7 +148,7 @@ describe('Express integration', () => {
     const prev = process.env.SHUGOKI_SIGNING_SECRET;
     process.env.SHUGOKI_SIGNING_SECRET = 'test-secret-pow';
     try {
-      const core = createCore({ siteKey: 'sg_sk_live_test', verifyBots: false, allowlist: [] });
+      const core = createCore({ siteKey: 'sg_sk_live_test', signingSecret: 'test-secret-pow', verifyBots: false, allowlist: [] });
       const discord = await core.evaluate({ path: '/', ua: 'Mozilla/5.0 (compatible; Discordbot/2.0; +https://discordapp.com)', ip: '1.2.3.5' });
       expect(discord).toBeNull();
       const fakeBrowser = await core.evaluate({ path: '/', ua: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120', ip: '1.2.3.6' });

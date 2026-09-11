@@ -12,6 +12,7 @@ describe('createShugoiMiddleware', () => {
 
   const validOptions: ShugoiCoreOptions = {
     siteKey: 'sg_sk_live_xxx',
+    signingSecret: 'test-secret-32bytes-long!',
   };
 
   function mockReqRes(headers: Record<string, string>, path = '/') {
@@ -160,7 +161,7 @@ describe('createShugoiMiddleware', () => {
 
   it('does not modify HTML when autoInject is false', async () => {
     mockGuardFetch();
-    const mw = createShugoiMiddleware({ siteKey: 'sg_sk_live_xxx', autoInject: false });
+    const mw = createShugoiMiddleware({ siteKey: 'sg_sk_live_xxx', signingSecret: 'test-secret-32bytes-long!', autoInject: false });
     const req = { headers: {}, path: '/' } satisfies MinimalRequest;
     let sentBody = '';
     const res = {
@@ -202,7 +203,7 @@ describe('createShugoiMiddleware', () => {
 
   it('respects custom blockStatus option', async () => {
     mockGuardFetch();
-    const mw = createShugoiMiddleware({ siteKey: 'sg_sk_live_xxx', blockStatus: 418 });
+    const mw = createShugoiMiddleware({ siteKey: 'sg_sk_live_xxx', signingSecret: 'test-secret-32bytes-long!', blockStatus: 418 });
     const { req, res } = mockReqRes({ 'user-agent': 'curl/8.0.0' });
     const next = vi.fn();
     await mw(req, res, next);
@@ -211,7 +212,7 @@ describe('createShugoiMiddleware', () => {
 
   it('splitRender: false preserves original HTML', async () => {
     mockGuardFetch();
-    const mw = createShugoiMiddleware({ siteKey: 'sg_sk_live_xxx', splitRender: false });
+    const mw = createShugoiMiddleware({ siteKey: 'sg_sk_live_xxx', signingSecret: 'test-secret-32bytes-long!', splitRender: false });
     const req = {
       headers: {
         'user-agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36',

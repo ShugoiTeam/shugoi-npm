@@ -13,7 +13,7 @@ describe('scriptTags', () => {
       return Promise.resolve({ ok: true, json: async () => ({}) });
     });
 
-    const result = await scriptTags({ siteKey: 'sg_sk_live_xxx' });
+    const result = await scriptTags({ siteKey: 'sg_sk_live_xxx', signingSecret: 'test-secret-32bytes-long!' });
     expect(result.guardDetect).toContain('<script>window.__sg_siteKey=');
     expect(result.guardDetect).not.toContain('eval(');
   });
@@ -29,7 +29,7 @@ describe('scriptTags', () => {
       return Promise.resolve({ ok: true, json: async () => ({}) });
     });
 
-    const result = await scriptTags({ siteKey: 'sg_sk_live_xxx', baseUrl: 'https://custom.com/api' });
+    const result = await scriptTags({ siteKey: 'sg_sk_live_xxx', signingSecret: 'test-secret-32bytes-long!', baseUrl: 'https://custom.com/api' });
     expect(result.guardDetect).toContain('window.__sg_baseUrl="https://custom.com/api"');
     expect(result.guardDetect).not.toContain('eval(');
   });

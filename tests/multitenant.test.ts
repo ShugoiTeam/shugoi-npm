@@ -26,8 +26,8 @@ describe('Multi-tenant cache isolation', () => {
       'siteB': { detectionFlags: { site: 'B' } },
     });
 
-    const mwA = createShugoiMiddleware({ siteKey: 'siteA', baseUrl: 'https://test.local/api/v1' });
-    const mwB = createShugoiMiddleware({ siteKey: 'siteB', baseUrl: 'https://test.local/api/v1' });
+    const mwA = createShugoiMiddleware({ siteKey: 'siteA', signingSecret: 'secret-a', baseUrl: 'https://test.local/api/v1' });
+    const mwB = createShugoiMiddleware({ siteKey: 'siteB', signingSecret: 'secret-b', baseUrl: 'https://test.local/api/v1' });
 
     const resA = { setHeader: vi.fn(), getHeader: vi.fn(), status: vi.fn().mockReturnThis(), type: vi.fn().mockReturnThis(), send: vi.fn() };
     const resB = { setHeader: vi.fn(), getHeader: vi.fn(), status: vi.fn().mockReturnThis(), type: vi.fn().mockReturnThis(), send: vi.fn() };

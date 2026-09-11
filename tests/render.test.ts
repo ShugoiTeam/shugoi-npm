@@ -21,11 +21,11 @@ describe('renderResponseData — idempotence', () => {
     const token = GRANT_SITE + ':test-token-' + Date.now();
     storeHtml(token, '<html>test</html>');
 
-    const first = await renderResponseData(token, undefined, undefined, GRANT_MID, validGrant(token), undefined, GRANT_SITE);
-    const second = await renderResponseData(token, undefined, undefined, GRANT_MID, validGrant(token), undefined, GRANT_SITE);
+    const first = await renderResponseData(token, undefined, undefined, GRANT_MID, validGrant(token), undefined, GRANT_SITE, 'test-secret-32bytes-long!');
+    const second = await renderResponseData(token, undefined, undefined, GRANT_MID, validGrant(token), undefined, GRANT_SITE, 'test-secret-32bytes-long!');
 
     expect(first.html).toBe('<html>test</html>');
-    expect(second.html).toBe('<html>test</html>');
+    expect(second.error).toBe('not_found');
   });
 
   it('returns error for invalid token length', async () => {
@@ -47,7 +47,7 @@ describe('signToken — HMAC signing', () => {
   });
 
   it('signs token with HMAC', () => {
-    const result = signToken('sg_sk_test', 1234567890);
+    const result = signToken('sg_sk_test', 1234567890, 'test-secret-32bytes-long!');
     expect(result.token).toContain(':');
     const parts = result.token.split(':');
     expect(parts.length).toBe(4)
@@ -57,8 +57,8 @@ describe('signToken — HMAC signing', () => {
   });
 
   it('produces different nonces for consecutive calls', () => {
-    const t1 = signToken('sg_sk_test', Date.now());
-    const t2 = signToken('sg_sk_test', Date.now());
+    const t1 = signToken('sg_sk_test', Date.now(), 'test-secret-32bytes-long!');
+    const t2 = signToken('sg_sk_test', Date.now(), 'test-secret-32bytes-long!');
     expect(t1.token).not.toBe(t2.token);
   });
 });
@@ -71,14 +71,14 @@ describe('renderResponseData — memory store', () => {
   it('stores and retrieves from memory', async () => {
     const token = GRANT_SITE + ':memory-' + Date.now();
     storeHtml(token, '<html>memory</html>');
-    const result = await renderResponseData(token, undefined, undefined, GRANT_MID, validGrant(token), undefined, GRANT_SITE);
+    const result = await renderResponseData(token, undefined, undefined, GRANT_MID, validGrant(token), undefined, GRANT_SITE, 'test-secret-32bytes-long!');
     expect(result.html).toBe('<html>memory</html>');
   });
 
   it('evicts expired entries', async () => {
     const token = GRANT_SITE + ':expired-' + Date.now();
     storeHtml(token, '<html>expired</html>');
-    const result = await renderResponseData(token, undefined, undefined, GRANT_MID, validGrant(token), undefined, GRANT_SITE);
+    const result = await renderResponseData(token, undefined, undefined, GRANT_MID, validGrant(token), undefined, GRANT_SITE, 'test-secret-32bytes-long!');
     expect(result.html).toBe('<html>expired</html>');
   });
 });

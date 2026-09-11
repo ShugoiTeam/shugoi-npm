@@ -13,7 +13,7 @@ describe("BLOCK_PAGE", () => {
   });
 
   it("returns the canonical page from the Next middleware", async () => {
-    const middleware = createShugoiNextMiddleware({ siteKey: "test" });
+    const middleware = createShugoiNextMiddleware({ siteKey: "test", signingSecret: "test-secret-32bytes-long!" });
     const request = new NextRequest("https://example.test/", {
       headers: { accept: "text/html", "user-agent": "curl/8.0" },
     });
@@ -23,7 +23,7 @@ describe("BLOCK_PAGE", () => {
   });
 
   it("returns the canonical page from the Next proxy", async () => {
-    const proxy = createShugoiProxy({ siteKey: "test" });
+    const proxy = createShugoiProxy({ siteKey: "test", signingSecret: "test-secret-32bytes-long!" });
     const request = new NextRequest("https://example.test/", {
       headers: { accept: "text/html", "user-agent": "curl/8.0" },
     });

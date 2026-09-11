@@ -15,7 +15,7 @@ describe('SEO — Googlebot receives original HTML', () => {
 
   it('Googlebot receives original HTML without eval/skeleton injection', async () => {
     mockGuardFetch();
-    const mw = createShugoiMiddleware({ siteKey: 'sg_sk_live_xxx', verifyBots: false });
+    const mw = createShugoiMiddleware({ siteKey: 'sg_sk_live_xxx', signingSecret: 'test-secret-32bytes-long!', verifyBots: false });
     let sentBody = '';
     const req = {
       headers: { 'user-agent': 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)' },
@@ -42,7 +42,7 @@ describe('SEO — Googlebot receives original HTML', () => {
 
   it('regular browser with Mozilla UA still gets skeleton', async () => {
     mockGuardFetch();
-    const mw = createShugoiMiddleware({ siteKey: 'sg_sk_live_xxx' });
+    const mw = createShugoiMiddleware({ siteKey: 'sg_sk_live_xxx', signingSecret: 'test-secret-32bytes-long!' });
     let sentBody = '';
     const req = {
       headers: {

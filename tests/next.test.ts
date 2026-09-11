@@ -60,7 +60,7 @@ describe('createShugoiProxy', () => {
   }
 
   it('blocks curl User-Agent with 403', async () => {
-    const proxy = createShugoiProxy({ siteKey: 'sg_sk_live_test', target: 'http://127.0.0.1:3001' });
+    const proxy = createShugoiProxy({ siteKey: 'sg_sk_live_test', signingSecret: 'test-secret-32bytes-long!', target: 'http://127.0.0.1:3001' });
     globalThis.fetch = vi.fn().mockResolvedValue({ ok: true, text: async () => '<html>test</html>' });
 
     const req = mockRequest('/', 'curl/8.0.0');
@@ -69,7 +69,7 @@ describe('createShugoiProxy', () => {
   });
 
   it('allows regular browser User-Agent', async () => {
-    const proxy = createShugoiProxy({ siteKey: 'sg_sk_live_test', target: 'http://127.0.0.1:3001' });
+    const proxy = createShugoiProxy({ siteKey: 'sg_sk_live_test', signingSecret: 'test-secret-32bytes-long!', target: 'http://127.0.0.1:3001' });
     globalThis.fetch = vi.fn().mockResolvedValue({ ok: true, text: async () => '<html>test</html>' });
     globalThis.fetch = vi.fn().mockImplementation((url: string) => {
       if (url.includes('guard-detect') || url.includes('guard?')) {
