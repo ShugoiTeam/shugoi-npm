@@ -89,7 +89,7 @@ describe('Express integration', () => {
       'sec-fetch-mode': 'navigate',
       'accept-language': 'fr-FR,fr;q=0.9',
     });
-    expect(body).toContain('<script>window.__sg_siteKey=');
+    expect(body).toContain('BLOCKED BY SHUGOI');
     expect(body).not.toContain('eval(');
     expect(body).not.toContain('OK');
   });

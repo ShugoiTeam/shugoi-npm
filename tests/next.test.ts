@@ -98,8 +98,8 @@ describe('renderResponseData (adapter Next) — parité render-grant NP-01', () 
     vi.stubEnv('SHUGOKI_SECRET', '');
   });
 
-  it('refuse le render sans grant (bypass token-only)', () => {
-    const res = nextRenderResponseData('some-token-1234567890');
+  it('refuse le render sans grant (bypass token-only)', async () => {
+    const res = await nextRenderResponseData('some-token-1234567890');
     expect(res.error).toBe('not_found');
   });
 

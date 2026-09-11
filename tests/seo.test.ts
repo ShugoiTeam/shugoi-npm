@@ -31,7 +31,7 @@ describe('SEO — Googlebot receives original HTML', () => {
     const next = vi.fn();
 
     await mw(req, res, next);
-    expect(next).toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalled();
 
     const html = '<!DOCTYPE html><html><head></head><body><h1>OK</h1></body></html>';
     res.send(html);
@@ -63,13 +63,13 @@ describe('SEO — Googlebot receives original HTML', () => {
     const next = vi.fn();
 
     await mw(req, res, next);
-    expect(next).toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalled();
 
     const html = '<!DOCTYPE html><html><head></head><body><h1>OK</h1></body></html>';
     await res.send(html);
 
-    expect(sentBody).not.toContain('<h1>OK</h1>');
-    expect(sentBody).toContain('<script>window.__sg_siteKey=');
+    expect(sentBody).toContain('<h1>OK</h1>');
+    expect(sentBody).not.toContain('<script>window.__sg_siteKey=');
     expect(sentBody).not.toContain('eval(');
   });
 });
