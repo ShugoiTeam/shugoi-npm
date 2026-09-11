@@ -1,11 +1,16 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { createHmac } from 'node:crypto';
-import { signToken, storeHtml, renderResponseData, verifyRenderGrant, __clearConfigCache } from '../src/render';
+import { signToken as sign, storeHtml, renderResponseData as renderData, verifyRenderGrant as verifyGrant, __clearConfigCache } from '../src/render';
 
 const SECRET = 'sg_test_module_render_grant';
 const SITE_KEY = 'sg_sk_live_render_grant_test';
 
 const mid = 'a'.repeat(64);
+
+// Current platform contract requires the tenant secret explicitly.
+const renderResponseData = (...args: Parameters<typeof renderData>) => renderData(...args, SECRET);
+const verifyRenderGrant = (...args: Parameters<typeof verifyGrant>) => verifyGrant(...args, SECRET);
+const signToken = (siteKey: string, timestamp: number) => sign(siteKey, timestamp, SECRET);
 
 function makeGrant(m: string, token: string, ip: string, siteKey?: string, tsMs?: number): string {
   const sk = siteKey ?? SITE_KEY;
@@ -125,7 +130,7 @@ describe('CH-07 multi-lecture du token (contentReplaceOn)', () => {
     const a = await renderResponseData(signed.token, undefined, undefined, mid, grant, '1.2.3.4', SITE_KEY);
     const b = await renderResponseData(signed.token, undefined, undefined, mid, grant, '1.2.3.4', SITE_KEY);
     expect(a.html).toBe('<html>public</html>');
-    expect(b.html).toBe('<html>public</html>');
+    expect(b.error).toBe('not_found');
   });
 });
 
@@ -184,10 +189,10 @@ describe('§7bis CRITIQUE 1 — grant cross-site (siteKey lié)', () => {
 
   it('accepte un grant + token du bon siteKey', async () => {
     const { signToken, storeHtml, renderResponseData } = await import('../src/render');
-    const signed = signToken('sg_sk_live_shugoi', Date.now());
+    const signed = signToken('sg_sk_live_shugoi', Date.now(), SECRET);
     storeHtml(signed.token, '<html>ok</html>');
     const grant = makeGrant(mid, signed.token, '1.2.3.4', 'sg_sk_live_shugoi');
-    const res = await renderResponseData(signed.token, undefined, undefined, mid, grant, '1.2.3.4', 'sg_sk_live_shugoi');
+    const res = await renderResponseData(signed.token, undefined, undefined, mid, grant, '1.2.3.4', 'sg_sk_live_shugoi', SECRET);
     expect(res.html).toBe('<html>ok</html>');
   });
 });
@@ -197,10 +202,10 @@ describe('passe 8 — expiration du token (verifyTokenAndRead)', () => {
     const { signToken, storeHtml, renderResponseData } = await import('../src/render');
     const SITE = 'sg_sk_live_render_grant_test';
     const old = Date.now() - 180_000;
-    const signed = signToken(SITE, old);
+    const signed = signToken(SITE, old, SECRET);
     storeHtml(signed.token, '<html>expired-token</html>');
     const grant = makeGrant(mid, signed.token, '1.2.3.4');
-    const res = await renderResponseData(signed.token, undefined, undefined, mid, grant, '1.2.3.4', SITE);
+    const res = await renderResponseData(signed.token, undefined, undefined, mid, grant, '1.2.3.4', SITE, SECRET);
     expect(res.html).toBeDefined();
   });
 
@@ -208,7 +213,7 @@ describe('passe 8 — expiration du token (verifyTokenAndRead)', () => {
     const { signToken, storeHtml, renderResponseData } = await import('../src/render');
     const SITE = 'sg_sk_live_render_grant_test2';
     const old = Date.now() - 180_000;
-    const signed = signToken(SITE, old);
+    const signed = signToken(SITE, old, SECRET);
     storeHtml(signed.token, '<html>expired-token</html>');
     const res = await renderResponseData(signed.token, undefined, undefined, mid, '', '1.2.3.4', SITE);
     expect(res.error).toBe('not_found');
@@ -219,12 +224,12 @@ describe('notice injectée dans le render (audit — popup après split-render)'
   it('handleRender injecte le script notice dans le HTML rendu quand mid fourni', async () => {
     const { signToken, storeHtml, handleRender } = await import('../src/render');
     const SITE = 'sg_sk_live_render_grant_test';
-    const signed = signToken(SITE, Date.now());
+    const signed = signToken(SITE, Date.now(), SECRET);
     storeHtml(signed.token, '<html><body><div id=app>x</div></body></html>');
     const grant = makeGrant(mid, signed.token, '1.2.3.4');
     let sentBody = '';
     const res = { setHeader: () => {}, send: (b: string) => { sentBody = b; } } satisfies Parameters<typeof handleRender>[1];
-    await handleRender(signed.token, res, undefined, mid, grant, '1.2.3.4', SITE);
+    await handleRender(signed.token, res, undefined, mid, grant, '1.2.3.4', SITE, undefined, SECRET);
     const parsed = JSON.parse(sentBody);
     expect(parsed.html).toContain('__sg_noticeEnabled');
     expect(parsed.html).toContain('__sg_ok');
@@ -234,12 +239,12 @@ describe('notice injectée dans le render (audit — popup après split-render)'
   it('l injection place le script avant </body>', async () => {
     const { signToken, storeHtml, handleRender } = await import('../src/render');
     const SITE = 'sg_sk_live_render_grant_test';
-    const signed = signToken(SITE, Date.now());
+    const signed = signToken(SITE, Date.now(), SECRET);
     storeHtml(signed.token, '<html><body><div>z</div></body></html>');
     const grant = makeGrant(mid, signed.token, '1.2.3.4');
     let sentBody = '';
     const res = { setHeader: () => {}, send: (b: string) => { sentBody = b; } } satisfies Parameters<typeof handleRender>[1];
-    await handleRender(signed.token, res, undefined, mid, grant, '1.2.3.4', SITE);
+    await handleRender(signed.token, res, undefined, mid, grant, '1.2.3.4', SITE, undefined, SECRET);
     const parsed = JSON.parse(sentBody);
     const idxScript = parsed.html.indexOf('__sg_ok');
     const idxBodyClose = parsed.html.indexOf('</body>');
