@@ -399,6 +399,15 @@ export function createCore(options: ShugoiCoreOptions): ShugoiCore {
   }
 
   async function evaluate(ctx: EvaluateCtx): Promise<BlockDecision | null> {
+    // botBypass peut coûter un DNS reverse (verifyBotIp) : on le mémoïse par appel
+    // evaluate (jusqu'à 3 sites d'appel : fake-browser, proof, headless → 1 seul).
+    // Le cache DNS global (1h) couvre l'inter-requêtes ; ici c'est l'intra-requête.
+    let _bypassMemo: boolean | null = null;
+    const botBypassOnce = async (ua: string, ip: string): Promise<boolean> => {
+      if (_bypassMemo !== null) return _bypassMemo;
+      _bypassMemo = await botBypass(ua, ip);
+      return _bypassMemo;
+    };
     await ensureValidated()
     if (siteSecret && _validationFailed && Date.now() - _validationWarnedAt > VALIDATION_WARN_INTERVAL) {
       _validationWarnedAt = Date.now()
@@ -492,7 +501,7 @@ step();
       // Sec-Fetch/Accept-Language. Exemption = isWhitelistedBot (même logique que le bypass
       // challenge). Un curl qui imiterait Discordbot n'y gagne rien : il obtient la page
       // publique, et l'anti-curl réel (rate-limit + grant + whitelist) reste en place.
-      if (/Mozilla/i.test(ctx.ua) && !(await botBypass(ctx.ua, ctx.ip))) {
+      if (/Mozilla/i.test(ctx.ua) && !(await botBypassOnce(ctx.ua, ctx.ip))) {
         const sfd = ctx.secFetchDest ?? ''
         const sfm = ctx.secFetchMode ?? ''
         const al = ctx.acceptLanguage ?? ''
@@ -519,7 +528,7 @@ step();
       // valide est CONSOMMÉE à sa 1re utilisation ; un rejeu (sans cookie) → 307.
       const proofFresh = validProof ? consumeProof(proof) : false
       const canProceed = validCookie || proofFresh
-      if (!canProceed && !(await botBypass(ctx.ua, ctx.ip))) {
+      if (!canProceed && !(await botBypassOnce(ctx.ua, ctx.ip))) {
         // SEO / aperçus sociaux : un crawler légitime NE PEUT PAS exécuter le PoW JS.
         // Les bots whitelistés (moteurs de recherche + bots de partage social :
         // googlebot, bingbot, facebookexternalhit, twitterbot, linkedinbot, discordbot,
@@ -595,7 +604,9 @@ step();
     }
 
     // Headless UA block
-    if (headlessEnabled && ctx.ua && !(await botBypass(ctx.ua, ctx.ip)) && headlessPatterns.some(p => p.test(ctx.ua))) {
+    // Headless UA block — patterns d'abord (test regex synchrone pas cher) puis
+    // botBypass (peut coûter un DNS) : on évite le DNS pour les UA non-headless.
+    if (headlessEnabled && ctx.ua && headlessPatterns.some(p => p.test(ctx.ua)) && !(await botBypassOnce(ctx.ua, ctx.ip))) {
       log('headless block:', ctx.ua.slice(0, 40))
       fetch(baseUrl + '/event', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ siteKey: options.siteKey, reason: 'headless' }), signal: AbortSignal.timeout(2000) }).catch(() => {})
       return { block: true, status: blockStatus, contentType: 'text/plain', body: BLOCK_PAGE }

@@ -21,6 +21,31 @@ interface MinimalResponse {
 
 export { DEFAULT_HEADLESS_PATTERNS, BLOCK_PAGE, DEFAULT_BOT_WHITELIST } from './core';
 
+// Parse les cookies __sg_* en une seule passe O(c) au lieu de 2 regex .match()
+// (chacune recompilée + scan complet de la chaîne cookie par requête).
+// Niveau module : partagé par le middleware Express et le plugin Fastify.
+function parseSgCookies(header: unknown): { sgOk?: string; sgAuthorized?: string } {
+  if (typeof header !== 'string' || header.indexOf('__sg_') < 0) return {};
+  let sgOk: string | undefined;
+  let sgAuthorized: string | undefined;
+  const parts = header.split(';');
+  for (let i = 0; i < parts.length; i++) {
+    const s = parts[i].trim();
+    if (!sgOk && s.startsWith('__sg_ok=')) sgOk = s.slice(8);
+    else if (!sgAuthorized && s.startsWith('__sg_authorized=')) sgAuthorized = s.slice(16);
+    if (sgOk && sgAuthorized) break;
+  }
+  return { sgOk, sgAuthorized };
+}
+
+function methodNotAllowed(res: MinimalResponse): void {
+  if (res.status) res.status(405);
+  if (res.type) res.type('application/json');
+  const body = JSON.stringify({ error: 'method_not_allowed' });
+  if (res.send) res.send(body);
+  else if (res.end) res.end(body);
+}
+
 export function createShugoiMiddleware(options: ShugoiCoreOptions) {
   const core = createCore(options);
   const autoInject = options.autoInject ?? true;
@@ -42,11 +67,7 @@ export function createShugoiMiddleware(options: ShugoiCoreOptions) {
         // renvoyaient un 200 sans effet d'état — surface réduite, méthode normalisée.
         const m = String((req.method || 'GET')).toUpperCase();
         if (m !== 'GET' && m !== 'HEAD') {
-          if (res.status) res.status(405);
-          if (res.type) res.type('application/json');
-          const body = JSON.stringify({ error: 'method_not_allowed' });
-          if (res.send) res.send(body);
-          else if (res.end) res.end(body);
+          methodNotAllowed(res);
           return;
         }
         const { handleRender } = await import('./render');
@@ -64,11 +85,7 @@ export function createShugoiMiddleware(options: ShugoiCoreOptions) {
       if (path === '/__sg_challenge') {
         const m = String((req.method || 'GET')).toUpperCase();
         if (m !== 'GET' && m !== 'HEAD') {
-          if (res.status) res.status(405);
-          if (res.type) res.type('application/json');
-          const body = JSON.stringify({ error: 'method_not_allowed' });
-          if (res.send) res.send(body);
-          else if (res.end) res.end(body);
+          methodNotAllowed(res);
           return;
         }
       }
@@ -92,6 +109,7 @@ export function createShugoiMiddleware(options: ShugoiCoreOptions) {
         ? req.headers['x-forwarded-for'].split(',')[0]?.trim()
         : undefined) || (typeof req.ip === 'string' ? req.ip : 'unknown');
       const reqLocale: Locale = resolveLocale(options.locale, typeof req.headers?.['accept-language'] === 'string' ? req.headers?.['accept-language'] : undefined);
+      const sgCookies = parseSgCookies(req.headers?.cookie);
 
       // SkipPaths check BEFORE detection — ces routes contournent toute protection.
       // Audit passe 8 (§3.1) : MATCH EXACT uniquement (plus de prefix-match). Un skipPath
@@ -125,8 +143,8 @@ export function createShugoiMiddleware(options: ShugoiCoreOptions) {
         secFetchDest: typeof req.headers?.['sec-fetch-dest'] === 'string' ? req.headers['sec-fetch-dest'] : undefined,
         secFetchMode: typeof req.headers?.['sec-fetch-mode'] === 'string' ? req.headers['sec-fetch-mode'] : undefined,
         sgProof: (req.query && typeof (req.query as Record<string, unknown>).sg_proof === 'string') ? (req.query as Record<string, unknown>).sg_proof as string : undefined,
-        sgOk: (typeof req.headers?.cookie === 'string' ? req.headers.cookie.match(/(?:^|;\s*)__sg_ok=([^;]+)/)?.[1] : undefined),
-        sgAuthorized: (typeof req.headers?.cookie === 'string' ? req.headers.cookie.match(/(?:^|;\s*)__sg_authorized=([^;]+)/)?.[1] : undefined),
+        sgOk: sgCookies.sgOk,
+        sgAuthorized: sgCookies.sgAuthorized,
         forwardedPrefix: (typeof req.headers?.['x-forwarded-prefix'] === 'string' ? req.headers['x-forwarded-prefix'] : undefined),
       });
 
@@ -253,6 +271,7 @@ export function createShugoiPlugin(options: ShugoiCoreOptions) {
 
         const ua = request.headers['user-agent'] ?? '';
         const ip = request.headers['x-forwarded-for']?.split(',')[0]?.trim() || request.ip || 'unknown';
+        const fCookies = parseSgCookies(request.headers.cookie);
 
         const decision = await core.evaluate({
           path,
@@ -263,8 +282,8 @@ export function createShugoiPlugin(options: ShugoiCoreOptions) {
           secFetchDest: request.headers['sec-fetch-dest'],
           secFetchMode: request.headers['sec-fetch-mode'],
           sgProof: (request.query && typeof request.query?.sg_proof === 'string') ? request.query.sg_proof as string : undefined,
-          sgOk: (typeof request.headers.cookie === 'string' ? request.headers.cookie.match(/(?:^|;\s*)__sg_ok=([^;]+)/)?.[1] : undefined),
-          sgAuthorized: (typeof request.headers.cookie === 'string' ? request.headers.cookie.match(/(?:^|;\s*)__sg_authorized=([^;]+)/)?.[1] : undefined),
+          sgOk: fCookies.sgOk,
+          sgAuthorized: fCookies.sgAuthorized,
           forwardedPrefix: (typeof request.headers['x-forwarded-prefix'] === 'string' ? request.headers['x-forwarded-prefix'] : undefined),
         });
 

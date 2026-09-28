@@ -39,9 +39,11 @@ export async function verifyBotIp(ua: string, ip: string): Promise<boolean | nul
     }
   } catch { ok = false; }
 
+  // Éviction O(1) : Map en ordre d'insertion → on éjecte la plus ancienne clé
+  // au lieu de trier tout le cache en O(n log n) à chaque insert au-delà du max.
   if (_cache.size >= MAX_ENTRIES) {
-    const oldest = [..._cache.entries()].sort((a, b) => a[1].at - b[1].at)[0];
-    if (oldest) _cache.delete(oldest[0]);
+    const oldest = _cache.keys().next();
+    if (!oldest.done) _cache.delete(oldest.value);
   }
   _cache.set(key, { ok, at: Date.now() });
   return ok;

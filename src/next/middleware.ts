@@ -109,10 +109,11 @@ function generateBootcode(siteKey: string, config: string, detectCode: string, g
     ';window.__sg_config=' + config +
     ';try{' + detectCode + '}catch(e){window.__sg_blocked=true}' +
     ';try{' + guardCode + '}catch(e){window.__sg_blocked=true}';
-  let enc = "";
+  const encParts: string[] = new Array(combined.length);
   for (let i = 0; i < combined.length; i++) {
-    enc += String.fromCodePoint(917504 + combined.charCodeAt(i));
+    encParts[i] = String.fromCodePoint(917504 + combined.charCodeAt(i));
   }
+  const enc = encParts.join('');
   return '<script>eval([...\'' + enc + '\'].map(function(x){return String.fromCodePoint(x.codePointAt(0)-917504)}).join(\'\'))</script>';
 }
 

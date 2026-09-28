@@ -21,12 +21,11 @@ function hexToBytes(hex: string): number[] {
 
 function xorEncrypt(str: string, hexKey: string): string {
   const kb = hexToBytes(hexKey);
-  let enc = '';
+  const out: string[] = new Array(str.length);
   for (let i = 0; i < str.length; i++) {
-    let cc = str.charCodeAt(i) ^ kb[i % kb.length];
-    enc += cc.toString(16).padStart(2, '0');
+    out[i] = (str.charCodeAt(i) ^ kb[i % kb.length]).toString(16).padStart(2, '0');
   }
-  return enc;
+  return out.join('');
 }
 
 function runtimeValue(str: string): string {
@@ -39,7 +38,8 @@ function runtimeValue(str: string): string {
 }
 
 function encryptStrings(code: string, key: string): string {
-  let r = '', i = 0;
+  const out: string[] = [];
+  let i = 0;
   while (i < code.length) {
     if (code[i] === "'" || code[i] === '"') {
       const q = code[i];
@@ -47,12 +47,12 @@ function encryptStrings(code: string, key: string): string {
       while (j < code.length) { if (code[j] === '\\') { j += 2; continue; } if (code[j] === q) break; j++; }
       if (j < code.length) {
         const val = runtimeValue(code.slice(i, j + 1));
-        r += '_D("' + xorEncrypt(val, key) + '")';
+        out.push('_D("' + xorEncrypt(val, key) + '")');
         i = j + 1;
-      } else { r += code[i]; i++; }
-    } else { r += code[i]; i++; }
+      } else { out.push(code[i]); i++; }
+    } else { out.push(code[i]); i++; }
   }
-  return r;
+  return out.join('');
 }
 
 function stripComments(s: string): string {
