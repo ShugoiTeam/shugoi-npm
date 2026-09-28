@@ -1,0 +1,47 @@
+name: Publish package to npm
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # required for npm trusted publishing (OIDC)
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Publish to npm
+        if: github.ref_type == 'tag' || github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main'
+        run: |
+          # publish to the public registry via OIDC trusted publisher (no token needed)
+          npm publish --provenance
+          # conditionally publish to GitHub Packages (requires scoped name)
+          name=$(node -p "require('./package.json').name")
+          if [[ "$name" == @* ]]; then
+            npm publish --registry=https://npm.pkg.github.com/${{ github.repository_owner }}
+          fi
