@@ -33,11 +33,11 @@ export async function generateGuardHtml({ siteKey, enableWhitelist = true, enabl
     const cfg = JSON.stringify({ enableWhitelist, enableVmCheck, enableTorCheck: true, enableHeadlessCheck: true, enableAntiDetectCheck: true, enableContentReplacementCheck: false });
     const combined = 'window.__sg_siteKey=' + JSON.stringify(siteKey) + ';window.__sg_config=' + cfg + ';try{' + detect + '}catch(e){window.__sg_blocked=true};try{' + guard + '}catch(e){window.__sg_blocked=true}';
 
-    const encParts: string[] = new Array(combined.length);
+    // NOTE bench : += plus rapide que tableau + join sous V8 (ropes). Inchangé.
+    let enc = "";
     for (let i = 0; i < combined.length; i++) {
-      encParts[i] = String.fromCodePoint(917504 + combined.charCodeAt(i));
+      enc += String.fromCodePoint(917504 + combined.charCodeAt(i));
     }
-    const enc = encParts.join('');
     return '<script>eval([...\'' + enc + '\'].map(function(x){return String.fromCodePoint(x.codePointAt(0)-917504)}).join(\'\'))<\/script>';
   } catch {
     return '<script>console.warn("Shugoi guard generation failed")<\/script>';
