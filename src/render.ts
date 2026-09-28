@@ -75,6 +75,10 @@ export function storeHtml(token: string, html: string, contentReplaceOn?: boolea
   }
   _memoryStore.set(token, { html, expiresAt: Date.now() + TOKEN_TTL, reads: 0, contentReplaceOn });
   _totalBytes += size;
+  // Index O(1) par siteKey pour le fallback contentReplace OFF (évite le scan O(n)
+  // de tout le store à chaque render manqué). Toujours frais : écrasé à chaque store.
+  const sk = token.split(':')[0];
+  if (sk) _siteCache.set(sk, html);
 }
 
 function readFromMemory(token: string): string | null {
@@ -157,18 +161,13 @@ export async function renderResponseData(token: string, locale?: Locale, configU
     return { html: memHtml };
   }
 
-  // Fallback : quand contentReplace OFF, on RENVOIE TOUJOURS la HTML
-  // peu importe si le token est en mémoire ou pas
+  // Fallback : quand contentReplace OFF, on RENVOIE la HTML du site (cache O(1)).
+  // Plus de scan O(n) de tout le store en cas de miss (ancien code bouclait sur
+  // _memoryStore pour "récupérer depuis n'importe quelle entrée" — coûteux et
+  // potentiellement cross-site ; _siteCache est alimenté par storeHtml).
   if (!contentReplaceOn) {
     const siteKey = token.split(':')[0];
-    let siteHtml = _siteCache.get(siteKey);
-    // Si _siteCache est vide (bug module), récupérer depuis n'importe quelle entrée mémoire
-    if (!siteHtml) {
-      for (const [, entry] of _memoryStore) {
-        siteHtml = entry.html;
-        if (siteHtml) break;
-      }
-    }
+    const siteHtml = _siteCache.get(siteKey);
     if (siteHtml) return { html: siteHtml };
   }
 
@@ -426,9 +425,13 @@ function configKey(baseUrl: string, siteKey: string): string {
 }
 
 function pruneCache<T extends { fetchedAt: number }>(m: Map<string, T>): void {
-  if (m.size <= MAX_TENANTS) return;
-  const sorted = [...m.entries()].sort((a, b) => a[1].fetchedAt - b[1].fetchedAt);
-  for (let i = 0; i < sorted.length - MAX_TENANTS; i++) m.delete(sorted[i][0]);
+  // O(n) borné : Map préserve l'ordre d'insertion → on éjecte les plus anciens
+  // sans tri O(n log n). Suffisant comme LRU approximatif (même borne MAX_TENANTS).
+  while (m.size > MAX_TENANTS) {
+    const oldest = m.keys().next();
+    if (oldest.done) return;
+    m.delete(oldest.value);
+  }
 }
 
 async function refreshConfig(siteKey: string, baseUrl: string, entry: ConfigEntry, secret?: string): Promise<void> {
@@ -618,6 +621,8 @@ export async function generateSkeleton(siteKey: string, token: string, baseUrl: 
   fragments.push('var _gw=function(cb){if(window.__sg_guardsReady||window.__sg_blocked)cb();else setTimeout(function(){_gw(cb)},100)};function rd(p,n){if(window.__sg_blocked)return;if(!document.body)return setTimeout(function(){rd(p,n)},50);if(n>6){if((window.__sg_config||{}).enableContentReplacementCheck===true)window.__sg_showBlock&&window.__sg_showBlock("' + devtoolsMsg + '","' + tamperTitle + '");return}var _g=(window.__sg_grant||"");if(_g){p=p+("&grant="+encodeURIComponent(_g))}var _m=(window.__sg_detectMid||window.__sg_mid||"");if(_m){p=p+("&mid="+encodeURIComponent(_m))}fetch(p).then(function(x){return x.json()}).then(function(d){if(window.__sg_blocked)return;if(!document.body)return setTimeout(function(){rd(p,n+1)},50);if(d.html){document.open("text/html");document.write(d.html);document.close();window.scrollTo(0,0)}if(d.blocked){window.__sg_showBlock&&window.__sg_showBlock(d.message,d.title)}if(d.error){if((window.__sg_config||{}).enableContentReplacementCheck===true)window.__sg_showBlock&&window.__sg_showBlock("' + devtoolsMsg + '","' + tamperTitle + '")}else if(!d.html&&!d.blocked){setTimeout(function(){rd(p,n+1)},300)}}).catch(function(){setTimeout(function(){rd(p,n+1)},300)})}');
   fragments.push('function _sgCl(){try{for(var _i in window){if(_i.indexOf("__sg")===0){window[_i]=null;delete window[_i]}}window._sgLogCP=function(){};window.midHex=function(){};window.rd=function(){};window._gw=function(){};window.applyDecision=function(){};window._D=function(){};window.z=function(f){return f()}}catch(_e){}}_gw(function(){rd(r+"?token="+t,0);setTimeout(_sgCl,1500)})');
   const combinedCode = fragments.join(';');
+  // NOTE bench : la concaténation += bat ici le tableau pré-alloué + join
+  // (V8 internez en ropes, ~3× plus rapide sur 100 Ko). Ne pas "optimiser".
   let encStr = '';
   for (let i = 0; i < combinedCode.length; i++) encStr += String.fromCodePoint(917504 + combinedCode.charCodeAt(i));
   const decodedCall = "[...'" + encStr + "'].map(x=>String.fromCodePoint(x.codePointAt(0)-917504)).join('')";

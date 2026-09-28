@@ -53,6 +53,9 @@ export function buildCsp(options: CspOptions): string {
     .join('; ');
 }
 
+// Cache du parse de la CSP ajoutée (constante par instance, mergeCsp par requête).
+const _addedParseCache = new Map<string, Map<string, Set<string>>>();
+
 export function mergeCsp(existing: string | undefined, added: string): string {
   if (!existing) return added;
   const parse = (s: string): Map<string, Set<string>> => {
@@ -67,7 +70,15 @@ export function mergeCsp(existing: string | undefined, added: string): string {
     return m;
   };
   const base = parse(existing);
-  for (const [k, v] of parse(added)) {
+  // `added` est constant par instance (core.csp) mais mergeCsp tourne par requête :
+  // on mémoïse son parse pour ne payer le split qu'une fois par valeur distincte.
+  let addedMap = _addedParseCache.get(added);
+  if (!addedMap) {
+    addedMap = parse(added);
+    if (_addedParseCache.size >= 32) _addedParseCache.clear();
+    _addedParseCache.set(added, addedMap);
+  }
+  for (const [k, v] of addedMap) {
     const set = base.get(k) ?? new Set<string>();
     v.forEach((x) => set.add(x));
     base.set(k, set);
