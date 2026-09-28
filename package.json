@@ -5,11 +5,11 @@
   "author": "Yohan SANNIER <support@shugoi.com>",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/RoxasYTB/shugoi-npm.git"
+    "url": "git+https://github.com/ShugoiTeam/shugoi-npm.git"
   },
   "homepage": "https://shugoi.com",
   "bugs": {
-    "url": "https://github.com/RoxasYTB/shugoi-npm/issues"
+    "url": "https://github.com/ShugoiTeam/shugoi-npm/issues"
   },
   "sideEffects": false,
   "type": "module",
