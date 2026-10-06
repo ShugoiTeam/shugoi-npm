@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.5.7] - 2026-10-06
+
+### Fixed
+- Align browser-rendered and server-rendered block page backgrounds with the detected browser family in light and dark mode.
+- Use the current Shugoi block card styling for Node SDK fallbacks.
+
+### Added
+- Add palette coverage for Chrome, Edge, Firefox, WebKit, and Opera.
+
 All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).

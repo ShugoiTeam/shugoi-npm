@@ -2,6 +2,7 @@ import type { ShugoiCoreOptions, BlockPageContext } from './types'
 import { ensureGuardsReady, fetchConfigForSiteKey } from './render'
 import { buildCsp, originOf } from './csp'
 import { resolveLocale, type Locale, MESSAGES } from './locales'
+import { nativeBlockPalette } from './block-palette'
 import { verifyBotIp, VERIFIABLE_BOTS } from './verify-bot'
 import crypto from 'node:crypto'
 
@@ -75,7 +76,7 @@ export interface ShugoiCore {
   log(...args: unknown[]): void;
 }
 
-function shieldPage(title: string, msg: string, badge: string, host: string, remainSecs: number, locale: Locale): string {
+function shieldPage(title: string, msg: string, badge: string, host: string, remainSecs: number, locale: Locale, userAgent: string): string {
   const msgs = MESSAGES[locale]
   const prefix = msg ? msg.replace(/Il reste \d+ seconde?s?.*$/, '').replace(/Retry in \d+s?.*$/, '').trim() : ''
   const countdownScript = remainSecs > 0
@@ -89,7 +90,8 @@ function shieldPage(title: string, msg: string, badge: string, host: string, rem
   const htmlHost = escapeHtml((host || 'shugoi.com').slice(0, 120))
   const htmlDesc = escapeHtml(desc)
   const htmlLang = locale === 'fr' ? 'fr' : 'en'
-  return '<!DOCTYPE html><html lang="' + htmlLang + '"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>@font-face{font-family:\'Alex Brush\';src:url(https://shugoi.com/alex-brush.woff2?v=2) format(\'woff2\');font-display:swap}*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}html,body{height:100%;background:#fcf9f5}body{font-family:system-ui,-apple-system,\'Segoe UI\',Roboto,sans-serif;display:flex;align-items:center;justify-content:center;padding:1.2rem}#c{max-width:460px;width:100%;background:#fff;border:4px solid #000;border-radius:28px 6px 32px 10px;box-shadow:12px 12px 0 #000;padding:3rem 2.4rem 2.8rem;text-align:center}#c .l{width:80px;height:80px;pointer-events:none;transform:rotate(-2.5deg);margin:0 auto .6rem;display:block}#c .b{display:block;margin:0 auto .2rem;pointer-events:none;max-width:100%;height:auto}#c .bdg{display:inline-block;border:2px solid #000;border-radius:10px 2px 14px 4px;padding:.3rem .9rem;font-size:.6rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#E87090;margin-bottom:1.4rem}#c h2{font-family:\'Alex Brush\',Georgia,"Times New Roman",serif;font-size:2.2rem;color:#E87090;font-weight:400;margin:0 auto .6rem}#c p.desc{font-size:.9rem;color:#555;line-height:1.8;max-width:380px;margin:0 auto}#c p.ft{font-size:.55rem;color:#E87090;margin-top:1.8rem}</style></head><body><div id=c><img src=https://shugoi.com/favicon.png alt class=l><img src=https://shugoi.com/brand.png alt class=b><div class=bdg>' + htmlBadge + '</div><h2>' + htmlTitle + '</h2><p class=desc>' + htmlDesc + '</p><p class=ft>' + htmlHost + ' \u00b7 Shugoi</p></div>' + countdownScript + '</body></html>'
+  const palette = nativeBlockPalette(userAgent)
+  return `<!DOCTYPE html><html lang="${htmlLang}"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><style>@font-face{font-family:'Reggae One';src:url(https://shugoi.com/reggae-one.woff2) format('woff2');font-display:swap}*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}html,body{height:100%;background:${palette.light};color:#2b211d}body{font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;display:flex;align-items:center;justify-content:center;padding:1.2rem}#c{max-width:460px;width:100%;background:#fffdfa;border:1px solid rgba(43,33,29,.16);border-radius:16px 5px 16px 5px;box-shadow:0 10px 30px rgba(43,33,29,.08);padding:3rem 2.4rem 2.8rem;text-align:center}#c .l{width:80px;height:80px;pointer-events:none;filter:drop-shadow(2px 4px 8px rgba(231,112,144,.55));margin:0 auto .6rem;display:block}#c .b{display:block;margin:0 auto .2rem;pointer-events:none;max-width:100%;height:auto}#c .bdg{display:inline-block;background:#fdf0f4;border:1px solid rgba(194,84,111,.35);border-radius:10px 4px 10px 4px;padding:.3rem .9rem;font-size:.6rem;font-weight:600;text-transform:uppercase;letter-spacing:.16em;color:#a83d5a;margin-bottom:1.4rem}#c h2{font-family:'Reggae One',Georgia,'Times New Roman',serif;font-size:2.2rem;color:#a83d5a;font-weight:400;margin:0 auto .6rem}#c p.desc{font-size:.9rem;color:#7a6a62;line-height:1.8;max-width:380px;margin:0 auto}#c p.ft{font-size:.55rem;color:#a83d5a;margin-top:1.8rem}@media(prefers-color-scheme:dark){html,body{background:${palette.dark};color:#f1e8f5}#c{background:#241a30;border-color:rgba(241,232,245,.14);box-shadow:0 10px 30px rgba(0,0,0,.4)}#c .bdg{background:rgba(233,137,159,.16);border-color:rgba(233,137,159,.5);color:#e9899f}#c h2,#c p.ft{color:#e9899f}#c p.desc{color:#a795b4}}</style></head><body><div id="c"><img src="https://shugoi.com/favicon-block.png" alt="" class="l"><img src="https://shugoi.com/brand-block.png" alt="Shugoi" class="b"><div class="bdg">${htmlBadge}</div><h2>${htmlTitle}</h2><p class="desc">${htmlDesc}</p><p class="ft">${htmlHost} · Shugoi</p></div>${countdownScript}</body></html>`
 }
 
 export function createCore(options: ShugoiCoreOptions): ShugoiCore {
@@ -450,7 +452,7 @@ export function createCore(options: ShugoiCoreOptions): ShugoiCore {
       if (!allowChallenge(ctx.ip)) {
         const loc = resolveLocale(undefined, ctx.acceptLanguage)
         const lmsgs = MESSAGES[loc]
-        return { block: true, status: 429, contentType: 'text/html', body: shieldPage(lmsgs.rateLimitTitle, lmsgs.rateLimitBody('1 min'), lmsgs.rateLimitBadge, ctx.host || '', 60, loc) }
+        return { block: true, status: 429, contentType: 'text/html', body: shieldPage(lmsgs.rateLimitTitle, lmsgs.rateLimitBody('1 min'), lmsgs.rateLimitBadge, ctx.host || '', 60, loc, ctx.ua || '') }
       }
       const js = `(function(){
 var P=new URLSearchParams(location.search);
@@ -509,7 +511,7 @@ step();
           log('fake browser (Accept-Language + Sec-Fetch absents) → 403 block page:', ctx.ua.slice(0, 40))
           const bloc = resolveLocale(undefined, ctx.acceptLanguage)
           const lmsgs = MESSAGES[bloc]
-          return { block: true, status: 403, contentType: 'text/html', body: shieldPage(lmsgs.fakeBrowserTitle, lmsgs.fakeBrowserBody, lmsgs.fakeBrowserBadge, ctx.host || '', 0, bloc) }
+          return { block: true, status: 403, contentType: 'text/html', body: shieldPage(lmsgs.fakeBrowserTitle, lmsgs.fakeBrowserBody, lmsgs.fakeBrowserBadge, ctx.host || '', 0, bloc, ctx.ua || '') }
         }
       }
       const proof = ctx.sgProof || ''
@@ -544,7 +546,7 @@ step();
           const loc = resolveLocale(undefined, ctx.acceptLanguage)
           const lmsgs = MESSAGES[loc]
           log('challenge rate-limited:', ctx.ip.slice(0, 24), ctx.ua.slice(0, 40))
-          return { block: true, status: 429, contentType: 'text/html', body: shieldPage(lmsgs.rateLimitTitle, lmsgs.rateLimitBody('1 min'), lmsgs.rateLimitBadge, ctx.host || '', 60, loc) }
+          return { block: true, status: 429, contentType: 'text/html', body: shieldPage(lmsgs.rateLimitTitle, lmsgs.rateLimitBody('1 min'), lmsgs.rateLimitBadge, ctx.host || '', 60, loc, ctx.ua || '') }
         }
         // 307 vers le challenge : body = tableau ASCII SEUL (curl le voit tel quel).
         // Le navigateur suit la redirection → /__sg_challenge?ts=&salt=&diff=&path=
@@ -597,7 +599,7 @@ step();
             if (blockPage) {
               return { block: true, status: 429, contentType: 'text/html', body: blockPage({ reason: 'rate_limit', title: msgs.rateLimitTitle, message: msgs.rateLimitBody(timeStr), badge: msgs.rateLimitBadge, host: ctx.host || '', remainingSeconds: remain, locale: loc }) }
             }
-            return { block: true, status: 429, contentType: 'text/html', body: shieldPage(msgs.rateLimitTitle, msgs.rateLimitBody(timeStr), msgs.rateLimitBadge, ctx.host || '', remain, loc) }
+            return { block: true, status: 429, contentType: 'text/html', body: shieldPage(msgs.rateLimitTitle, msgs.rateLimitBody(timeStr), msgs.rateLimitBadge, ctx.host || '', remain, loc, ctx.ua || '') }
           }
         }
       } catch {}
