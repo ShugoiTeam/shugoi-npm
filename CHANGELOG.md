@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.5.8] - 2026-10-07
+
+### Fixed
+- Enforce a fresh protected document navigation when an SPA leaves an excluded path, for both Express and Fastify middleware.
+- Keep browser timing diagnostics disabled by default and make them explicitly opt-in with `timingLogs` across middleware, Next.js proxy, and script-tag APIs.
+
 ## [0.5.7] - 2026-10-06
 
 ### Fixed
