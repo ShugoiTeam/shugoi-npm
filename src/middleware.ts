@@ -2,6 +2,7 @@ import type { ShugoiCoreOptions } from './types'
 import { injectGuardScripts, ensureGuardsReady, enableDiskStore, getConfig, storeHtml, signToken, renderResponseData } from './render'
 
 import { mergeCsp } from './csp'
+import { addSkipPathNavigationGuard } from './navigation-guard'
 import { createCore, DEFAULT_HEADLESS_PATTERNS, BLOCK_PAGE, DEFAULT_BOT_WHITELIST } from './core'
 import { resolveLocale, type Locale } from './locales'
 
@@ -50,6 +51,16 @@ function methodNotAllowed(res: MinimalResponse): void {
   const body = JSON.stringify({ error: 'method_not_allowed' });
   if (res.send) res.send(body);
   else if (res.end) res.end(body);
+}
+
+function withSkipPathNavigationGuard(body: unknown, res: MinimalResponse, skipPaths: readonly string[]): unknown {
+  const html = typeof body === 'string' ? body : body instanceof Uint8Array ? new TextDecoder().decode(body) : null;
+  if (html === null) return body;
+  const contentType = res.getHeader?.('content-type');
+  if (contentType && !String(contentType).toLowerCase().includes('text/html')) return body;
+  const csp = res.getHeader?.('content-security-policy');
+  const nonce = typeof csp === 'string' ? csp.match(/'nonce-([^']+)'/)?.[1] : undefined;
+  return addSkipPathNavigationGuard(html, skipPaths, nonce);
 }
 
 export function createShugoiMiddleware(options: ShugoiCoreOptions) {
@@ -125,17 +136,19 @@ export function createShugoiMiddleware(options: ShugoiCoreOptions) {
         try {
           const { skipPaths } = await getConfig(options.siteKey, internalUrl, signingSecret);
           if (skipPaths?.some((p: string) => path === p)) {
-            try {
-              // @ts-ignore
-              const { renderPage } = await import('../../../server/lib/ssr.js');
-              const html = await renderPage(path);
-              if (res.setHeader) res.setHeader('Content-Type', 'text/html; charset=utf-8');
-              if (res.send) res.send(html);
-              else if (res.end) res.end(html);
-              return;
-            } catch (ssrErr) {
-              return next();
+            if (res.send) {
+              const originalSend = res.send.bind(res);
+              res.send = function (body: unknown) {
+                return originalSend(withSkipPathNavigationGuard(body, res, skipPaths));
+              };
             }
+            if (res.end) {
+              const originalEnd = res.end.bind(res);
+              res.end = function (body?: unknown, ...rest: unknown[]) {
+                return originalEnd(withSkipPathNavigationGuard(body, res, skipPaths), ...rest);
+              };
+            }
+            return next();
           }
         } catch {}
       }
@@ -198,7 +211,7 @@ export function createShugoiMiddleware(options: ShugoiCoreOptions) {
           if (typeof body === 'string') {
             const ct = res.getHeader ? res.getHeader('content-type') : undefined;
             if (!ct || String(ct).includes('text/html')) {
-              try { body = await injectGuardScripts(body, options.siteKey, baseUrl, undefined, restrictedAccess, signingSecret, req as any, undefined, reqLocale); } catch (e) { core.log('inject error:', e); }
+              try { body = await injectGuardScripts(body, options.siteKey, baseUrl, undefined, restrictedAccess, signingSecret, req as any, undefined, reqLocale, undefined, options.timingLogs ?? false); } catch (e) { core.log('inject error:', e); }
               injected = true;
             }
           }
@@ -236,6 +249,7 @@ export function createShugoiPlugin(options: ShugoiCoreOptions) {
   if (options.multiProcess) enableDiskStore(true);
 
   return async function shugoiPlugin(fastify: any) {
+    const skippedRequests = new WeakMap<object, readonly string[]>();
     // CSP onRequest hook
     fastify.addHook('onRequest', async (request: any, reply: any) => {
       if (core.cspEnabled && reply.getHeader) {
@@ -273,6 +287,15 @@ export function createShugoiPlugin(options: ShugoiCoreOptions) {
       try {
         const path = request.url.split('?')[0];
         if (path.endsWith('/__shugoi/render') || path.endsWith('/__shugoi/healthcheck')) return;
+        if ((options.autoInject ?? true) && options.siteKey) {
+          try {
+            const { skipPaths } = await getConfig(options.siteKey, options.internalUrl || options.baseUrl || 'https://shugoi.com/api/v1', signingSecret);
+            if (skipPaths?.some((p: string) => path === p)) {
+              skippedRequests.set(request, skipPaths);
+              return;
+            }
+          } catch {}
+        }
         if (core.isAllowlisted(path)) return;
 
         const ua = request.headers['user-agent'] ?? '';
@@ -316,6 +339,17 @@ export function createShugoiPlugin(options: ShugoiCoreOptions) {
       const path = request.url.split('?')[0];
       if (path.endsWith('/__shugoi/render') || path.endsWith('/__shugoi/healthcheck')) return payload;
       if (reply.statusCode !== 200) return payload;
+      const skipPaths = skippedRequests.get(request);
+      if (skipPaths) {
+        skippedRequests.delete(request);
+        const ct = reply.getHeader('content-type');
+        if (!ct || String(ct).toLowerCase().includes('text/html')) {
+          const csp = reply.getHeader('content-security-policy');
+          const nonce = typeof csp === 'string' ? csp.match(/'nonce-([^']+)'/)?.[1] : undefined;
+          return addSkipPathNavigationGuard(payload, skipPaths, nonce);
+        }
+        return payload;
+      }
       // Bots (moteurs + partage social) : HTML brut sans skeleton — ils ne peuvent pas
       // exécuter le skeleton eval() (og:image / indexation).
       const ua = typeof request.headers?.['user-agent'] === 'string' ? request.headers['user-agent'] : '';
@@ -323,7 +357,7 @@ export function createShugoiPlugin(options: ShugoiCoreOptions) {
       const ct = reply.getHeader('content-type');
       if (!ct || String(ct).includes('text/html')) {
         const pluginLocale: Locale = resolveLocale(options.locale, typeof request.headers?.['accept-language'] === 'string' ? request.headers?.['accept-language'] : undefined);
-        return await injectGuardScripts(payload, options.siteKey, baseUrl, undefined, restrictedAccess, signingSecret, { url: path } as any, undefined, pluginLocale);
+        return await injectGuardScripts(payload, options.siteKey, baseUrl, undefined, restrictedAccess, signingSecret, { url: path } as any, undefined, pluginLocale, undefined, options.timingLogs ?? false);
       }
       return payload;
     });

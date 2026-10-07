@@ -542,7 +542,7 @@ export async function ensureGuardsReady(baseUrl: string, secret?: string, siteKe
   await fetchGuardScripts(baseUrl, secret, siteKey);
 }
 
-export async function generateSkeleton(siteKey: string, token: string, baseUrl: string, restrictedAccess?: boolean, whitelist?: string[], renderUrl?: string, locale?: Locale, flags?: Record<string, boolean>, clockts?: number, signingSecret?: string): Promise<string> {
+export async function generateSkeleton(siteKey: string, token: string, baseUrl: string, restrictedAccess?: boolean, whitelist?: string[], renderUrl?: string, locale?: Locale, flags?: Record<string, boolean>, clockts?: number, signingSecret?: string, timingLogs = false): Promise<string> {
   await ensureGuardsReady(baseUrl, undefined, siteKey);
   const rurl = renderUrl || './__shugoi/render';
   const cfg = flags ?? (await getConfig(siteKey, baseUrl, signingSecret)).flags;
@@ -553,6 +553,7 @@ export async function generateSkeleton(siteKey: string, token: string, baseUrl: 
   fragments.push('window.__sg_siteKey=' + JSON.stringify(siteKey));
   fragments.push('window.__sg_baseUrl=' + JSON.stringify(baseUrl));
   fragments.push('window.__sg_config=' + JSON.stringify(cfg));
+  fragments.push('window.__shugoiTimingEnabled=' + (timingLogs ? 'true' : 'false'));
   // Mode debug (audit #8) : piloté UNIQUEMENT par le serveur. En production ce flag
   // est toujours false → le guard n'active jamais ses traces via ?sg_probe_debug=1
   // ou localStorage. (Nom volontairement différent de "debug" pour ne pas exposer
@@ -635,7 +636,7 @@ export async function generateSkeleton(siteKey: string, token: string, baseUrl: 
   return '<script>' + bootCode + '</script>';
 }
 
-export async function injectGuardScripts(html: string, siteKey: string, baseUrl: string, whitelist?: string[] | null, restrictedAccess?: boolean, signingSecret?: string, req?: unknown, _allowedOrigins?: string[], locale?: Locale, clockts?: number): Promise<string> {
+export async function injectGuardScripts(html: string, siteKey: string, baseUrl: string, whitelist?: string[] | null, restrictedAccess?: boolean, signingSecret?: string, req?: unknown, _allowedOrigins?: string[], locale?: Locale, clockts?: number, timingLogs = false): Promise<string> {
   await ensureGuardsReady(baseUrl, signingSecret, siteKey);
   const cfgData = await getConfig(siteKey, baseUrl, signingSecret);
   const wl = whitelist ?? cfgData.whitelist;
@@ -651,7 +652,7 @@ export async function injectGuardScripts(html: string, siteKey: string, baseUrl:
   else injectedHtml = configScript + injectedHtml;
   const renderUrl = './__shugoi/render';
   storeHtml(signed.token, injectedHtml);
-  return generateSkeleton(siteKey, signed.token, baseUrl, restrictedAccess, wl, renderUrl, locale, cfgData.flags, clockts, signingSecret);
+  return generateSkeleton(siteKey, signed.token, baseUrl, restrictedAccess, wl, renderUrl, locale, cfgData.flags, clockts, signingSecret, timingLogs);
 }
 
 export function enableDiskStore(multiProcess: boolean) {

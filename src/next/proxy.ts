@@ -9,6 +9,8 @@ export interface ShugoiProxyOptions {
   headlessPatterns?: RegExp[];
   /** Internal URL to fetch page content (e.g. "http://127.0.0.1:3009") */
   target?: string;
+  /** Affiche les mesures de performance `[SHUGOI-TIMING]` dans le navigateur. Défaut : false */
+  timingLogs?: boolean;
 }
 
 const DEFAULT_HEADLESS = [
@@ -75,7 +77,7 @@ export function createShugoiProxy(options: ShugoiProxyOptions) {
 
       const skeleton = await injectGuardScripts(
         html, siteKey, BASE_URL, undefined, false, undefined,
-        { url: path }
+        { url: path }, undefined, undefined, undefined, options.timingLogs ?? false
       );
 
       return new NextResponse(skeleton, {

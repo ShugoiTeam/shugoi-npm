@@ -18,6 +18,8 @@ export interface ShugoiCoreOptions {
   internalUrl?: string
   /** Logs console. Défaut : false */
   debug?: boolean
+  /** Affiche les mesures de performance `[SHUGOI-TIMING]` dans le navigateur. Défaut : false */
+  timingLogs?: boolean
   /** Injecte les guards dans le HTML. Défaut : true */
   autoInject?: boolean
   /** Affiche la page « accès restreint » aux machines non whitelistées. Défaut : false */
@@ -63,6 +65,8 @@ export interface ScriptTagsOptions {
   signingSecret?: string
   restrictedAccess?: boolean
   whitelist?: string[]
+  /** Affiche les mesures de performance `[SHUGOI-TIMING]` dans le navigateur. Défaut : false */
+  timingLogs?: boolean
 }
 
 export interface ScriptTagsResult {
