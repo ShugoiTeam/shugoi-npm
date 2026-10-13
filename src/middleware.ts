@@ -269,7 +269,7 @@ export function createShugoiPlugin(options: ShugoiCoreOptions) {
       const ip = (typeof request.headers?.['x-forwarded-for'] === 'string'
         ? request.headers['x-forwarded-for'].split(',')[0]?.trim()
         : undefined) || (typeof request.ip === 'string' ? request.ip : 'unknown');
-      const data = await renderResponseData(request.query.token || '', undefined, options.baseUrl, request.query.mid || '', request.query.grant || '', ip, options.siteKey);
+      const data = await renderResponseData(request.query.token || '', undefined, options.baseUrl, request.query.mid || '', request.query.grant || '', ip, options.siteKey, signingSecret);
       // Anti-leak du grant : strict-origin-when-cross-origin (pas no-referrer — casserait
       // les embeds YouTube 153 ; le grant n'est plus dans l'URL de la page après document.write).
       if (data.html) data.html = injectReferrerPolicy(data.html);

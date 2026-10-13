@@ -7,10 +7,10 @@ const SITE_KEY = 'sg_sk_live_render_grant_test';
 
 const mid = 'a'.repeat(64);
 
-function makeGrant(m: string, token: string, ip: string, siteKey?: string, tsMs?: number): string {
+function makeGrant(m: string, token: string, _ip: string, siteKey?: string, tsMs?: number): string {
   const sk = siteKey ?? SITE_KEY;
   const t = Math.floor((tsMs ?? Date.now()) / 1000).toString(36);
-  const payload = 'render-grant:' + [sk, m, token, ip, t].join(':');
+  const payload = 'render-grant:' + [sk, m, token, t].join(':');
   const sig = createHmac('sha256', SECRET).update(payload).digest('hex');
   return t + ':' + sig;
 }
@@ -37,7 +37,7 @@ describe('renderResponseData anti-bypass token-only', () => {
     expect((await renderResponseData(token, undefined, undefined, fakeMid, forgedGrant)).error).toBe('not_found');
   });
 
-  it('accepte un grant valide lié au token + IP pour un token existant', async () => {
+  it('accepte un grant valide lié au site et au token pour un token existant', async () => {
     const signed = signToken(SITE_KEY, Date.now());
     const html = '<html><body>secret-content</body></html>';
     storeHtml(signed.token, html);
@@ -47,13 +47,12 @@ describe('renderResponseData anti-bypass token-only', () => {
   });
 });
 
-describe('CH-01 rejeu cross-IP', () => {
-  it('refuse un grant signé pour une autre IP', async () => {
+describe('CH-01 changement d’IP', () => {
+  it('conserve un grant signé après un changement d’IP', async () => {
     const signed = signToken(SITE_KEY, Date.now());
     storeHtml(signed.token, '<html>x</html>');
     const grant = makeGrant(mid, signed.token, '1.2.3.4');
-    // Rejoué depuis une IP différente
-    expect((await renderResponseData(signed.token, undefined, undefined, mid, grant, '5.6.7.8', SITE_KEY)).error).toBe('not_found');
+    expect((await renderResponseData(signed.token, undefined, undefined, mid, grant, '5.6.7.8', SITE_KEY)).html).toBe('<html>x</html>');
   });
 });
 
@@ -80,6 +79,18 @@ describe('CH-03 expiration du grant', () => {
   it('verifyRenderGrant accepte un grant frais et refuse un grant expiré', () => {
     expect(verifyRenderGrant(mid, makeGrant(mid, 't', '1.2.3.4'), 't', '1.2.3.4', SITE_KEY)).toBe(true);
     expect(verifyRenderGrant(mid, makeGrant(mid, 't', '1.2.3.4', SITE_KEY, Date.now() - 180_000), 't', '1.2.3.4', SITE_KEY)).toBe(false);
+  });
+
+  it('refuse un grant daté dans le futur', () => {
+    const futureGrant = makeGrant(mid, 't', '1.2.3.4', SITE_KEY, Date.now() + 30_000);
+    expect(verifyRenderGrant(mid, futureGrant, 't', '1.2.3.4', SITE_KEY)).toBe(false);
+  });
+
+  it('refuse un grant si aucun secret de signature n’est configuré', () => {
+    vi.stubEnv('SHUGOKI_SIGNING_SECRET', '');
+    vi.stubEnv('SHUGOKI_SECRET', '');
+    expect(verifyRenderGrant(mid, makeGrant(mid, 't', '1.2.3.4'), 't', '1.2.3.4', SITE_KEY)).toBe(false);
+    vi.stubEnv('SHUGOKI_SIGNING_SECRET', SECRET);
   });
 });
 

@@ -117,12 +117,12 @@ function generateBootcode(siteKey: string, config: string, detectCode: string, g
   return '<script>eval([...\'' + enc + '\'].map(function(x){return String.fromCodePoint(x.codePointAt(0)-917504)}).join(\'\'))</script>';
 }
 
-export function renderResponseData(token: string, mid?: string, grant?: string, ip?: string, expectedSiteKey?: string): { html?: string; blocked?: boolean; error?: string } {
+export function renderResponseData(token: string, mid?: string, grant?: string, ip?: string, expectedSiteKey?: string, secret?: string): { html?: string; blocked?: boolean; error?: string } {
   if (!token || token.length < 16 || token.length > 300) return { error: "not_found" };
   // CRITIQUE 1 (§7bis) : le token appartient à ce site uniquement (anti cross-site grant).
   if (expectedSiteKey && token.split(':')[0] !== expectedSiteKey) return { error: "not_found" };
   // Parité avec l'adapter Express (NP-01) : sans grant valide (lié au siteKey), pas de HTML.
-  if (!verifyRenderGrant(mid, grant, token, ip, expectedSiteKey)) return { error: "not_found" };
+  if (!verifyRenderGrant(mid, grant, token, ip, expectedSiteKey, secret)) return { error: "not_found" };
   const suffix = token.slice(-16);
   try {
     for (const f of readdirSync(TOKEN_DIR)) {
@@ -154,7 +154,7 @@ export function createShugoiNextMiddleware(options: ShugoiNextOptions) {
       const grant = request.nextUrl.searchParams.get("grant") || "";
       const xff = request.headers.get("x-forwarded-for") || "";
       const ip = xff.split(",")[0]?.trim() || "unknown";
-      return NextResponse.json(renderResponseData(token, mid, grant, ip, options.siteKey));
+      return NextResponse.json(renderResponseData(token, mid, grant, ip, options.siteKey, options.signingSecret));
     }
 
     if (path.startsWith("/_next/") || path.startsWith("/api/")) return NextResponse.next();

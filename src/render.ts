@@ -103,25 +103,26 @@ function readFromMemory(token: string): string | null {
 // l'ajoute à l'URL render. Un bot curl qui extrait le token du challenge sans exécuter
 // le JS n'a pas de mid/grant cohérents → render refuse. Signé avec le même secret que
 // le token (SHUGOKI_SIGNING_SECRET) → vérifiable localement, sans état partagé.
-// Format : base36(timestamp) + ":" + HMAC(secret, "render-grant:mid:token:ip:timestamp").
-// Lié au token + IP + TTL (CH-01/02/03). Factorisé pour les adapters Express/Next/Fastify.
+// Format : base36(timestamp) + ":" + HMAC(secret, "render-grant:siteKey:mid:token:timestamp").
+// Lié au site, au token et au TTL, sans dépendre de l'adresse IP.
 const GRANT_TTL_MS = 60_000;
 
-export function verifyRenderGrant(mid: string | undefined, grant: string | undefined, token?: string, ip?: string, expectedSiteKey?: string): boolean {
-  const gSecret = process.env.SHUGOKI_SIGNING_SECRET || process.env.SHUGOKI_SECRET;
-  if (!gSecret) return true; // fail-safe : pas de secret configuré → pas de vérification
+export function verifyRenderGrant(mid: string | undefined, grant: string | undefined, token?: string, _ip?: string, expectedSiteKey?: string, secretOverride?: string): boolean {
+  const gSecret = secretOverride || process.env.SHUGOKI_SIGNING_SECRET || process.env.SHUGOKI_SECRET;
+  if (!gSecret) return false;
   if (!grant || !mid || !/^[a-f0-9]{64}$/.test(mid)) return false;
   const sep = grant.indexOf(':');
   if (sep < 0) return false;
   const ts = grant.slice(0, sep);
   const sig = grant.slice(sep + 1);
   const tsSec = parseInt(ts, 36);
-  if (isNaN(tsSec) || Date.now() - tsSec * 1000 > GRANT_TTL_MS) return false;
+  const age = Date.now() - tsSec * 1000;
+  if (isNaN(tsSec) || age > GRANT_TTL_MS || age < -5000) return false;
   // CRITIQUE 1 (§7bis) : le grant est signé AVEC le siteKey du wlc émetteur. Le render
   // vérifie que ce siteKey == le sien — un grant émis par un autre site (whitelist off)
   // pour un token d'ici est refusé même si le token est authentique.
   if (!expectedSiteKey) return false;
-  const payload = 'render-grant:' + [expectedSiteKey, mid, token || '', ip || '', ts].join(':');
+  const payload = 'render-grant:' + [expectedSiteKey, mid, token || '', ts].join(':');
   const exp = crypto.createHmac('sha256', gSecret).update(payload).digest('hex');
   try { return crypto.timingSafeEqual(Buffer.from(sig, 'hex'), Buffer.from(exp, 'hex')); }
   catch { return false; }
@@ -144,7 +145,7 @@ export async function renderResponseData(token: string, locale?: Locale, configU
   if (!isNaN(tokTs) && Date.now() - tokTs > TOKEN_TTL) return { error: 'not_found' };
 
   // Anti-bypass "token-only" : sans grant valide (lié au siteKey), pas de HTML.
-  if (!verifyRenderGrant(mid, grant, token, ip, expectedSiteKey)) return { error: 'not_found' };
+  if (!verifyRenderGrant(mid, grant, token, ip, expectedSiteKey, _secret)) return { error: 'not_found' };
 
   // Vérifier le flag en direct depuis l'API interne (pas de cache)
   const contentReplaceOn = await fetchContentReplaceFlag(token, configUrl || 'http://127.0.0.1:3098', _secret);
